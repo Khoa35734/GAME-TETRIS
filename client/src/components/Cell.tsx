@@ -1,9 +1,10 @@
 import React from 'react';
 import styled from 'styled-components'; // Cần cài đặt: npm install styled-components
-
+import { TETROMINOS } from './tetrominos';
 type CellProps = {
   type: keyof typeof TETROMINOS;
 }
+
 
 // Bạn sẽ cần định nghĩa TETROMINOS ở đâu đó để import vào đây
 // Ví dụ: import { TETROMINOS } from '../tetrominos';
