@@ -1,14 +1,13 @@
 import React from "react";
 import { StyledCell } from "./styles/StyledCell";
-import { TETROMINOS } from "./tetrominos";
+import { TETROMINOES } from "../components/tetrominos";
 
-interface CellProps {
-  type: keyof typeof TETROMINOS;
+type Props = {
+  type: string | number;
 }
 
-const Cell: React.FC<CellProps> = ({ type }) => (
-  <StyledCell type={type} color={TETROMINOS[type].color}>
-    {console.log("rerender")}
-  </StyledCell>
+const Cell: React.FC<Props> = ({ type }) => (
+  <StyledCell type={type} color={TETROMINOES[type].color} />
 );
+
 export default React.memo(Cell);

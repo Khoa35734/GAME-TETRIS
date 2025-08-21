@@ -1,16 +1,16 @@
 import React from "react";
-import { StyledStage } from "./styles/StyledStage";
 import Cell from "./Cell";
+import { StyledStage } from "./styles/StyledStage";
+// Sửa lỗi: Import kiểu "Stage" trực tiếp từ gameHelpers
+import type { Stage as StageType } from '../gamehelper'; 
 
-interface StageProps {
-  stage: Array<Array<{ type: string }>>;
+type Props = {
+  stage: StageType; // Sử dụng kiểu đã import
 }
 
-const Stage: React.FC<StageProps> = ({ stage }) => (
-  <StyledStage>
-    {stage.map((row, y) =>
-      row.map((cell, x) => <Cell key={`${x}-${y}`} type={cell.type} />)
-    )}
+const Stage: React.FC<Props> = ({ stage }) => (
+  <StyledStage width={stage[0].length} height={stage.length}>
+    {stage.map((row) => row.map((cell, x) => <Cell key={x} type={cell[0]} />))}
   </StyledStage>
 );
 
