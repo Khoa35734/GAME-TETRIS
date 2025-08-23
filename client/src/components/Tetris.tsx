@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-
+import React, { useState, useRef, useEffect } from "react";
 import { createStage, checkCollision } from "../gamehelper";
 
 // Styled Components
@@ -26,6 +25,12 @@ const Tetris: React.FC = () => {
   const [stage, setStage, rowsCleared] = useStage(player, resetPlayer);
   const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
 
+  // 👉 thêm ref để giữ focus ở khu vực chơi
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    wrapperRef.current?.focus();
+  }, []);
+
   const movePlayer = (dir: number) => {
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
@@ -33,7 +38,6 @@ const Tetris: React.FC = () => {
   };
 
   const startGame = (): void => {
-    // Reset everything
     setStage(createStage());
     setDropTime(1000);
     resetPlayer();
@@ -41,22 +45,24 @@ const Tetris: React.FC = () => {
     setScore(0);
     setRows(0);
     setLevel(0);
+
+    // 👉 sau khi bấm Start, focus lại wrapper
+    setTimeout(() => wrapperRef.current?.focus(), 0);
   };
 
   const drop = (): void => {
-    // Increase level when player clears ten rows
-    if (rows > (level + 1) * 10) {
-      setLevel((prev) => prev + 1);
-      // Also increase speed
-      setDropTime(1000 / (level + 1) + 200);
+    if (rows >= (level + 1) * 10) {
+      setLevel(prev => {
+        const next = prev + 1;
+        setDropTime(1000 / next + 200);
+        return next;
+      });
     }
 
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-      // Khi va chạm, ngừng di chuyển và đánh dấu collided
       if (player.pos.y < 1) {
-        // Game Over
         setGameOver(true);
         setDropTime(null);
       }
@@ -64,12 +70,10 @@ const Tetris: React.FC = () => {
     }
   };
 
-  // Hàm soft drop - tăng tốc độ rơi khi nhấn phím xuống
   const softDrop = (): void => {
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-      // Khi chạm đáy hoặc khối khác, drop ngay lập tức
       if (player.pos.y < 1) {
         setGameOver(true);
         setDropTime(null);
@@ -78,59 +82,68 @@ const Tetris: React.FC = () => {
     }
   };
 
-  // Hàm hard drop - thả khối xuống ngay lập tức
   const hardDrop = (): void => {
+    // 👉 tạm dừng tick để tránh “race” khi nhấn Space đúng lúc interval chạy
+    const prev = dropTime;
+    setDropTime(null);
+
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) {
       dropDistance += 1;
     }
-    if (dropDistance > 0) {
-      updatePlayerPos({ x: 0, y: dropDistance, collided: false });
-      setPendingCollide(true);
-    }
+    updatePlayerPos({ x: 0, y: dropDistance, collided: false });
+    setPendingCollide(true);
+
+    // khôi phục timer sau khi lock (ở effect phía dưới)
   };
-  // Effect để set collided sau khi hard drop
-  React.useEffect(() => {
+
+  // Sau hard drop: lock khối rồi khôi phục tốc độ rơi
+  useEffect(() => {
     if (pendingCollide) {
-      // Nếu đã ở đáy, set collided cho player
       updatePlayerPos({ x: 0, y: 0, collided: true });
       setPendingCollide(false);
+      setDropTime(1000 / (level + 1) + 200);
     }
-  }, [pendingCollide, updatePlayerPos]);
+  }, [pendingCollide, updatePlayerPos, level]);
 
   const keyUp = ({ keyCode }: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!gameOver) {
-      if (keyCode === 40) { // Down arrow key
-        setDropTime(1000 / (level + 1) + 200);
-      }
+    if (!gameOver && keyCode === 40) {
+      setDropTime(1000 / (level + 1) + 200);
     }
   };
 
   const dropPlayer = (): void => {
-    // Sử dụng soft drop thay vì drop thông thường để xử lý va chạm tốt hơn
     softDrop();
   };
 
-  const move = ({ keyCode }: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!gameOver) {
-      if (keyCode === 37) { // Left arrow key - Di chuyển trái
-        movePlayer(-1);
-      } else if (keyCode === 39) { // Right arrow key - Di chuyển phải
-        movePlayer(1);
-      } else if (keyCode === 40) { // Down arrow key - Tăng tốc độ rơi
-        dropPlayer();
-      } else if (keyCode === 38) { // Up arrow key - Xoay khối (trừ khối O)
-        // Kiểm tra nếu không phải khối O thì mới cho xoay
-        const currentTetromino = player.tetromino;
-        const isOBlock = currentTetromino.length === 2 && currentTetromino[0].length === 2 && 
-                        currentTetromino.every(row => row.every(cell => cell === 'O' || cell === 0));
-        
-        if (!isOBlock) {
-          playerRotate(stage, 1);
-        }
-      } else if (keyCode === 32) { // Space bar - Hard drop
-        hardDrop();
+  const move = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (gameOver) return;
+
+    // 👉 CHẶN hành vi mặc định để Space/Arrow không “click” nút Start / cuộn trang
+    if ([32, 37, 38, 39, 40].includes(e.keyCode)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    const { keyCode } = e;
+    if (keyCode === 37) {
+      movePlayer(-1);
+    } else if (keyCode === 39) {
+      movePlayer(1);
+    } else if (keyCode === 40) {
+      dropPlayer(); // hoặc setDropTime(30) nếu muốn mượt hơn
+    } else if (keyCode === 38) {
+      const currentTetromino = player.tetromino;
+      const isOBlock =
+        currentTetromino.length === 2 &&
+        currentTetromino[0].length === 2 &&
+        currentTetromino.every(row => row.every(cell => cell === "O" || cell === 0));
+
+      if (!isOBlock) {
+        playerRotate(stage, 1);
       }
+    } else if (keyCode === 32) {
+      hardDrop(); // 👉 Space = hard drop
     }
   };
 
@@ -140,13 +153,13 @@ const Tetris: React.FC = () => {
 
   return (
     <StyledTetrisWrapper
+      ref={wrapperRef}   // 👉 gắn ref để focus
       role="button"
       tabIndex={0}
       onKeyDown={move}
       onKeyUp={keyUp}
     >
       <StyledTetris>
-        {/* The 'as StageType' assertion is no longer needed as 'stage' is correctly typed by the useStage hook */}
         <Stage stage={stage} />
         <aside>
           {gameOver ? (
