@@ -1,25 +1,31 @@
-import { useState, useEffect } from "react";
 
-const LINE_POINTS = [40, 100, 300, 1200] as const;
+import { useState, useEffect, useCallback } from "react";
 
-export const useGameStatus = (rowsCleared: number) => {
+export const useGameStatus = (rowsCleared: number): [
+    number,
+    React.Dispatch<React.SetStateAction<number>>,
+    number,
+    React.Dispatch<React.SetStateAction<number>>,
+    number,
+    React.Dispatch<React.SetStateAction<number>>
+] => {
   const [score, setScore] = useState(0);
   const [rows, setRows] = useState(0);
   const [level, setLevel] = useState(0);
 
-  useEffect(() => {
+  const linePoints = [40, 100, 300, 1200];
+
+  const calcScore = useCallback(() => {
     if (rowsCleared > 0) {
-      const cleared = Math.max(1, Math.min(rowsCleared, 4)); // giới hạn 1–4
-      setScore((prev) => prev + LINE_POINTS[cleared - 1] * (level + 1));
-      setRows((prev) => prev + cleared);
+      setScore((prev) => prev + linePoints[rowsCleared - 1] * (level + 1));
+      setRows((prev) => prev + rowsCleared);
     }
-  }, [rowsCleared, level]);
+  }, [level, linePoints, rowsCleared]);
 
-  const resetGameStatus = () => {
-    setScore(0);
-    setRows(0);
-    setLevel(0);
-  };
+  useEffect(() => {
+    calcScore();
+  }, [calcScore, rowsCleared, score]);
 
-  return { score, rows, level, setLevel, resetGameStatus };
+  return [score, setScore, rows, setRows, level, setLevel];
 };
+
