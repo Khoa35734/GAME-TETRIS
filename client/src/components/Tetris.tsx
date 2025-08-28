@@ -18,9 +18,10 @@ import StartButton from "./StartButton";
 const Tetris: React.FC = () => {
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
-  
+
   // State để quản lý chuỗi hiệu ứng "đè khối" khi spawn lỗi
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
+
 
   const [player, updatePlayerPos, resetPlayer, playerRotate] = usePlayer();
   const [stage, setStage, rowsCleared] = useStage(player);
@@ -49,18 +50,24 @@ const Tetris: React.FC = () => {
     resetPlayer();
     setTimeout(() => wrapperRef.current?.focus(), 0);
   };
-
+  
   const drop = (): void => {
+
+    // Tăng level khi đủ hàng
     if (rows > (level + 1) * 10) {
       setLevel(prev => prev + 1);
+      // Tăng tốc độ rơi
+
       setDropTime(1000 / (level + 1) + 200);
     }
 
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
+
       // Logic 1: Game over ngay lập tức do "chạm đỉnh"
       if (player.pos.y < 1) {
+
         setGameOver(true);
         setDropTime(null);
       }
@@ -69,13 +76,17 @@ const Tetris: React.FC = () => {
   };
 
   const keyUp = ({ keyCode }: React.KeyboardEvent<HTMLDivElement>): void => {
+
     if (!gameOver && !startGameOverSequence && keyCode === 40) {
+
       setDropTime(1000 / (level + 1) + 200);
     }
   };
 
   const softDrop = (): void => {
+
     if (gameOver || startGameOverSequence) return;
+
     setDropTime(null);
     drop();
   };
@@ -83,18 +94,23 @@ const Tetris: React.FC = () => {
   const hardDrop = (): void => {
     if (gameOver || startGameOverSequence) return;
     let dropDistance = 0;
+    // Tìm vị trí thấp nhất mà khối có thể rơi tới
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) {
       dropDistance += 1;
     }
+
     updatePlayerPos({ x: 0, y: dropDistance, collided: true });
   };
 
   const move = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+
     if (gameOver || startGameOverSequence) return;
+
     if ([32, 37, 38, 39, 40].includes(e.keyCode)) {
       e.preventDefault();
       e.stopPropagation();
     }
+
     const { keyCode } = e;
     if (keyCode === 37) movePlayer(-1);
     else if (keyCode === 39) movePlayer(1);
@@ -123,6 +139,7 @@ useEffect(() => {
     if (isNewPlayer && checkCollision(player, stage, { x: 0, y: 0 })) {
         setDropTime(null);
         setStartGameOverSequence(true);
+
     }
   }, [player, stage]);
 
@@ -134,13 +151,25 @@ useEffect(() => {
       }
   }, [startGameOverSequence, gameOver, updatePlayerPos]);
 
+  // Kiểm tra game over khi một khối mới được tạo
+  useEffect(() => {
+    if (player.collided && !gameOver) {
+      // Kiểm tra xem khối mới có bị va chạm ngay tại vị trí xuất hiện không
+      const newPlayer = { ...player, pos: { ...player.pos } };
+      if (checkCollision(newPlayer, stage, { x: 0, y: 0 })) {
+        setGameOver(true);
+        setDropTime(null);
+      }
+    }
+  }, [player, stage, gameOver]);
+
   return (
     <StyledTetrisWrapper
       ref={wrapperRef}
       role="button"
       tabIndex={0}
       onKeyDown={move}
-      onKeyUp={keyUp}
+      onKeyUp={keyUp} // Thêm onKeyUp để xử lý việc nhả phím soft drop
     >
       <StyledTetris>
         <Stage stage={stage} />
