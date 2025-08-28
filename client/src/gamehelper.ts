@@ -24,26 +24,34 @@ export const checkCollision = (
   stage: Stage,
   { x: moveX, y: moveY }: { x: number; y: number }
 ): boolean => {
-  // Lặp qua từng ô của khối tetromino
+  // Dùng vòng lặp for truyền thống để có thể return ngay khi phát hiện va chạm
   for (let y = 0; y < player.tetromino.length; y += 1) {
     for (let x = 0; x < player.tetromino[y].length; x += 1) {
-      // 1. Kiểm tra xem chúng ta có đang ở trên một ô thực của tetromino không
+      // 1. Kiểm tra xem ô đang xét có phải là một phần của khối không
       if (player.tetromino[y][x] !== 0) {
-        if (
-          // 2. Kiểm tra nước đi có nằm trong chiều cao của màn chơi (y) không
-          // Không được đi xuyên qua đáy màn chơi
-          !stage[y + player.pos.y + moveY] ||
-          // 3. Kiểm tra nước đi có nằm trong chiều rộng của màn chơi (x) không
-          !stage[y + player.pos.y + moveY][x + player.pos.x + moveX] ||
-          // 4. Kiểm tra xem ô sắp di chuyển tới có phải là ô trống ('clear') không
-          stage[y + player.pos.y + moveY][x + player.pos.x + moveX][1] !==
-            "clear"
-        ) {
-          return true; // Va chạm xảy ra
+        // 2. Tọa độ mới của ô trên sân chơi
+        const newY = y + player.pos.y + moveY;
+        const newX = x + player.pos.x + moveX;
+
+        // 3. Kiểm tra va chạm với tường (trái/phải)
+        if (newX < 0 || newX >= STAGE_WIDTH) {
+          return true;
+        }
+
+        // 4. Kiểm tra va chạm với đáy sân chơi
+        if (newY >= STAGE_HEIGHT) {
+          return true;
+        }
+
+        // 5. Kiểm tra va chạm với các khối đã có trên sân chơi
+        // Chỉ kiểm tra khi ô nằm trong sân chơi (newY >= 0)
+        if (newY >= 0 && stage[newY][newX][1] !== 'clear') {
+          return true;
         }
       }
     }
   }
-  // Không có va chạm
+
+  // 6. Nếu không có va chạm nào, trả về false
   return false;
 };
