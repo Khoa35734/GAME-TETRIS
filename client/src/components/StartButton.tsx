@@ -6,7 +6,19 @@ type Props = {
 }
 
 const StartButton: React.FC<Props> = ({ callback }) => (
-  <StyledStartButton onClick={callback}>Start Game</StyledStartButton>
+  <StyledStartButton
+    type="button"
+    tabIndex={-1}        //  không cho nút này bị focus → Space không kích hoạt
+    onClick={callback}
+    onKeyDown={(e) => {  //  nếu lỡ focus, chặn Space luôn
+      if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }}
+  >
+    Start Game
+  </StyledStartButton>
 );
 
 export default StartButton;
