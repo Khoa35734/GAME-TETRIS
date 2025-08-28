@@ -56,7 +56,6 @@ export const TETROMINOES: Tetrominoes = {
   },
   T: {
     shape: [
-      [0, 0, 0],
       ["T", "T", "T"],
       [0, "T", 0],
     ],

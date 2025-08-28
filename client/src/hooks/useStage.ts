@@ -6,7 +6,7 @@ export type CellValue = string | number;
 export type Cell = [CellValue, string];
 export type Stage = Cell[][];
 
-export const useStage = (player: Player, resetPlayer: () => void): [Stage, React.Dispatch<React.SetStateAction<Stage>>, number] => {
+export const useStage = (player: Player): [Stage, React.Dispatch<React.SetStateAction<Stage>>, number] => {
   const [stage, setStage] = useState<Stage>(createStage());
   const [rowsCleared, setRowsCleared] = useState(0);
 
@@ -25,12 +25,10 @@ export const useStage = (player: Player, resetPlayer: () => void): [Stage, React
       }, [] as Stage);
 
     const updateStage = (prevStage: Stage): Stage => {
-      // Đầu tiên, làm sạch màn chơi
       const newStage = prevStage.map(
         (row) => row.map((cell) => (cell[1] === 'clear' ? [0, 'clear'] : cell)) as Cell[]
       );
 
-      // Sau đó, vẽ tetromino
       player.tetromino.forEach((row, y) => {
         row.forEach((value, x) => {
           if (value !== 0) {
@@ -42,16 +40,14 @@ export const useStage = (player: Player, resetPlayer: () => void): [Stage, React
         });
       });
 
-      // Kiểm tra va chạm
       if (player.collided) {
-        resetPlayer();
         return sweepRows(newStage);
       }
       return newStage;
     };
 
     setStage((prev) => updateStage(prev));
-  }, [player, resetPlayer]);
+  }, [player]);
 
   return [stage, setStage, rowsCleared];
 };

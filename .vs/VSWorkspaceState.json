@@ -1,0 +1,11 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\client",
+    "\\client\\public",
+    "\\client\\src",
+    "\\client\\src\\hooks"
+  ],
+  "SelectedNode": "\\client\\src\\hooks\\usePlayer.ts",
+  "PreviewInSolutionExplorer": false
+}
