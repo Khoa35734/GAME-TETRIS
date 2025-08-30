@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createStage, checkCollision } from "../gamehelper";
 
 // Styled Components
@@ -18,28 +18,26 @@ import StartButton from "./StartButton";
 const Tetris: React.FC = () => {
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
-
-  // State để quản lý chuỗi hiệu ứng "đè khối" khi spawn lỗi
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
-
 
   const [player, updatePlayerPos, resetPlayer, playerRotate] = usePlayer();
   const [stage, setStage, rowsCleared] = useStage(player);
   const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
+  
   useEffect(() => {
     wrapperRef.current?.focus();
   }, []);
 
-  const movePlayer = (dir: number) => {
+  const movePlayer = useCallback((dir: number) => {
     if (gameOver || startGameOverSequence) return;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
     }
-  };
+  }, [gameOver, startGameOverSequence, player, stage, updatePlayerPos]);
 
-  const startGame = (): void => {
+  const startGame = useCallback((): void => {
     setStage(createStage());
     setDropTime(1000);
     setGameOver(false);
@@ -49,49 +47,41 @@ const Tetris: React.FC = () => {
     setLevel(0);
     resetPlayer();
     setTimeout(() => wrapperRef.current?.focus(), 0);
-  };
+  }, [setStage, resetPlayer, setScore, setRows, setLevel]);
   
-  const drop = (): void => {
-
+  const drop = useCallback((): void => {
     // Tăng level khi đủ hàng
     if (rows > (level + 1) * 10) {
       setLevel(prev => prev + 1);
       // Tăng tốc độ rơi
-
       setDropTime(1000 / (level + 1) + 200);
     }
 
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-
       // Logic 1: Game over ngay lập tức do "chạm đỉnh"
       if (player.pos.y < 1) {
-
         setGameOver(true);
         setDropTime(null);
       }
       updatePlayerPos({ x: 0, y: 0, collided: true });
     }
-  };
+  }, [player, stage, updatePlayerPos, rows, level, setLevel]);
 
-  const keyUp = ({ keyCode }: React.KeyboardEvent<HTMLDivElement>): void => {
-
+  const keyUp = useCallback(({ keyCode }: React.KeyboardEvent<HTMLDivElement>): void => {
     if (!gameOver && !startGameOverSequence && keyCode === 40) {
-
       setDropTime(1000 / (level + 1) + 200);
     }
-  };
+  }, [gameOver, startGameOverSequence, level]);
 
-  const softDrop = (): void => {
-
+  const softDrop = useCallback((): void => {
     if (gameOver || startGameOverSequence) return;
-
     setDropTime(null);
     drop();
-  };
+  }, [gameOver, startGameOverSequence, drop]);
   
-  const hardDrop = (): void => {
+  const hardDrop = useCallback((): void => {
     if (gameOver || startGameOverSequence) return;
     let dropDistance = 0;
     // Tìm vị trí thấp nhất mà khối có thể rơi tới
@@ -100,10 +90,9 @@ const Tetris: React.FC = () => {
     }
 
     updatePlayerPos({ x: 0, y: dropDistance, collided: true });
-  };
+  }, [gameOver, startGameOverSequence, player, stage, updatePlayerPos]);
 
-  const move = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-
+  const move = useCallback((e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (gameOver || startGameOverSequence) return;
 
     if ([32, 37, 38, 39, 40].includes(e.keyCode)) {
@@ -117,7 +106,7 @@ const Tetris: React.FC = () => {
     else if (keyCode === 40) softDrop();
     else if (keyCode === 38) playerRotate(stage, 1);
     else if (keyCode === 32) hardDrop();
-  };
+  }, [gameOver, startGameOverSequence, movePlayer, softDrop, playerRotate, stage, hardDrop]);
 
   useInterval(() => {
     if (!gameOver && !startGameOverSequence) {
@@ -126,12 +115,12 @@ const Tetris: React.FC = () => {
   }, dropTime);
 
   // useEffect 1: Điều phối việc tạo khối mới sau khi va chạm
-useEffect(() => {
-  // Chỉ tạo khối mới khi khối cũ đã va chạm VÀ game chưa kết thúc
-  if (player.collided && !gameOver) {
-    resetPlayer();
-  }
-}, [player.collided, gameOver, resetPlayer]);
+  useEffect(() => {
+    // Chỉ tạo khối mới khi khối cũ đã va chạm VÀ game chưa kết thúc
+    if (player.collided && !gameOver) {
+      resetPlayer();
+    }
+  }, [player.collided, gameOver, resetPlayer]);
   
   // useEffect 2: Kiểm tra spawn lỗi để bắt đầu hiệu ứng "đè khối"
   useEffect(() => {
@@ -139,7 +128,6 @@ useEffect(() => {
     if (isNewPlayer && checkCollision(player, stage, { x: 0, y: 0 })) {
         setDropTime(null);
         setStartGameOverSequence(true);
-
     }
   }, [player, stage]);
 
@@ -169,10 +157,10 @@ useEffect(() => {
       role="button"
       tabIndex={0}
       onKeyDown={move}
-      onKeyUp={keyUp} // Thêm onKeyUp để xử lý việc nhả phím soft drop
+      onKeyUp={keyUp}
     >
       <StyledTetris>
-        <Stage stage={stage} />
+        <Stage stage={stage} player={player} />
         <aside>
           {gameOver ? (
             <Display gameOver={gameOver} text="Game Over" />
