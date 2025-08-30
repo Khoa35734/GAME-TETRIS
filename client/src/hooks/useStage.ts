@@ -32,10 +32,17 @@ export const useStage = (player: Player): [Stage, React.Dispatch<React.SetStateA
       player.tetromino.forEach((row, y) => {
         row.forEach((value, x) => {
           if (value !== 0) {
-            newStage[y + player.pos.y][x + player.pos.x] = [
-              value,
-              `${player.collided ? 'merged' : 'clear'}`,
-            ];
+            const drawY = y + player.pos.y;
+            const drawX = x + player.pos.x;
+            if (
+              newStage[drawY] &&
+              newStage[drawY][drawX] !== undefined
+            ) {
+              newStage[drawY][drawX] = [
+                value,
+                `${player.collided ? 'merged' : 'clear'}`,
+              ];
+            }
           }
         });
       });

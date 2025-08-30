@@ -64,10 +64,12 @@ export const usePlayer = (): [
   };
 
   const resetPlayer = useCallback((): void => {
+    const tetro = randomTetromino();
+    const isT = tetro.shape.length === 3 && tetro.shape[1][1] === "T";
     setPlayer({
-      pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
-      tetromino: randomTetromino().shape,
-      collided: false, // Sửa lỗi chính tả từ 'collider'
+      pos: { x: STAGE_WIDTH / 2 - 2, y: isT ? -1 : 0 },
+      tetromino: tetro.shape,
+      collided: false,
     });
   }, []);
 
