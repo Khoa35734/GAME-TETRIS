@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createStage, checkCollision } from "../gamehelper";
+import { HoldPanel, NextPanel, ScorePanel } from "./SidePanels";
 
 // Styled Components
 import { StyledTetris } from "./styles/StyledTetris";
@@ -21,7 +22,11 @@ const Tetris: React.FC = () => {
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [pendingCollide, setPendingCollide] = useState(false);
 
-  const [player, updatePlayerPos, resetPlayer, playerRotate] = usePlayer();
+  const [
+  player, updatePlayerPos, resetPlayer, playerRotate,
+  hold, nextFour, holdSwap
+] = usePlayer();
+
   const [stage, setStage, rowsCleared] = useStage(player, resetPlayer);
   const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
 
@@ -142,40 +147,62 @@ const Tetris: React.FC = () => {
       if (!isOBlock) {
         playerRotate(stage, 1);
       }
-    } else if (keyCode === 32) {
+    } if (keyCode === 32) {
       hardDrop(); // 👉 Space = hard drop
     }
+    
+
+    else if (keyCode === 67) { // C
+  holdSwap();
+}
+
   };
 
   useInterval(() => {
     drop();
   }, dropTime);
 
-  return (
-    <StyledTetrisWrapper
-      ref={wrapperRef}   // 👉 gắn ref để focus
-      role="button"
-      tabIndex={0}
-      onKeyDown={move}
-      onKeyUp={keyUp}
+return (
+  <StyledTetrisWrapper
+    ref={wrapperRef}
+    role="button"
+    tabIndex={0}
+    onKeyDown={move}
+    onKeyUp={keyUp}
+  >
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "180px 1fr 200px",
+        gap: 16,
+        alignItems: "start",
+        width: "100%",
+      }}
     >
+      {/* LEFT: HOLD */}
+      <div style={{ display: "grid", gap: 16 }}>
+        <HoldPanel hold={hold} />
+      </div>
+
+      {/* CENTER: BOARD giữ nguyên StyledTetris + Stage */}
       <StyledTetris>
         <Stage stage={stage} />
-        <aside>
-          {gameOver ? (
-            <Display gameOver={gameOver} text="Game Over" />
-          ) : (
-            <div>
-              <Display text={`Score: ${score}`} />
-              <Display text={`Rows: ${rows}`} />
-              <Display text={`Level: ${level}`} />
-            </div>
-          )}
-          <StartButton callback={startGame} />
-        </aside>
       </StyledTetris>
-    </StyledTetrisWrapper>
-  );
+
+      {/* RIGHT: NEXT + STATS + START */}
+      <div style={{ display: "grid", gap: 16 }}>
+        <NextPanel queue={nextFour as any} />
+        {gameOver ? (
+          <Display gameOver={gameOver} text="Game Over" />
+        ) : (
+          <ScorePanel score={score} rows={rows} level={level} />
+        )}
+        <StartButton callback={startGame} />
+      </div>
+    </div>
+  </StyledTetrisWrapper>
+);
+
 };
 
 export default Tetris;
