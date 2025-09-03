@@ -21,25 +21,17 @@ export function useQueue(previewSize = 5) {
     rest.length < 7 ? [...rest, ...shuffle([...BAG])] : rest;
 
   // ✅ Bốc NGẪU NHIÊN trong N khối đầu, không phụ thuộc thời điểm setState
-  const popRandomNext = useCallback((): TType => {
+  const popNext = useCallback((): TType => {
     setQueue(prev => {
-      const window = Math.min(previewSize, prev.length);
-      const idx = Math.floor(Math.random() * window);
-      const chosen = prev[idx] as TType;
-
-      // lưu ra ref để trả về NGAY lập tức, tránh bị trả về 'T' mặc định
+      const chosen = (prev[0] ?? "T") as TType;    // ⬅️ lấy phần tử đầu
       lastChosen.current = chosen;
-
-      const rest = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      const rest = prev.slice(1);
       return refill(rest);
     });
-
     return lastChosen.current;
-  }, [previewSize]);
-
+  }, []);
   const nextN = useMemo(() => queue.slice(0, previewSize), [queue, previewSize]);
-
-  return { nextN, popRandomNext };
+  return { nextN, popNext };
 }
 
 

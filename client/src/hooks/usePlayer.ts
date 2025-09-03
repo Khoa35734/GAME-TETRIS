@@ -30,7 +30,7 @@ export const usePlayer = (): [
   TType[],        // nextFour
   () => void      // holdSwap
 ] => {
-  const { nextN, popRandomNext } = useQueue(5); // 5 khối hiển thị
+  const { nextN, popNext } = useQueue(5); // 5 khối hiển thị
 
 
   const [player, setPlayer] = useState<Player>({
@@ -54,7 +54,7 @@ export const usePlayer = (): [
   };
 
   const spawnFromQueue = useCallback(() => {
-  const t = popRandomNext();  // ✅ bốc random trong 5
+  const t = popNext();  // ✅ bốc random trong 5
   setPlayer({
     pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
     tetromino: TETROMINOES[t].shape,
@@ -62,7 +62,7 @@ export const usePlayer = (): [
     collided: false,
   });
   setCanHold(true);
-}, [popRandomNext]);
+}, [popNext]);
 
   const resetPlayer = useCallback(() => {
     spawnFromQueue();
@@ -92,7 +92,7 @@ export const usePlayer = (): [
   setPlayer(p => {
     if (hold === null) {
       setHold(p.type);
-      const t = popRandomNext(); // ✅ cũng bốc random trong 5
+      const t = popNext(); // ✅ cũng bốc random trong 5
       setCanHold(false);
       return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
     } else {
@@ -102,7 +102,7 @@ export const usePlayer = (): [
       return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
     }
   });
-}, [canHold, hold, popRandomNext]);
+}, [canHold, hold, popNext]);
 
  
   return [
