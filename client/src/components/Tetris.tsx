@@ -1,10 +1,10 @@
+import React, { useState, useRef, useEffect, useCallback } from "react";
 
 // Import các panel từ SidePanels
 import { HoldPanel, NextPanel, ScorePanel } from "./SidePanels";
-import React, { useState, useRef, useEffect } from "react";
 
 import { createStage, checkCollision } from "../gamehelper";
-import HoldDisplay from "./HoldDisplay";
+// import HoldDisplay from "./HoldDisplay"; // Không dùng nữa
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
 
@@ -28,8 +28,7 @@ const SOFT_DROP_SPEED: number = 30; // Tốc độ rơi nhanh khi giữ phím xu
 
 const Tetris: React.FC = () => {
   // Hold state
-  const [holdTetromino, setHoldTetromino] = useState<any>(null); // ô Hold rỗng khi bắt đầu
-  const [hasHeld, setHasHeld] = useState(false);
+  // Đã chuyển sang logic hold chuẩn, không cần biến này nữa
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
@@ -56,7 +55,7 @@ const Tetris: React.FC = () => {
       updatePlayerPos({ x: dir, y: 0, collided: false });
     }
 
-  };
+  }, [gameOver, startGameOverSequence, player, stage, updatePlayerPos]);
   
   // Hàm di chuyển tức thời sang cạnh (dành cho ARR = 0)
   const movePlayerToSide = (dir: number) => {
@@ -79,8 +78,6 @@ const Tetris: React.FC = () => {
   setScore(0);
   setRows(0);
   setLevel(0);
-  setHoldTetromino(null); // reset hold khi bắt đầu game
-  setHasHeld(false);
   resetPlayer();
   setTimeout(() => {
     wrapperRef.current?.focus();
@@ -144,7 +141,7 @@ const Tetris: React.FC = () => {
         drop();
       }, 0);
     }
-  };
+  }, [gameOver, startGameOverSequence, player, stage, updatePlayerPos, resetPlayer, setMoveIntent, checkCollision]);
   
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
 
@@ -228,7 +225,6 @@ const Tetris: React.FC = () => {
       }
       
       // Cho phép hold lại ở khối tiếp theo
-      setHasHeld(false);
 
       // Dùng setTimeout(..., 0) để đẩy việc reset player sang chu trình sự kiện (event loop) tiếp theo.
       // Mẹo này đảm bảo React có đủ thời gian để cập nhật state `stage` trước khi khối mới được tạo ra.
@@ -322,7 +318,7 @@ const Tetris: React.FC = () => {
 
           {/* CENTER: BOARD giữ nguyên StyledTetris + Stage, trả lại kích thước ban đầu */}
           <StyledTetris style={{ display: "flex", justifyContent: "center", alignItems: "center", minWidth: 400, minHeight: 720 }}>
-            <Stage stage={stage} />
+            <Stage stage={stage} player={player} />
           </StyledTetris>
 
           {/* RIGHT: NEXT + STATS + START - dịch sang phải, tăng gap */}
