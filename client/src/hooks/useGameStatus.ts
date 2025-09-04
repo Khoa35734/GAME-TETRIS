@@ -28,4 +28,3 @@ export const useGameStatus = (rowsCleared: number): [
 
   return [score, setScore, rows, setRows, level, setLevel];
 };
-

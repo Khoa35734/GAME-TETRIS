@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
 import { STAGE_WIDTH, checkCollision } from "../gamehelper";
-
 import { TETROMINOES } from "../components/tetrominos";
 import type { Stage, CellValue } from "./useStage";
 import { useQueue, type TType } from "./useQueue";
@@ -13,7 +12,6 @@ export type Player = {
   pos: { x: number; y: number };
   tetromino: CellValue[][];
   type: TType;
-
   collided: boolean;
 };
 
@@ -36,7 +34,6 @@ export const usePlayer = (): [
 
 
   const [player, setPlayer] = useState<Player>({
-
     pos: { x: 0, y: 0 },
     tetromino: TETROMINOES["T"].shape,
     type: "T",
@@ -54,7 +51,6 @@ export const usePlayer = (): [
       pos: { x: prev.pos.x + x, y: prev.pos.y + y },
       collided,
     }));
-
   };
 
   const spawnFromQueue = useCallback(() => {
