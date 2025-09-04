@@ -1,50 +1,56 @@
-// Định nghĩa các kiểu dữ liệu sẽ được sử dụng trong các hàm
+// Định nghĩa các kiểu dữ liệu
 export type Player = {
   pos: { x: number; y: number };
   tetromino: (string | number)[][];
   collided: boolean;
 };
 
-type Cell = [string | number, string];
-
+export type Cell = [string | number, string];
 export type Stage = Cell[][];
 
 export const STAGE_WIDTH: number = 12;
 export const STAGE_HEIGHT: number = 20;
 
-// Hàm tạo màn chơi giờ đây sẽ trả về kiểu Stage đã được định nghĩa
+// Tạo bóng chơi (ghost)
+export const getGhostPiecePosition = (player: Player, stage: Stage): { x: number; y: number } => {
+  let ghostY = player.pos.y;
+  while (!checkCollision(player, stage, { x: 0, y: ghostY + 1 })) {
+    ghostY++;
+  }
+  return { x: player.pos.x, y: ghostY };
+};
+
+// Hàm tạo màn chơi
 export const createStage = (): Stage =>
   Array.from(Array(STAGE_HEIGHT), () =>
     new Array(STAGE_WIDTH).fill([0, "clear"])
   );
 
-// Thêm kiểu dữ liệu cho các tham số của hàm để tăng tính rõ ràng và an toàn
+// Kiểm tra va chạm
 export const checkCollision = (
   player: Player,
   stage: Stage,
   { x: moveX, y: moveY }: { x: number; y: number }
 ): boolean => {
-  // Dùng vòng lặp for truyền thống để có thể return ngay khi phát hiện va chạm
   for (let y = 0; y < player.tetromino.length; y += 1) {
     for (let x = 0; x < player.tetromino[y].length; x += 1) {
-      // 1. Kiểm tra xem ô đang xét có phải là một phần của khối không
+      // Kiểm tra xem ô đang xét có phải là một phần của khối không
       if (player.tetromino[y][x] !== 0) {
-        // 2. Tọa độ mới của ô trên sân chơi
+        // Tọa độ mới của ô trên sân chơi
         const newY = y + player.pos.y + moveY;
         const newX = x + player.pos.x + moveX;
 
-        // 3. Kiểm tra va chạm với tường (trái/phải)
+        // Kiểm tra va chạm với tường (trái/phải)
         if (newX < 0 || newX >= STAGE_WIDTH) {
           return true;
         }
 
-        // 4. Kiểm tra va chạm với đáy sân chơi
+        // Kiểm tra va chạm với đáy sân chơi
         if (newY >= STAGE_HEIGHT) {
           return true;
         }
 
-        // 5. Kiểm tra va chạm với các khối đã có trên sân chơi
-        // Chỉ kiểm tra khi ô nằm trong sân chơi (newY >= 0)
+        // Kiểm tra va chạm với các khối đã có trên sân chơi
         if (newY >= 0 && stage[newY][newX][1] !== 'clear') {
           return true;
         }
@@ -52,6 +58,35 @@ export const checkCollision = (
     }
   }
 
-  // 6. Nếu không có va chạm nào, trả về false
   return false;
+};
+// Hàm tính toán vị trí ghost piece
+export const calculateGhostPosition = (
+  player: Player,
+  stage: Stage
+): { x: number; y: number } => {
+  // Tạo bản sao của player để không ảnh hưởng đến player thật
+  const ghostPlayer = { ...player };
+  let dropDistance = 0;
+
+  // Tìm khoảng cách rơi xuống tối đa
+  while (!checkCollision(
+    ghostPlayer,
+    stage,
+    { x: 0, y: dropDistance + 1 }
+  )) {
+    dropDistance++;
+  }
+
+  return {
+    x: player.pos.x,
+    y: player.pos.y + dropDistance
+  };
+};
+
+// Hàm lấy tetromino cho ghost piece
+export const getGhostTetromino = (player: Player): (string | number)[][] => {
+  return player.tetromino.map(row => 
+    row.map(cell => cell !== 0 ? 'ghost' : 0)
+  );
 };

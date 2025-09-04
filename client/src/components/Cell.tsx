@@ -1,13 +1,26 @@
 import React from "react";
 import { StyledCell } from "./styles/StyledCell";
-import { TETROMINOES } from "../components/tetrominos";
+import { TETROMINOES } from "./tetrominos";
 
-type Props = {
+interface CellProps {
   type: string | number;
 }
 
-const Cell: React.FC<Props> = ({ type }) => (
-  <StyledCell type={type} color={TETROMINOES[type].color} />
-);
+const Cell: React.FC<CellProps> = ({ type }) => {
+  // Xác định loại tetromino và màu sắc
+  let tetrominoType: keyof typeof TETROMINOES;
+  
+  if (typeof type === 'string' && type in TETROMINOES) {
+    tetrominoType = type as keyof typeof TETROMINOES;
+  } else if (type === 'ghost') {
+    tetrominoType = 'ghost';
+  }else {
+    tetrominoType = 0;
+  }
+  
+  const color = TETROMINOES[tetrominoType].color;
+  
+  return <StyledCell type={type} color={color} />;
+};
 
-export default React.memo(Cell);
+export default Cell;
