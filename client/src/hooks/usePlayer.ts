@@ -1,12 +1,10 @@
 import { useState, useCallback } from "react";
 import { STAGE_WIDTH, checkCollision } from "../gamehelper";
-import { TETROMINOES, randomTetromino } from "../components/tetrominos";
 import type { Stage } from "./useStage";
-import type { CellValue } from "./useStage";
 
 export type Player = {
   pos: { x: number; y: number };
-  tetromino: CellValue[][];
+  tetromino: (string | number)[][];
   collided: boolean;
 };
 
@@ -17,12 +15,12 @@ export const usePlayer = (): [
   (stage: Stage, dir: number) => void
 ] => {
   const [player, setPlayer] = useState<Player>({
-    pos: { x: 0, y: 0 },
-    tetromino: TETROMINOES[0].shape,
+    pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
+    tetromino: [[0]],
     collided: false,
   });
 
-  const rotate = (matrix: CellValue[][], dir: number): CellValue[][] => {
+  const rotate = (matrix: (string | number)[][], dir: number): (string | number)[][] => {
     // Chuyển hàng thành cột (chuyển vị)
     const rotatedTetro = matrix.map((_, index) =>
       matrix.map((col) => col[index])
@@ -51,23 +49,18 @@ export const usePlayer = (): [
   };
 
   const updatePlayerPos = ({ x, y, collided }: { x: number; y: number; collided: boolean }): void => {
-    setPlayer((prev) => {
-      const newX = prev.pos.x + x;
-      const newY = prev.pos.y + y;
-      
-      return {
-        ...prev,
-        pos: { x: newX, y: newY },
-        collided,
-      };
-    });
+    setPlayer((prev) => ({
+      ...prev,
+      pos: { x: prev.pos.x + x, y: prev.pos.y + y },
+      collided,
+    }));
   };
 
   const resetPlayer = useCallback((): void => {
     setPlayer({
       pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
-      tetromino: randomTetromino().shape,
-      collided: false, // Sửa lỗi chính tả từ 'collider'
+      tetromino: [[0]],
+      collided: false,
     });
   }, []);
 

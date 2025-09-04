@@ -2,26 +2,26 @@ export const TETROMINOES = {
   0: { shape: [[0]], color: '0, 0, 0' },
   I: {
     shape: [
-      [0, 0, 0, 0],
-      ['I', 'I', 'I', 'I'],
-      [0, 0, 0, 0],
-      [0, 0, 0, 0],
+      [0, 'I', 0, 0],
+      [0, 'I', 0, 0],
+      [0, 'I', 0, 0],
+      [0, 'I', 0, 0],
     ],
     color: '80, 227, 230',
   },
   J: {
     shape: [
-      [0, 0, 0],
-      ['J', 'J', 'J'],
-      [0, 0, 'J'],
+      [0, 'J', 0],
+      [0, 'J', 0],
+      ['J', 'J', 0],
     ],
     color: '36, 95, 223',
   },
   L: {
     shape: [
-      [0, 0, 0],
-      ['L', 'L', 'L'],
-      ['L', 0, 0],
+      [0, 'L', 0],
+      [0, 'L', 0],
+      [0, 'L', 'L'],
     ],
     color: '223, 173, 36',
   },
@@ -34,9 +34,9 @@ export const TETROMINOES = {
   },
   S: {
     shape: [
-      [0, 0, 0],
       [0, 'S', 'S'],
       ['S', 'S', 0],
+      [0, 0, 0],
     ],
     color: '48, 211, 56',
   },
@@ -58,8 +58,8 @@ export const TETROMINOES = {
   },
   // Thêm ghost piece
   ghost: {
-    shape: [[0]], // Shape không quan trọng vì chúng ta sẽ dùng shape của player
-    color: '150, 150, 150, 0.5', // Màu xám trong suốt
+    shape: [[0]],
+    color: '150, 150, 150',
   },
 };
 
