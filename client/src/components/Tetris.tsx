@@ -156,6 +156,12 @@ const Tetris: React.FC = () => {
         setHasHeld(true);
       }
     }
+    
+
+    else if (keyCode === 67) { // C
+  holdSwap();
+}
+
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -257,24 +263,31 @@ const Tetris: React.FC = () => {
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
     >
+      {/* LEFT: HOLD */}
+      <div style={{ display: "grid", gap: 16 }}>
+        <HoldPanel hold={hold} />
+      </div>
+
+      {/* CENTER: BOARD giữ nguyên StyledTetris + Stage */}
       <StyledTetris>
         <HoldDisplay tetromino={holdTetromino} />
         <Stage stage={stage} />
-        <aside>
-          {gameOver ? (
-            <Display gameOver={gameOver} text="Game Over" />
-          ) : (
-            <div>
-              <Display text={`Score: ${score}`} />
-              <Display text={`Rows: ${rows}`} />
-              <Display text={`Level: ${level}`} />
-            </div>
-          )}
-          <StartButton callback={startGame} />
-        </aside>
       </StyledTetris>
-    </StyledTetrisWrapper>
-  );
+
+      {/* RIGHT: NEXT + STATS + START */}
+      <div style={{ display: "grid", gap: 16 }}>
+        <NextPanel queue={nextFour as any} />
+        {gameOver ? (
+          <Display gameOver={gameOver} text="Game Over" />
+        ) : (
+          <ScorePanel score={score} rows={rows} level={level} />
+        )}
+        <StartButton callback={startGame} />
+      </div>
+    </div>
+  </StyledTetrisWrapper>
+);
+
 };
 
 export default Tetris;
