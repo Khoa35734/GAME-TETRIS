@@ -1,6 +1,8 @@
+
 // Import các panel từ SidePanels
 import { HoldPanel, NextPanel, ScorePanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
+
 import { createStage, checkCollision } from "../gamehelper";
 import HoldDisplay from "./HoldDisplay";
 // Styled Components
@@ -35,21 +37,25 @@ const Tetris: React.FC = () => {
   // State để lưu ý định di chuyển của người chơi, hỗ trợ DAS/ARR
   const [moveIntent, setMoveIntent] = useState<{ dir: number, startTime: number, dasCharged: boolean } | null>(null);
 
+
   // usePlayer trả về các biến cần thiết cho HoldPanel và NextPanel
   const [player, updatePlayerPos, resetPlayer, playerRotate, hold, nextFour, holdSwap] = usePlayer();
+
   const [stage, setStage, rowsCleared] = useStage(player);
   const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
+  
   useEffect(() => {
     wrapperRef.current?.focus();
   }, []);
 
-  const movePlayer = (dir: number) => {
+  const movePlayer = useCallback((dir: number) => {
     if (gameOver || startGameOverSequence) return;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
     }
+
   };
   
   // Hàm di chuyển tức thời sang cạnh (dành cho ARR = 0)
@@ -86,28 +92,33 @@ const Tetris: React.FC = () => {
   const drop = (): void => {
     if (rows > (level + 1) * 10) {
       setLevel(prev => prev + 1);
+
       setDropTime(1000 / (level + 1) + 200);
     }
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
+
       // Khi khối không thể rơi thêm và bị lock
       if (player.pos.y <= 0) {
         // Khối chạm trần -> Game Over ngay lập tức
+
         setGameOver(true);
         setDropTime(null);
         return;
       }
       updatePlayerPos({ x: 0, y: 0, collided: true });
     }
+
   };
-  
-  const hardDrop = (): void => {
+
+  const hardDrop = useCallback((): void => {
     if (gameOver || startGameOverSequence) return;
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) {
       dropDistance += 1;
     }
+
     // Hard drop: cập nhật vị trí và lock khối
     const finalY = player.pos.y + dropDistance;
     if (finalY <= 0) {
@@ -136,6 +147,7 @@ const Tetris: React.FC = () => {
   };
   
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+
     if (gameOver || startGameOverSequence) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
@@ -143,6 +155,7 @@ const Tetris: React.FC = () => {
     }
 
     const { keyCode } = e;
+
     if (keyCode === 37 || keyCode === 39) {
       const dir = keyCode === 37 ? -1 : 1;
       if (!moveIntent || moveIntent.dir !== dir) {
@@ -171,12 +184,14 @@ const Tetris: React.FC = () => {
     }
   };
 
+
   // Vòng lặp game cho việc RƠI
   useInterval(() => {
     if (!gameOver && !startGameOverSequence) {
         drop();
     }
   }, dropTime);
+
 
   // Vòng lặp game cho việc DI CHUYỂN NGANG (xử lý DAS)
   useInterval(() => {
@@ -201,12 +216,14 @@ const Tetris: React.FC = () => {
   }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : null);
 
   // useEffect điều phối việc tạo khối mới
+
   useEffect(() => {
     if (player.collided && !gameOver) {
       // Kiểm tra chạm trần ngay khi va chạm
       if (player.pos.y <= 0) {
         setGameOver(true);
         setDropTime(null);
+
         return;
       }
       
@@ -222,6 +239,7 @@ const Tetris: React.FC = () => {
 
       // Cleanup function để tránh lỗi khi component bị unmount
       return () => clearTimeout(timer);
+
     }
   }, [player.collided, gameOver]); // Chỉ phụ thuộc vào player.collided và gameOver
 
@@ -257,6 +275,7 @@ const Tetris: React.FC = () => {
       ref={wrapperRef}
       role="button"
       tabIndex={0}
+
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
     >
@@ -319,6 +338,7 @@ const Tetris: React.FC = () => {
           </div>
         </div>
       </div>
+
     </StyledTetrisWrapper>
 );
 
