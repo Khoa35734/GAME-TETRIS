@@ -1,3 +1,5 @@
+// Import các panel từ SidePanels
+import { HoldPanel, NextPanel, ScorePanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
 import { createStage, checkCollision } from "../gamehelper";
 import HoldDisplay from "./HoldDisplay";
@@ -33,7 +35,8 @@ const Tetris: React.FC = () => {
   // State để lưu ý định di chuyển của người chơi, hỗ trợ DAS/ARR
   const [moveIntent, setMoveIntent] = useState<{ dir: number, startTime: number, dasCharged: boolean } | null>(null);
 
-  const [player, updatePlayerPos, resetPlayer, playerRotate] = usePlayer();
+  // usePlayer trả về các biến cần thiết cho HoldPanel và NextPanel
+  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, nextFour, holdSwap] = usePlayer();
   const [stage, setStage, rowsCleared] = useStage(player);
   const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
 
@@ -73,7 +76,11 @@ const Tetris: React.FC = () => {
   setHoldTetromino(null); // reset hold khi bắt đầu game
   setHasHeld(false);
   resetPlayer();
-  setTimeout(() => wrapperRef.current?.focus(), 0);
+  setTimeout(() => {
+    wrapperRef.current?.focus();
+    // Force drop immediately to avoid floating
+    drop();
+  }, 0);
   };
 
   const drop = (): void => {
@@ -109,12 +116,22 @@ const Tetris: React.FC = () => {
       setDropTime(null);
       return;
     }
-    
     if (dropDistance > 0) {
       updatePlayerPos({ x: 0, y: dropDistance, collided: true });
+      // Ngay sau khi hard drop, spawn khối mới luôn và force drop
+      setTimeout(() => {
+        resetPlayer();
+        setMoveIntent(null);
+        drop();
+      }, 0);
     } else {
       // Nếu không thể drop thêm, chỉ lock tại chỗ
       updatePlayerPos({ x: 0, y: 0, collided: true });
+      setTimeout(() => {
+        resetPlayer();
+        setMoveIntent(null);
+        drop();
+      }, 0);
     }
   };
   
@@ -263,31 +280,72 @@ const Tetris: React.FC = () => {
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
     >
-      {/* LEFT: HOLD */}
-      <div style={{ display: "grid", gap: 16 }}>
-        <HoldPanel hold={hold} />
-      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          width: "100vw",
+          height: "100vh",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "220px 1fr 260px",
+            gap: 48,
+            alignItems: "center",
+            background: "rgba(255,255,255,0.0)",
+          }}
+        >
+          {/* LEFT: HOLD - hiển thị lại vùng HoldPanel, kèm nút Hold nếu chưa có */}
+          <div style={{ display: "grid", gap: 24, alignItems: "center" }}>
+            <HoldPanel hold={hold} />
+            {!hold && (
+              <button
+                style={{
+                  marginTop: 8,
+                  padding: "6px 18px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#222",
+                  color: "#fff",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                }}
+                onClick={holdSwap}
+              >
+                Hold
+              </button>
+            )}
+          </div>
 
-      {/* CENTER: BOARD giữ nguyên StyledTetris + Stage */}
-      <StyledTetris>
-        <HoldDisplay tetromino={holdTetromino} />
-        <Stage stage={stage} />
-      </StyledTetris>
+          {/* CENTER: BOARD giữ nguyên StyledTetris + Stage, trả lại kích thước ban đầu */}
+          <StyledTetris style={{ display: "flex", justifyContent: "center", alignItems: "center", minWidth: 400, minHeight: 720 }}>
+            <Stage stage={stage} />
+          </StyledTetris>
 
-      {/* RIGHT: NEXT + STATS + START */}
-      <div style={{ display: "grid", gap: 16 }}>
-        <NextPanel queue={nextFour as any} />
-        {gameOver ? (
-          <Display gameOver={gameOver} text="Game Over" />
-        ) : (
-          <ScorePanel score={score} rows={rows} level={level} />
-        )}
-        <StartButton callback={startGame} />
+          {/* RIGHT: NEXT + STATS + START - dịch sang phải, tăng gap */}
+          <div style={{ display: "grid", gap: 24, justifyItems: "end" }}>
+            {/* NextPanel hiển thị các khối theo ngăn xếp, spawn theo pop ngăn xếp */}
+            <NextPanel queue={nextFour} />
+            {gameOver ? (
+              <Display gameOver={gameOver} text="Game Over" />
+            ) : (
+              <ScorePanel score={score} rows={rows} level={level} />
+            )}
+            <StartButton callback={startGame} />
+          </div>
+        </div>
       </div>
-    </div>
-  </StyledTetrisWrapper>
+    </StyledTetrisWrapper>
 );
 
 };
 
 export default Tetris;
+
+function holdSwap() {
+  throw new Error("Function not implemented.");
+}

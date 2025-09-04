@@ -14,32 +14,25 @@ const shuffle = <T,>(a: T[]) => {
 };
 
 export function useQueue(previewSize = 5) {
-  const [queue, setQueue] = useState<TType[]>(() => shuffle([...BAG, ...BAG]));
-  const lastChosen = useRef<TType>("T"); // 🔒 giữ kết quả đã chọn một cách chắc chắn
+  const [queue, setQueue] = useState<TType[]>(() => Array.from({length: previewSize}, () => BAG[Math.floor(Math.random() * BAG.length)]));
+  const lastChosen = useRef<TType>(queue[0]);
 
-  const refill = (rest: TType[]) =>
-    rest.length < 7 ? [...rest, ...shuffle([...BAG])] : rest;
-
-  // ✅ Bốc NGẪU NHIÊN trong N khối đầu, không phụ thuộc thời điểm setState
-  const popRandomNext = useCallback((): TType => {
+  // Pop từ đầu queue, push random vào cuối
+  const popNext = useCallback((): TType => {
+    let chosen: TType;
     setQueue(prev => {
-      const window = Math.min(previewSize, prev.length);
-      const idx = Math.floor(Math.random() * window);
-      const chosen = prev[idx] as TType;
-
-      // lưu ra ref để trả về NGAY lập tức, tránh bị trả về 'T' mặc định
+      chosen = prev[0];
       lastChosen.current = chosen;
-
-      const rest = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
-      return refill(rest);
+      // Push random vào cuối
+      const newPiece = BAG[Math.floor(Math.random() * BAG.length)];
+      return [...prev.slice(1), newPiece];
     });
-
     return lastChosen.current;
-  }, [previewSize]);
+  }, []);
 
   const nextN = useMemo(() => queue.slice(0, previewSize), [queue, previewSize]);
 
-  return { nextN, popRandomNext };
+  return { nextN, popNext };
 }
 
 
