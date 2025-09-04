@@ -137,7 +137,7 @@ const Tetris: React.FC = () => {
   
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (gameOver || startGameOverSequence) return;
-    if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
+  if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -155,29 +155,9 @@ const Tetris: React.FC = () => {
       playerRotate(stage, 1);
     } else if (keyCode === 32) {
       hardDrop();
-    } else if (keyCode === 16) { // Phím Shift để Hold
-      if (!hasHeld) {
-        if (!holdTetromino) {
-          // Lần đầu hold: lưu khối hiện tại, spawn khối mới
-          setHoldTetromino(player.tetromino);
-          resetPlayer();
-        } else {
-          // Swap khối hiện tại với khối hold, orientation về ban đầu
-          setHoldTetromino(player.tetromino);
-          updatePlayerPos({ x: 0, y: 0, collided: false });
-          setTimeout(() => {
-            resetPlayer();
-            updatePlayerPos({ x: 0, y: 0, collided: false });
-          }, 0);
-        }
-        setHasHeld(true);
-      }
+    } else if (keyCode === 16) { // Chỉ Shift để Hold
+      holdSwap();
     }
-    
-
-    else if (keyCode === 67) { // C
-  holdSwap();
-}
 
   };
 

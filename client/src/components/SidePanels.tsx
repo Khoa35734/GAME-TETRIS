@@ -2,7 +2,14 @@ import React from "react";
 import MinoPreview from "./MinoPreview";
 
 export const HoldPanel = ({ hold }: { hold: string | null }) => (
-  <div style={panel}>
+  <div style={{
+    ...panel,
+    position: "absolute",
+    left: 0,
+    top: "50%",
+    transform: "translateY(-50%)",
+    zIndex: 10,
+  }}>
     <div style={title}>HOLD</div>
     <MinoPreview type={(hold as any) ?? null} size={18} />
   </div>
