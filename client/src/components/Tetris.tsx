@@ -1,6 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { createStage, checkCollision } from "../gamehelper";
 
+// Import các panel từ SidePanels
+import { HoldPanel, NextPanel, ScorePanel } from "./SidePanels";
+import React, { useState, useRef, useEffect } from "react";
+
+import { createStage, checkCollision } from "../gamehelper";
+import HoldDisplay from "./HoldDisplay";
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
 
@@ -15,12 +19,28 @@ import Stage from "./Stage";
 import Display from "./Display";
 import StartButton from "./StartButton";
 
+// --- CÀI ĐẶT ĐỘ NHẠY PHÍM ---
+// Kiểu Tetr.io: Đặt MOVE_INTERVAL = 0, chỉnh DAS_DELAY theo ý muốn (ví dụ: 120)
+// Kiểu cổ điển: Đặt MOVE_INTERVAL > 0 (ví dụ: 40)
+const DAS_DELAY: number = 120; // Độ trễ trước khi auto-repeat (ms)
+const MOVE_INTERVAL: number = 40; // Tốc độ lặp lại di chuyển (ms). Đặt 0 để di chuyển tức thời!
+const SOFT_DROP_SPEED: number = 30; // Tốc độ rơi nhanh khi giữ phím xuống (ms)
+
 const Tetris: React.FC = () => {
+  // Hold state
+  const [holdTetromino, setHoldTetromino] = useState<any>(null); // ô Hold rỗng khi bắt đầu
+  const [hasHeld, setHasHeld] = useState(false);
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
+  
+  // State để lưu ý định di chuyển của người chơi, hỗ trợ DAS/ARR
+  const [moveIntent, setMoveIntent] = useState<{ dir: number, startTime: number, dasCharged: boolean } | null>(null);
 
-  const [player, updatePlayerPos, resetPlayer, playerRotate] = usePlayer();
+
+  // usePlayer trả về các biến cần thiết cho HoldPanel và NextPanel
+  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, nextFour, holdSwap] = usePlayer();
+
   const [stage, setStage, rowsCleared] = useStage(player);
   const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
 
@@ -35,103 +55,234 @@ const Tetris: React.FC = () => {
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
     }
-  }, [gameOver, startGameOverSequence, player, stage, updatePlayerPos]);
 
-  const startGame = useCallback((): void => {
-    setStage(createStage());
-    setDropTime(1000);
-    setGameOver(false);
-    setStartGameOverSequence(false);
-    setScore(0);
-    setRows(0);
-    setLevel(0);
-    resetPlayer();
-    setTimeout(() => wrapperRef.current?.focus(), 0);
-  }, [setStage, resetPlayer, setScore, setRows, setLevel]);
+  };
   
-  const drop = useCallback((): void => {
-    // Tăng level khi đủ hàng
+  // Hàm di chuyển tức thời sang cạnh (dành cho ARR = 0)
+  const movePlayerToSide = (dir: number) => {
+    if (gameOver || startGameOverSequence) return;
+    let distance = 0;
+    while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) {
+        distance += 1;
+    }
+    if (distance > 0) {
+        updatePlayerPos({ x: dir * distance, y: 0, collided: false });
+    }
+  };
+
+  const startGame = (): void => {
+  setStage(createStage());
+  setDropTime(1000);
+  setGameOver(false);
+  setStartGameOverSequence(false);
+  setMoveIntent(null);
+  setScore(0);
+  setRows(0);
+  setLevel(0);
+  setHoldTetromino(null); // reset hold khi bắt đầu game
+  setHasHeld(false);
+  resetPlayer();
+  setTimeout(() => {
+    wrapperRef.current?.focus();
+    // Force drop immediately to avoid floating
+    drop();
+  }, 0);
+  };
+
+  const drop = (): void => {
     if (rows > (level + 1) * 10) {
       setLevel(prev => prev + 1);
-      // Tăng tốc độ rơi
+
       setDropTime(1000 / (level + 1) + 200);
     }
-
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-      // Logic 1: Game over ngay lập tức do "chạm đỉnh"
-      if (player.pos.y < 1) {
+
+      // Khi khối không thể rơi thêm và bị lock
+      if (player.pos.y <= 0) {
+        // Khối chạm trần -> Game Over ngay lập tức
+
         setGameOver(true);
         setDropTime(null);
+        return;
       }
       updatePlayerPos({ x: 0, y: 0, collided: true });
     }
-  }, [player, stage, updatePlayerPos, rows, level, setLevel]);
 
-  const keyUp = useCallback(({ keyCode }: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!gameOver && !startGameOverSequence && keyCode === 40) {
-      setDropTime(1000 / (level + 1) + 200);
-    }
-  }, [gameOver, startGameOverSequence, level]);
+  };
 
-  const softDrop = useCallback((): void => {
-    if (gameOver || startGameOverSequence) return;
-    setDropTime(null);
-    drop();
-  }, [gameOver, startGameOverSequence, drop]);
-  
   const hardDrop = useCallback((): void => {
     if (gameOver || startGameOverSequence) return;
     let dropDistance = 0;
-    // Tìm vị trí thấp nhất mà khối có thể rơi tới
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) {
       dropDistance += 1;
     }
 
-    updatePlayerPos({ x: 0, y: dropDistance, collided: true });
-  }, [gameOver, startGameOverSequence, player, stage, updatePlayerPos]);
+    // Hard drop: cập nhật vị trí và lock khối
+    const finalY = player.pos.y + dropDistance;
+    if (finalY <= 0) {
+      // Khối sau hard drop chạm trần -> Game Over
+      setGameOver(true);
+      setDropTime(null);
+      return;
+    }
+    if (dropDistance > 0) {
+      updatePlayerPos({ x: 0, y: dropDistance, collided: true });
+      // Ngay sau khi hard drop, spawn khối mới luôn và force drop
+      setTimeout(() => {
+        resetPlayer();
+        setMoveIntent(null);
+        drop();
+      }, 0);
+    } else {
+      // Nếu không thể drop thêm, chỉ lock tại chỗ
+      updatePlayerPos({ x: 0, y: 0, collided: true });
+      setTimeout(() => {
+        resetPlayer();
+        setMoveIntent(null);
+        drop();
+      }, 0);
+    }
+  };
+  
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
 
-  const move = useCallback((e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (gameOver || startGameOverSequence) return;
-
-    if ([32, 37, 38, 39, 40].includes(e.keyCode)) {
+    if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
       e.stopPropagation();
     }
 
     const { keyCode } = e;
-    if (keyCode === 37) movePlayer(-1);
-    else if (keyCode === 39) movePlayer(1);
-    else if (keyCode === 40) softDrop();
-    else if (keyCode === 38) playerRotate(stage, 1);
-    else if (keyCode === 32) hardDrop();
-  }, [gameOver, startGameOverSequence, movePlayer, softDrop, playerRotate, stage, hardDrop]);
 
+    if (keyCode === 37 || keyCode === 39) {
+      const dir = keyCode === 37 ? -1 : 1;
+      if (!moveIntent || moveIntent.dir !== dir) {
+        movePlayer(dir);
+        setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
+      }
+    } else if (keyCode === 40) {
+      setDropTime(SOFT_DROP_SPEED);
+    } else if (keyCode === 38) {
+      playerRotate(stage, 1);
+    } else if (keyCode === 32) {
+      hardDrop();
+    } else if (keyCode === 16) { // Phím Shift để Hold
+      if (!hasHeld) {
+        if (!holdTetromino) {
+          // Lần đầu hold: lưu khối hiện tại, spawn khối mới
+          setHoldTetromino(player.tetromino);
+          resetPlayer();
+        } else {
+          // Swap khối hiện tại với khối hold, orientation về ban đầu
+          setHoldTetromino(player.tetromino);
+          updatePlayerPos({ x: 0, y: 0, collided: false });
+          setTimeout(() => {
+            resetPlayer();
+            updatePlayerPos({ x: 0, y: 0, collided: false });
+          }, 0);
+        }
+        setHasHeld(true);
+      }
+    }
+    
+
+    else if (keyCode === 67) { // C
+  holdSwap();
+}
+
+  };
+
+  const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (gameOver || startGameOverSequence) return;
+    const { keyCode } = e;
+    if (keyCode === 37 || keyCode === 39) {
+        setMoveIntent(null);
+    } else if (keyCode === 40) {
+      setDropTime(1000 / (level + 1) + 200);
+    }
+  };
+
+
+  // Vòng lặp game cho việc RƠI
   useInterval(() => {
     if (!gameOver && !startGameOverSequence) {
         drop();
     }
   }, dropTime);
 
-  // useEffect 1: Điều phối việc tạo khối mới sau khi va chạm
+
+  // Vòng lặp game cho việc DI CHUYỂN NGANG (xử lý DAS)
+  useInterval(() => {
+    if (moveIntent) {
+      const { dir, startTime, dasCharged } = moveIntent;
+      const now = Date.now();
+
+      if (now - startTime > DAS_DELAY && !dasCharged) {
+        if (MOVE_INTERVAL === 0) {
+          movePlayerToSide(dir);
+        }
+        setMoveIntent(prev => prev ? { ...prev, dasCharged: true } : null);
+      }
+    }
+  }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : 16);
+
+  // Vòng lặp game cho việc DI CHUYỂN NGANG (xử lý ARR > 0)
+  useInterval(() => {
+      if(moveIntent && moveIntent.dasCharged && MOVE_INTERVAL > 0) {
+          movePlayer(moveIntent.dir);
+      }
+  }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : null);
+
+  // useEffect điều phối việc tạo khối mới
+
   useEffect(() => {
-    // Chỉ tạo khối mới khi khối cũ đã va chạm VÀ game chưa kết thúc
     if (player.collided && !gameOver) {
-      resetPlayer();
-    }
-  }, [player.collided, gameOver, resetPlayer]);
-  
-  // useEffect 2: Kiểm tra spawn lỗi để bắt đầu hiệu ứng "đè khối"
-  useEffect(() => {
-    const isNewPlayer = !player.collided;
-    if (isNewPlayer && checkCollision(player, stage, { x: 0, y: 0 })) {
+      // Kiểm tra chạm trần ngay khi va chạm
+      if (player.pos.y <= 0) {
+        setGameOver(true);
         setDropTime(null);
-        setStartGameOverSequence(true);
+
+        return;
+      }
+      
+      // Cho phép hold lại ở khối tiếp theo
+      setHasHeld(false);
+
+      // Dùng setTimeout(..., 0) để đẩy việc reset player sang chu trình sự kiện (event loop) tiếp theo.
+      // Mẹo này đảm bảo React có đủ thời gian để cập nhật state `stage` trước khi khối mới được tạo ra.
+      const timer = setTimeout(() => {
+        resetPlayer();
+        setMoveIntent(null);
+      }, 0);
+
+      // Cleanup function để tránh lỗi khi component bị unmount
+      return () => clearTimeout(timer);
+
     }
+  }, [player.collided, gameOver]); // Chỉ phụ thuộc vào player.collided và gameOver
+
+  // useEffect(() => {
+  //   if (waitForStageUpdate) {
+  //     resetPlayer();
+  //     setMoveIntent(null);
+  //     setWaitForStageUpdate(false);
+  //   }
+  // }, [stage, waitForStageUpdate, resetPlayer]);
+  
+  // useEffect kiểm tra spawn lỗi
+  useEffect(() => {
+  // Chỉ kiểm tra game over khi khối mới được spawn (sau khi reset)
+  // Không kiểm tra khi đang hard drop hoặc di chuyển khối hiện tại
+  const isSpawningNewPlayer = player.pos.x === 5 && player.pos.y === 0 && !player.collided;
+  if (isSpawningNewPlayer && checkCollision(player, stage, { x: 0, y: 0 })) {
+    setDropTime(null);
+    setStartGameOverSequence(true);
+  }
   }, [player, stage]);
 
-  // useEffect 3: Thực hiện hiệu ứng "đè khối" và kết thúc game
+  // useEffect thực hiện hiệu ứng "đè khối"
   useEffect(() => {
       if (startGameOverSequence && !gameOver) {
           updatePlayerPos({ x: 0, y: 0, collided: true });
@@ -139,43 +290,82 @@ const Tetris: React.FC = () => {
       }
   }, [startGameOverSequence, gameOver, updatePlayerPos]);
 
-  // Kiểm tra game over khi một khối mới được tạo
-  useEffect(() => {
-    if (player.collided && !gameOver) {
-      // Kiểm tra xem khối mới có bị va chạm ngay tại vị trí xuất hiện không
-      const newPlayer = { ...player, pos: { ...player.pos } };
-      if (checkCollision(newPlayer, stage, { x: 0, y: 0 })) {
-        setGameOver(true);
-        setDropTime(null);
-      }
-    }
-  }, [player, stage, gameOver]);
-
   return (
     <StyledTetrisWrapper
       ref={wrapperRef}
       role="button"
       tabIndex={0}
-      onKeyDown={move}
-      onKeyUp={keyUp}
+
+      onKeyDown={handleKeyDown}
+      onKeyUp={handleKeyUp}
     >
-      <StyledTetris>
-        <Stage stage={stage} player={player} />
-        <aside>
-          {gameOver ? (
-            <Display gameOver={gameOver} text="Game Over" />
-          ) : (
-            <div>
-              <Display text={`Score: ${score}`} />
-              <Display text={`Rows: ${rows}`} />
-              <Display text={`Level: ${level}`} />
-            </div>
-          )}
-          <StartButton callback={startGame} />
-        </aside>
-      </StyledTetris>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          width: "100vw",
+          height: "100vh",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "220px 1fr 260px",
+            gap: 48,
+            alignItems: "center",
+            background: "rgba(255,255,255,0.0)",
+          }}
+        >
+          {/* LEFT: HOLD - hiển thị lại vùng HoldPanel, kèm nút Hold nếu chưa có */}
+          <div style={{ display: "grid", gap: 24, alignItems: "center" }}>
+            <HoldPanel hold={hold} />
+            {!hold && (
+              <button
+                style={{
+                  marginTop: 8,
+                  padding: "6px 18px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#222",
+                  color: "#fff",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                }}
+                onClick={holdSwap}
+              >
+                Hold
+              </button>
+            )}
+          </div>
+
+          {/* CENTER: BOARD giữ nguyên StyledTetris + Stage, trả lại kích thước ban đầu */}
+          <StyledTetris style={{ display: "flex", justifyContent: "center", alignItems: "center", minWidth: 400, minHeight: 720 }}>
+            <Stage stage={stage} />
+          </StyledTetris>
+
+          {/* RIGHT: NEXT + STATS + START - dịch sang phải, tăng gap */}
+          <div style={{ display: "grid", gap: 24, justifyItems: "end" }}>
+            {/* NextPanel hiển thị các khối theo ngăn xếp, spawn theo pop ngăn xếp */}
+            <NextPanel queue={nextFour} />
+            {gameOver ? (
+              <Display gameOver={gameOver} text="Game Over" />
+            ) : (
+              <ScorePanel score={score} rows={rows} level={level} />
+            )}
+            <StartButton callback={startGame} />
+          </div>
+        </div>
+      </div>
+
     </StyledTetrisWrapper>
-  );
+);
+
 };
 
 export default Tetris;
+
+function holdSwap() {
+  throw new Error("Function not implemented.");
+}
