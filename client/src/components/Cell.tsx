@@ -14,7 +14,9 @@ const Cell: React.FC<CellProps> = ({ type }) => {
     tetrominoType = type as keyof typeof TETROMINOES;
   } else if (type === 'ghost') {
     tetrominoType = 'ghost';
-  }else {
+  } else if (type === 'W') {
+    tetrominoType = 'W';
+  } else {
     tetrominoType = 0;
   }
   
