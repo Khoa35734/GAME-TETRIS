@@ -154,23 +154,6 @@ const Tetris: React.FC = () => {
       playerRotate(stage, 1);
     } else if (keyCode === 32) {
       hardDrop();
-    } else if (keyCode === 16) { // Phím Shift để Hold
-      if (!hasHeld) {
-        if (!holdTetromino) {
-          // Lần đầu hold: lưu khối hiện tại, spawn khối mới
-          setHoldTetromino(player.tetromino);
-          resetPlayer();
-        } else {
-          // Swap khối hiện tại với khối hold, orientation về ban đầu
-          setHoldTetromino(player.tetromino);
-          updatePlayerPos({ x: 0, y: 0, collided: false });
-          setTimeout(() => {
-            resetPlayer();
-            updatePlayerPos({ x: 0, y: 0, collided: false });
-          }, 0);
-        }
-        setHasHeld(true);
-      }
     }
     
 
@@ -228,21 +211,18 @@ const Tetris: React.FC = () => {
         setDropTime(null);
         return;
       }
-      
       // Cho phép hold lại ở khối tiếp theo
       setHasHeld(false);
-
-      // Dùng setTimeout(..., 0) để đẩy việc reset player sang chu trình sự kiện (event loop) tiếp theo.
-      // Mẹo này đảm bảo React có đủ thời gian để cập nhật state `stage` trước khi khối mới được tạo ra.
-      const timer = setTimeout(() => {
-        resetPlayer();
-        setMoveIntent(null);
-      }, 0);
-
-      // Cleanup function để tránh lỗi khi component bị unmount
-      return () => clearTimeout(timer);
     }
-  }, [player.collided, gameOver]); // Chỉ phụ thuộc vào player.collided và gameOver
+  }, [player.collided, gameOver]);
+
+  // Reset player chỉ sau khi stage đã cập nhật xong
+  useEffect(() => {
+    if (player.collided && !gameOver) {
+      resetPlayer();
+      setMoveIntent(null);
+    }
+  }, [stage, player.collided, gameOver]);
 
   // useEffect(() => {
   //   if (waitForStageUpdate) {
