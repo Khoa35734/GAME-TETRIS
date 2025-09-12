@@ -1,7 +1,7 @@
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-export const useGameStatus = (rowsCleared: number): [
+export const useGameStatus = (): [
     number,
     React.Dispatch<React.SetStateAction<number>>,
     number,
@@ -13,12 +13,7 @@ export const useGameStatus = (rowsCleared: number): [
   const [rows, setRows] = useState(0);
   const [level, setLevel] = useState(0);
 
-  // Đơn giản: mỗi hàng xóa được -> rows + rowsCleared. Không cộng điểm.
-  useEffect(() => {
-    if (rowsCleared > 0) {
-      setRows((prev) => prev + rowsCleared);
-    }
-  }, [rowsCleared]);
+  // Việc cộng rows sẽ được thực hiện tại Tetris.tsx dựa vào sự kiện clear (clearEventId)
 
   return [score, setScore, rows, setRows, level, setLevel];
 };

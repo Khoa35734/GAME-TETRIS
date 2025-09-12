@@ -1,5 +1,5 @@
 // Import cac panel tu SidePanels
-import { HoldPanel, NextPanel, ScorePanel } from "./SidePanels";
+import { HoldPanel, NextPanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
 import { createStage, checkCollision } from "../gamehelper";
 // Styled Components
@@ -57,9 +57,12 @@ const Tetris: React.FC = () => {
   const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
 
   // hooks game
-  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, nextFour, holdSwap] = usePlayer();
-  const [stage, setStage, rowsCleared] = useStage(player);
-  const [score, setScore, rows, setRows, level, setLevel] = useGameStatus(rowsCleared);
+  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, canHold, nextFour, holdSwap, clearHold] = usePlayer();
+  const [stage, setStage, rowsCleared, clearEventId] = useStage(player);
+  const [, , rows, setRows, level, setLevel] = useGameStatus();
+  const [win, setWin] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [timerOn, setTimerOn] = useState(false);
   // Whiteout sweep for game over
   // progress not exposed to UI; animation drives stage directly
   const whiteoutRaf = useRef<number | null>(null);
@@ -91,9 +94,13 @@ const Tetris: React.FC = () => {
   // reset whiteout
   if (whiteoutRaf.current) cancelAnimationFrame(whiteoutRaf.current);
     setMoveIntent(null);
-    setScore(0);
+  // score removed
     setRows(0);
     setLevel(0);
+  setWin(false);
+  setElapsedMs(0);
+  setTimerOn(true);
+    clearHold(); // reset vùng hold về rỗng khi chơi lại
     setHasHeld(false);
     resetPlayer();
     wrapperRef.current?.focus();
@@ -111,6 +118,7 @@ const Tetris: React.FC = () => {
       if (player.pos.y <= 0) {
         setGameOver(true);
         setDropTime(null);
+        setTimerOn(false); // End game → ngừng bấm giờ
         return;
       }
       // tam dung gravity, doi stage merge roi reset
@@ -128,6 +136,7 @@ const Tetris: React.FC = () => {
     if (finalY <= 0) {
       setGameOver(true);
       setDropTime(null);
+      setTimerOn(false); // End game → ngừng bấm giờ
       return;
     }
     setDropTime(null);
@@ -156,6 +165,7 @@ const Tetris: React.FC = () => {
         if (player.pos.y <= 0) {
           setGameOver(true);
           setDropTime(null);
+          setTimerOn(false); // End game → ngừng bấm giờ
           return;
         }
         setDropTime(null);
@@ -167,7 +177,7 @@ const Tetris: React.FC = () => {
   } else if (keyCode === 32) {
       hardDrop();
   } else if (keyCode === 16) { // Shift -> Hold
-      if (!hasHeld) {
+      if (!hasHeld && canHold) {
         holdSwap();
         setHasHeld(true);
       }
@@ -233,6 +243,7 @@ const Tetris: React.FC = () => {
     if (startGameOverSequence && !gameOver) {
       updatePlayerPos({ x: 0, y: 0, collided: true });
       setGameOver(true);
+      setTimerOn(false);
     }
   }, [startGameOverSequence, gameOver, updatePlayerPos]);
 
@@ -268,6 +279,35 @@ const Tetris: React.FC = () => {
       if (whiteoutRaf.current) cancelAnimationFrame(whiteoutRaf.current);
     };
   }, [gameOver, stage.length, setStage]);
+
+  // Đếm thời gian chơi (ms)
+  useEffect(() => {
+    if (!timerOn) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      setElapsedMs((prev) => prev + (now - last));
+      last = now;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [timerOn]);
+
+  // Cộng rows đúng 1 lần theo sự kiện clear và kiểm tra thắng 150
+  useEffect(() => {
+    if (rowsCleared > 0) {
+      setRows((prev) => prev + rowsCleared);
+    }
+  }, [clearEventId]);
+
+  useEffect(() => {
+    if (!win && rows >= 150) {
+      setWin(true);
+      setTimerOn(false);
+      setDropTime(null);
+    }
+  }, [rows, win]);
 
   return (
     <StyledTetrisWrapper
@@ -337,7 +377,15 @@ const Tetris: React.FC = () => {
   }}
 >
   <NextPanel queue={nextFour} style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10 }} />
-  <ScorePanel score={score} rows={rows} level={level} style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10 }} />
+  <div style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10, color: '#fff' }}>
+    <div style={{ fontWeight: 700, marginBottom: 6 }}>STATUS</div>
+    <div>Rows: {rows} / 150</div>
+    <div>Level: {level}</div>
+    <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
+  </div>
+  {win && (
+    <div style={{ padding: 8, borderRadius: 10, background: 'rgba(0,200,0,0.55)', color: '#fff', textAlign: 'center', fontWeight: 800 }}>You Win!</div>
+  )}
   {gameOver && (
     <div style={{ marginTop: 4 }}>
       <Display gameOver={gameOver} text="Game Over" />
