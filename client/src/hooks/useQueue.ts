@@ -4,34 +4,30 @@ import { useCallback, useMemo, useRef, useState } from "react";
 export type TType = "I" | "J" | "L" | "O" | "S" | "T" | "Z";
 const BAG: TType[] = ["I","J","L","O","S","T","Z"];
 
-const shuffle = <T,>(a: T[]) => {
-  const b = [...a];
-  for (let i = b.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [b[i], b[j]] = [b[j], b[i]];
-  }
-  return b;
-};
+// Note: shuffle was previously used for 7-bag; removed to avoid unused warnings.
 
 export function useQueue(previewSize = 5) {
-  const [queue, setQueue] = useState<TType[]>(() => Array.from({length: previewSize}, () => BAG[Math.floor(Math.random() * BAG.length)]));
-  const lastChosen = useRef<TType>(queue[0]);
+  const initial = Array.from({ length: previewSize }, () => BAG[Math.floor(Math.random() * BAG.length)]);
+  const [queue, setQueue] = useState<TType[]>(initial);
+  const queueRef = useRef<TType[]>(initial);
 
-  // Pop từ đầu queue, push random vào cuối
+  // Xem trước phần tử đầu tiên trong queue (không mutate)
+  const peekNext = useCallback((): TType => {
+    return queueRef.current[0];
+  }, []);
+
+  // Pop từ đầu queue, push random vào cuối (đồng bộ, không buffer)
   const popNext = useCallback((): TType => {
-    let chosen: TType;
-    setQueue(prev => {
-      chosen = prev[0];
-      lastChosen.current = chosen;
-      // Push random vào cuối
-      const newPiece = BAG[Math.floor(Math.random() * BAG.length)];
-      return [...prev.slice(1), newPiece];
-    });
-    return lastChosen.current;
+    const current = queueRef.current;
+    const chosen = current[0];
+    const newPiece = BAG[Math.floor(Math.random() * BAG.length)];
+    const updated = [...current.slice(1), newPiece];
+    queueRef.current = updated;
+    setQueue(updated);
+    return chosen;
   }, []);
 
   const nextN = useMemo(() => queue.slice(0, previewSize), [queue, previewSize]);
 
-  return { nextN, popNext };
+  return { nextN, popNext, peekNext };
 }
-

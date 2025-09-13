@@ -45,7 +45,7 @@ export const checkCollision = (
 
         // 5. Kiểm tra va chạm với các khối đã có trên sân chơi
         // Chỉ kiểm tra khi ô nằm trong sân chơi (newY >= 0)
-        if (newY >= 0 && stage[newY][newX][1] !== 'clear') {
+        if (newY >= 0 && stage[newY][newX][1] !== "clear") {
           return true;
         }
       }
@@ -54,4 +54,15 @@ export const checkCollision = (
 
   // 6. Nếu không có va chạm nào, trả về false
   return false;
+};
+// Hàm tính toán vị trí ghost block
+export const getGhostPosition = (player: Player, stage: Stage): { x: number; y: number } => {
+  if (!player || !stage) return { x: 0, y: 0 };
+
+  const ghost = { ...player, pos: { ...player.pos } };
+
+  while (!checkCollision(ghost, stage, { x: 0, y: 1 })) {
+    ghost.pos.y += 1;
+  }
+  return { x: ghost.pos.x, y: ghost.pos.y };
 };

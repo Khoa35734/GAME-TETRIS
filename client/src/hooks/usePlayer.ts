@@ -1,18 +1,15 @@
-import { useCallback, useMemo, useState } from "react";
-import { STAGE_WIDTH, checkCollision } from "../gamehelper";
+import { useCallback, useMemo, useState, useEffect } from "react";
+import { STAGE_WIDTH, checkCollision, getGhostPosition } from "../gamehelper";
 import { TETROMINOES } from "../components/tetrominos";
 import type { Stage, CellValue } from "./useStage";
 import { useQueue, type TType } from "./useQueue";
-
-
-
-
 
 export type Player = {
   pos: { x: number; y: number };
   tetromino: CellValue[][];
   type: TType;
   collided: boolean;
+  ghostPos?: { x: number; y: number };
 };
 
 const rotate = (m: CellValue[][], dir: number) => {
@@ -20,18 +17,16 @@ const rotate = (m: CellValue[][], dir: number) => {
   return dir > 0 ? r.map(row => row.reverse()) : r.reverse();
 };
 
-export const usePlayer = (): [
+export const usePlayer = (stage: Stage): [
   Player,
   (pos: { x: number; y: number; collided: boolean }) => void,
   () => void,
   (stage: Stage, dir: number) => void,
-  // các giá trị thêm cho UI tetr.io:
-  TType | null,   // hold
-  TType[],        // nextFour
-  () => void      // holdSwap
+  TType | null,
+  TType[],
+  () => void
 ] => {
   const { nextN, popNext } = useQueue(5); // 5 khối hiển thị
-
 
   const [player, setPlayer] = useState<Player>({
     pos: { x: 0, y: 0 },
@@ -54,15 +49,15 @@ export const usePlayer = (): [
   };
 
   const spawnFromQueue = useCallback(() => {
-  const t = popNext();  // ✅ lấy khối đầu tiên, push random vào cuối
-  setPlayer({
-    pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
-    tetromino: TETROMINOES[t].shape,
-    type: t,
-    collided: false,
-  });
-  setCanHold(true);
-}, [popNext]);
+    const t = popNext();  // ✅ lấy khối đầu tiên, push random vào cuối
+    setPlayer({
+      pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
+      tetromino: TETROMINOES[t].shape,
+      type: t,
+      collided: false,
+    });
+    setCanHold(true);
+  }, [popNext]);
 
   const resetPlayer = useCallback(() => {
     spawnFromQueue();
@@ -88,23 +83,32 @@ export const usePlayer = (): [
   };
 
   const holdSwap = useCallback(() => {
-  if (!canHold) return;
-  setPlayer(p => {
-    if (hold === null) {
-      setHold(p.type);
-  const t = popNext(); // ✅ cũng lấy khối đầu tiên, push random vào cuối
-      setCanHold(false);
-      return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
-    } else {
-      const t = hold;
-      setHold(p.type);
-      setCanHold(false);
-      return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
-    }
-  });
-}, [canHold, hold, popNext]);
+    if (!canHold) return;
+    setPlayer(p => {
+      if (hold === null) {
+        setHold(p.type);
+        const t = popNext(); // ✅ cũng lấy khối đầu tiên, push random vào cuối
+        setCanHold(false);
+        return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
+      } else {
+        const t = hold;
+        setHold(p.type);
+        setCanHold(false);
+        return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
+      }
+    });
+  }, [canHold, hold, popNext]);
 
- 
+
+ // Thêm useEffect tính ghostPos
+ useEffect(() => {
+  if (player && stage) {
+    const ghost = getGhostPosition(player, stage);
+    setPlayer((prev) => ({ ...prev, ghostPos: ghost }));
+  }
+}, [player, stage]);
+
+  // Trả về player có ghostPos
   return [
     player,
     updatePlayerPos,
