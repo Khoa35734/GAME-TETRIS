@@ -14,6 +14,8 @@ type Tetrominoes = {
 
 export const TETROMINOES: Tetrominoes = {
   0: { shape: [[0]], color: "0, 0, 0" },
+  ghost: { shape: [["G"]], color: "255, 255, 255" },
+  W: { shape: [["W"]], color: "255, 255, 255" },
   I: {
     shape: [
       [0, "I", 0, 0],
@@ -55,13 +57,14 @@ export const TETROMINOES: Tetrominoes = {
     color: "48, 211, 56",
   },
   T: {
-    shape: [
-      [0, 0, 0],
-      ["T", "T", "T"],
-      [0, "T", 0],
-    ],
-    color: "132, 61, 198",
-  },
+  shape: [
+    [0, 0, 0],
+    ["T", "T", "T"],
+    [0, "T", 0],
+    
+  ],
+  color: "132, 61, 198",
+},
   Z: {
     shape: [
       ["Z", "Z", 0],
