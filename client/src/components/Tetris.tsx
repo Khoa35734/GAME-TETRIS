@@ -1,7 +1,7 @@
 // Import cac panel tu SidePanels
 import { HoldPanel, NextPanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
-import { createStage, checkCollision } from "../gamehelper";
+import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from "../gamehelper";
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
 
@@ -49,6 +49,7 @@ const Tetris: React.FC = () => {
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(3); // 3-2-1
 
   // dong bo lock
   const [locking, setLocking] = useState(false);
@@ -72,15 +73,28 @@ const Tetris: React.FC = () => {
     wrapperRef.current?.focus();
   }, []);
 
+  // Đếm ngược khi vào màn single
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      // tự động bắt đầu trò chơi sau đếm ngược
+      startGame();
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => (c ?? 0) - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
   const movePlayer = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking) return;
+    if (gameOver || startGameOverSequence || locking || countdown !== null) return;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
     }
   };
 
   const movePlayerToSide = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking) return;
+    if (gameOver || startGameOverSequence || locking || countdown !== null) return;
     let distance = 0;
     while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) distance += 1;
     if (distance > 0) updatePlayerPos({ x: dir * distance, y: 0, collided: false });
@@ -107,6 +121,7 @@ const Tetris: React.FC = () => {
   };
 
   const drop = (): void => {
+    if (countdown !== null) return;
     if (rows > (level + 1) * 10) {
       const newLevel = level + 1;
       setLevel((prev) => prev + 1);
@@ -115,7 +130,8 @@ const Tetris: React.FC = () => {
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-      if (player.pos.y <= 0) {
+      // Điều kiện game over mới: có merge trong vùng buffer
+      if (isGameOverFromBuffer(stage)) {
         setGameOver(true);
         setDropTime(null);
         setTimerOn(false); // End game → ngừng bấm giờ
@@ -123,13 +139,19 @@ const Tetris: React.FC = () => {
       }
       // tam dung gravity, doi stage merge roi reset
       setDropTime(null);
+      // T-Spin detection: khi khối sắp được khoá
+      const tspin = (player.type === 'T') && isTSpin(player as any, stage as any);
+      if (tspin) {
+        // Bạn có thể thay console.log bằng cập nhật điểm/hiệu ứng
+        console.log('T-Spin!');
+      }
       setLocking(true);
       updatePlayerPos({ x: 0, y: 0, collided: true });
     }
   };
 
   const hardDrop = (): void => {
-    if (gameOver || startGameOverSequence) return;
+    if (gameOver || startGameOverSequence || countdown !== null) return;
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
     const finalY = player.pos.y + dropDistance;
@@ -146,7 +168,7 @@ const Tetris: React.FC = () => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence) return;
+    if (gameOver || startGameOverSequence || countdown !== null) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
       e.stopPropagation();
@@ -185,7 +207,7 @@ const Tetris: React.FC = () => {
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence) return;
+    if (gameOver || startGameOverSequence || countdown !== null) return;
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) setMoveIntent(null);
   else if (keyCode === 40) setDropTime(getFallSpeed(level));
@@ -345,7 +367,8 @@ const Tetris: React.FC = () => {
           >
             <StyledTetris>
               <div style={{ transform: `translate(${BOARD_SHIFT_X}px, ${BOARD_SHIFT_Y}px)` }}>
-                <Stage stage={stage} />
+                {/* Trong đếm ngược vẫn hiển thị board nhưng không có khối */}
+                <Stage stage={countdown !== null ? createStage() : stage} />
               </div>
             </StyledTetris>
 
@@ -400,6 +423,20 @@ const Tetris: React.FC = () => {
           {/* Start/Game Over moved under the right panel */}
         </div>
       </div>
+
+      {/* Overlay countdown */}
+      {countdown !== null && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, display: 'grid', placeItems: 'center',
+            background: 'rgba(0,0,0,0.15)', backdropFilter: 'blur(1px)',
+            color: '#fff', fontSize: 80, fontWeight: 800,
+            textShadow: '0 6px 24px rgba(0,0,0,0.4)'
+          }}
+        >
+          {countdown}
+        </div>
+      )}
     </StyledTetrisWrapper>
   );
 };

@@ -1,21 +1,22 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { StyledTetrisWrapper } from "./styles/StyledTetris";
 
 const HomeMenu: React.FC = () => {
   return (
-    <div style={{ width: "100%", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <StyledTetrisWrapper style={{ display: 'grid', placeItems: 'center' }}>
       <div
         style={{
-          width: "min(520px, 92vw)",
-          display: "flex",
-          flexDirection: "column",
+          width: 'min(520px, 92vw)',
+          display: 'flex',
+          flexDirection: 'column',
           gap: 16,
           padding: 24,
           borderRadius: 16,
-          background: "rgba(20,20,22,0.35)",
-          backdropFilter: "blur(6px)",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-          textAlign: "center",
+          background: 'rgba(20,20,22,0.35)',
+          backdropFilter: 'blur(6px)',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
+          textAlign: 'center',
         }}
       >
         <h1 style={{ margin: 0, letterSpacing: 1 }}>TETRIS</h1>
@@ -31,7 +32,7 @@ const HomeMenu: React.FC = () => {
           Dùng phím mũi tên/ASDW để di chuyển, Space để thả nhanh.
         </div>
       </div>
-    </div>
+    </StyledTetrisWrapper>
   );
 };
 
