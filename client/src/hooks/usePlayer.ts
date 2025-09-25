@@ -1,18 +1,16 @@
+
 import { useCallback, useState } from "react";
 import { STAGE_WIDTH, checkCollision } from "../gamehelper";
 import { TETROMINOES } from "../components/tetrominos";
 import type { Stage, CellValue } from "./useStage";
 import { useQueue, type TType } from "./useQueue";
 
-
-
-
-
 export type Player = {
   pos: { x: number; y: number };
   tetromino: CellValue[][];
   type: TType;
   collided: boolean;
+  ghostPos?: { x: number; y: number };
 };
 
 const rotate = (m: CellValue[][], dir: number) => {
@@ -20,7 +18,7 @@ const rotate = (m: CellValue[][], dir: number) => {
   return dir > 0 ? r.map(row => row.reverse()) : r.reverse();
 };
 
-export const usePlayer = (): [
+export const usePlayer = (stage: Stage): [
   Player,
   (pos: { x: number; y: number; collided: boolean }) => void,
   () => void,
@@ -33,7 +31,6 @@ export const usePlayer = (): [
   () => void      // clearHold
 ] => {
   const { nextN, popNext, peekNext } = useQueue(5); // 5 khối hiển thị
-
 
   const [player, setPlayer] = useState<Player>({
     pos: { x: 0, y: 0 },
@@ -149,7 +146,16 @@ export const usePlayer = (): [
     // Không bật canHold ở đây; spawnFromQueue sẽ bật khi đã có current hợp lệ từ queue
   }, []);
 
- 
+
+ // Thêm useEffect tính ghostPos
+ useEffect(() => {
+  if (player && stage) {
+    const ghost = getGhostPosition(player, stage);
+    setPlayer((prev) => ({ ...prev, ghostPos: ghost }));
+  }
+}, [player, stage]);
+
+  // Trả về player có ghostPos
   return [
     player,
     updatePlayerPos,

@@ -8,6 +8,7 @@ type Props = {
 export const StyledStage = styled.div<Props>`
   --boardW: clamp(340px, 20vw, 480px);
   --cell: calc(var(--boardW) / ${(props) => props.width});
+
   display: grid;
   grid-template-rows: repeat(
     ${(props) => props.height},
@@ -44,4 +45,5 @@ export const StyledStage = styled.div<Props>`
     pointer-events: none;
     box-shadow: inset 2px 0 0 #333, inset -2px 0 0 #333;
   }
+
 `;

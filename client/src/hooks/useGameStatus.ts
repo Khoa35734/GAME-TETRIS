@@ -17,4 +17,3 @@ export const useGameStatus = (): [
 
   return [score, setScore, rows, setRows, level, setLevel];
 };
-
