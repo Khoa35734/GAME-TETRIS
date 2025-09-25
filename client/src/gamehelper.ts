@@ -9,7 +9,8 @@ export type Cell = [string | number, string];
 export type Stage = Cell[][];
 
 export const STAGE_WIDTH: number = 12;
-export const STAGE_HEIGHT: number = 20;
+export const END_BUFFER_ROWS: number = 3; // số hàng trên cùng ẩn cho điều kiện end game
+export const STAGE_HEIGHT: number = 20 + END_BUFFER_ROWS;
 
 // Tạo bóng chơi (ghost)
 export const getGhostPiecePosition = (player: Player, stage: Stage): { x: number; y: number } => {
@@ -45,7 +46,7 @@ export const checkCollision = (
           return true;
         }
 
-        // Kiểm tra va chạm với đáy sân chơi
+        // Kiểm tra va chạm với đáy sân chơi (chiều cao đã gồm buffer)
         if (newY >= STAGE_HEIGHT) {
           return true;
         }
@@ -89,4 +90,40 @@ export const getGhostTetromino = (player: Player): (string | number)[][] => {
   return player.tetromino.map(row => 
     row.map(cell => cell !== 0 ? 'ghost' : 0)
   );
+};
+
+// Kiểm tra end game: có ô đã merged nằm trong vùng buffer (3 hàng trên cùng)
+export const isGameOverFromBuffer = (stage: Stage): boolean => {
+  for (let y = 0; y < END_BUFFER_ROWS; y++) {
+    for (let x = 0; x < STAGE_WIDTH; x++) {
+      const cell = stage[y][x];
+      if (cell && cell[1] === 'merged' && cell[0] !== 0 && cell[0] !== '0') {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+// Hỗ trợ: một ô được xem là "chiếm chỗ" nếu ngoài biên hoặc stage[y][x] không 'clear'
+export const isOccupied = (stage: Stage, x: number, y: number): boolean => {
+  if (x < 0 || x >= STAGE_WIDTH || y < 0 || y >= STAGE_HEIGHT) return true;
+  return stage[y][x][1] !== 'clear';
+};
+
+// Phát hiện T-Spin đơn giản: 3/4 góc quanh tâm T bị chiếm + khối hiện tại là T
+export const isTSpin = (player: Player, stage: Stage): boolean => {
+  // Chỉ áp dụng cho T; giả định matrix 3x3 bao quanh tâm tại (1,1)
+  // Nếu không phải 3x3 thì phép kiểm vẫn hợp lệ cho T guideline tiêu chuẩn của ta
+  const cx = player.pos.x + 1;
+  const cy = player.pos.y + 1;
+  const corners = [
+    [cx - 1, cy - 1],
+    [cx + 1, cy - 1],
+    [cx - 1, cy + 1],
+    [cx + 1, cy + 1],
+  ];
+  let occ = 0;
+  for (const [x, y] of corners) if (isOccupied(stage, x, y)) occ++;
+  return occ >= 3;
 };

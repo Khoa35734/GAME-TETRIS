@@ -1,7 +1,7 @@
 // Import cac panel tu SidePanels
 import { HoldPanel, NextPanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
-import { createStage, checkCollision } from "../gamehelper";
+import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from "../gamehelper";
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
 
@@ -24,6 +24,9 @@ const INITIAL_SPEED_MS = 1000; // tốc độ Level 1 (level state = 0)
 const SPEED_FACTOR = 0.85;     // < 1 → càng về sau càng nhanh
 const MIN_SPEED_MS = 60;       // tránh quá nhanh
 const getFallSpeed = (lvl: number) => Math.max(MIN_SPEED_MS, Math.round(INITIAL_SPEED_MS * Math.pow(SPEED_FACTOR, lvl)));
+// Dual-timer lock logic
+const INACTIVITY_LOCK_MS = 750; // Không thao tác trong 0.75s kể từ lần thao tác cuối khi đang chạm đất → lock
+const HARD_CAP_MS = 3000;        // Sau 3s kể từ lúc chạm đất đầu tiên: mọi thao tác khi vẫn chạm → lock ngay
 
 // --- THAM SO VI TRI PANEL (chinh tai day) ---
 const PANEL_WIDTH = 120;     // do rong khung preview
@@ -49,9 +52,18 @@ const Tetris: React.FC = () => {
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(3); // 3-2-1
 
   // dong bo lock
   const [locking, setLocking] = useState(false);
+  // trạng thái chạm đất + timers
+  const [isGrounded, setIsGrounded] = useState(false);
+  const inactivityTimeoutRef = useRef<number | null>(null);
+  const capTimeoutRef = useRef<number | null>(null);
+  const capExpiredRef = useRef<boolean>(false);
+  const groundedSinceRef = useRef<number | null>(null);
+  const lastGroundActionRef = useRef<number | null>(null);
+  const prevPlayerRef = useRef<{ x: number; y: number; rotKey: string } | null>(null);
 
   // DAS/ARR
   const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
@@ -72,15 +84,28 @@ const Tetris: React.FC = () => {
     wrapperRef.current?.focus();
   }, []);
 
+  // Đếm ngược khi vào màn single
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      // tự động bắt đầu trò chơi sau đếm ngược
+      startGame();
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => (c ?? 0) - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
   const movePlayer = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking) return;
+    if (gameOver || startGameOverSequence || locking || countdown !== null) return;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
     }
   };
 
   const movePlayerToSide = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking) return;
+    if (gameOver || startGameOverSequence || locking || countdown !== null) return;
     let distance = 0;
     while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) distance += 1;
     if (distance > 0) updatePlayerPos({ x: dir * distance, y: 0, collided: false });
@@ -88,7 +113,7 @@ const Tetris: React.FC = () => {
 
   const startGame = (): void => {
     setStage(createStage());
-  setDropTime(getFallSpeed(0));
+    setDropTime(getFallSpeed(0));
     setGameOver(false);
     setStartGameOverSequence(false);
   // reset whiteout
@@ -97,16 +122,96 @@ const Tetris: React.FC = () => {
   // score removed
     setRows(0);
     setLevel(0);
-  setWin(false);
-  setElapsedMs(0);
-  setTimerOn(true);
+    setWin(false);
+    setElapsedMs(0);
+    setTimerOn(true);
     clearHold(); // reset vùng hold về rỗng khi chơi lại
     setHasHeld(false);
+    // clear lock timers + grounded
+    if (inactivityTimeoutRef.current) { clearTimeout(inactivityTimeoutRef.current); inactivityTimeoutRef.current = null; }
+    if (capTimeoutRef.current) { clearTimeout(capTimeoutRef.current); capTimeoutRef.current = null; }
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
     resetPlayer();
     wrapperRef.current?.focus();
   };
 
+  // Helpers cho lock delay
+  const clearInactivity = () => {
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+      inactivityTimeoutRef.current = null;
+    }
+  };
+  const clearCap = () => {
+    if (capTimeoutRef.current) {
+      clearTimeout(capTimeoutRef.current);
+      capTimeoutRef.current = null;
+    }
+  };
+
+  const doLock = () => {
+    // Khóa khối sau delay: kiểm tra game over và T-Spin, rồi cập nhật collided
+    if (isGameOverFromBuffer(stage)) {
+      setGameOver(true);
+      setDropTime(null);
+      setTimerOn(false);
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
+      return;
+    }
+    const tspin = (player.type === 'T') && isTSpin(player as any, stage as any);
+    if (tspin) console.log('T-Spin!');
+    setLocking(true);
+    clearInactivity();
+    clearCap();
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
+    updatePlayerPos({ x: 0, y: 0, collided: true });
+  };
+
+  const startGroundTimers = () => {
+    setIsGrounded(true);
+    const now = Date.now();
+    const firstTouch = groundedSinceRef.current == null;
+    groundedSinceRef.current = groundedSinceRef.current ?? now; // set once
+    lastGroundActionRef.current = now;
+    // reset inactivity each time ground is (re)entered
+    clearInactivity();
+    inactivityTimeoutRef.current = window.setTimeout(() => {
+      doLock(); // không thao tác 2s → lock
+    }, INACTIVITY_LOCK_MS);
+    // start hard cap only once at first touch
+    if (firstTouch && !capTimeoutRef.current) {
+      capExpiredRef.current = false;
+      capTimeoutRef.current = window.setTimeout(() => {
+        capExpiredRef.current = true; // sau 3s từ lúc chạm đất đầu tiên
+      }, HARD_CAP_MS);
+    }
+  };
+
+  const onGroundAction = () => {
+    // gọi khi có di chuyển/rotate mà vẫn đang chạm đất
+    if (capExpiredRef.current) {
+      doLock();
+      return;
+    }
+    lastGroundActionRef.current = Date.now();
+    // reset inactivity timer
+    clearInactivity();
+    inactivityTimeoutRef.current = window.setTimeout(() => doLock(), INACTIVITY_LOCK_MS);
+  };
+
   const drop = (): void => {
+    if (countdown !== null) return;
     if (rows > (level + 1) * 10) {
       const newLevel = level + 1;
       setLevel((prev) => prev + 1);
@@ -115,21 +220,14 @@ const Tetris: React.FC = () => {
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-      if (player.pos.y <= 0) {
-        setGameOver(true);
-        setDropTime(null);
-        setTimerOn(false); // End game → ngừng bấm giờ
-        return;
-      }
-      // tam dung gravity, doi stage merge roi reset
+      // Chạm đất: tạm dừng gravity và (re)start timers
       setDropTime(null);
-      setLocking(true);
-      updatePlayerPos({ x: 0, y: 0, collided: true });
+      startGroundTimers();
     }
   };
 
   const hardDrop = (): void => {
-    if (gameOver || startGameOverSequence) return;
+    if (gameOver || startGameOverSequence || countdown !== null) return;
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
     const finalY = player.pos.y + dropDistance;
@@ -139,14 +237,21 @@ const Tetris: React.FC = () => {
       setTimerOn(false); // End game → ngừng bấm giờ
       return;
     }
+    // Hard drop: khóa ngay, bỏ qua delay
     setDropTime(null);
     setLocking(true);
+    clearInactivity();
+    clearCap();
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
     if (dropDistance > 0) updatePlayerPos({ x: 0, y: dropDistance, collided: true });
     else updatePlayerPos({ x: 0, y: 0, collided: true });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence) return;
+    if (gameOver || startGameOverSequence || countdown !== null) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
       e.stopPropagation();
@@ -162,18 +267,15 @@ const Tetris: React.FC = () => {
       if (!checkCollision(player, stage, { x: 0, y: 1 })) {
         updatePlayerPos({ x: 0, y: 1, collided: false });
       } else {
-        if (player.pos.y <= 0) {
-          setGameOver(true);
-          setDropTime(null);
-          setTimerOn(false); // End game → ngừng bấm giờ
-          return;
-        }
-        setDropTime(null);
-        setLocking(true);
-        updatePlayerPos({ x: 0, y: 0, collided: true });
+        // Soft drop nhưng đã chạm đất → áp dụng timers, không khóa ngay
+        startGroundTimers();
       }
     } else if (keyCode === 38) {
-      if (!locking) playerRotate(stage, 1);
+      if (!locking) {
+        playerRotate(stage, 1);
+        // nếu vẫn chạm đất sau xoay → coi như 1 thao tác trên đất
+        if (checkCollision(player, stage, { x: 0, y: 1 })) onGroundAction();
+      }
   } else if (keyCode === 32) {
       hardDrop();
   } else if (keyCode === 16) { // Shift -> Hold
@@ -185,10 +287,10 @@ const Tetris: React.FC = () => {
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence) return;
+    if (gameOver || startGameOverSequence || countdown !== null) return;
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) setMoveIntent(null);
-  else if (keyCode === 40) setDropTime(getFallSpeed(level));
+    else if (keyCode === 40) setDropTime(isGrounded ? null : getFallSpeed(level));
   };
 
   // ROI
@@ -227,6 +329,12 @@ const Tetris: React.FC = () => {
       setMoveIntent(null);
       setLocking(false);
   setDropTime(getFallSpeed(level));
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
     }
   }, [stage, locking, player.collided, gameOver, level, resetPlayer]);
 
@@ -244,6 +352,12 @@ const Tetris: React.FC = () => {
       updatePlayerPos({ x: 0, y: 0, collided: true });
       setGameOver(true);
       setTimerOn(false);
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
     }
   }, [startGameOverSequence, gameOver, updatePlayerPos]);
 
@@ -309,6 +423,52 @@ const Tetris: React.FC = () => {
     }
   }, [rows, win]);
 
+  // Theo dõi thay đổi player/stage để (re)start/cancel lock delay dựa trên trạng thái chạm đất
+  useEffect(() => {
+    // detect player changes
+    const currKey = JSON.stringify(player.tetromino);
+    const prev = prevPlayerRef.current;
+    prevPlayerRef.current = { x: player.pos.x, y: player.pos.y, rotKey: currKey };
+
+    if (gameOver || startGameOverSequence || countdown !== null) {
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
+      return;
+    }
+    if (player.collided) return; // đã khóa rồi, đợi reset
+    const touching = checkCollision(player, stage, { x: 0, y: 1 });
+    if (touching) {
+      // bắt đầu timers nếu mới chạm
+      if (!isGrounded) startGroundTimers();
+      else {
+        // nếu đã chạm: kiểm tra xem có thao tác (di chuyển/rotate) hay không
+        if (
+          prev && (prev.x !== player.pos.x || prev.y !== player.pos.y || prev.rotKey !== currKey)
+        ) {
+          onGroundAction();
+        }
+      }
+    } else {
+      // Nhấc khỏi đất: hủy timers và tiếp tục gravity
+      if (isGrounded) {
+        clearInactivity();
+        clearCap();
+        capExpiredRef.current = false;
+        groundedSinceRef.current = null;
+        lastGroundActionRef.current = null;
+        setIsGrounded(false);
+        setDropTime(getFallSpeed(level));
+      }
+    }
+  }, [player, stage, gameOver, startGameOverSequence, countdown, level, isGrounded]);
+
+  // Dọn dẹp khi unmount
+  useEffect(() => () => { clearInactivity(); clearCap(); }, []);
+
   return (
     <StyledTetrisWrapper
       ref={wrapperRef}
@@ -345,7 +505,8 @@ const Tetris: React.FC = () => {
           >
             <StyledTetris>
               <div style={{ transform: `translate(${BOARD_SHIFT_X}px, ${BOARD_SHIFT_Y}px)` }}>
-                <Stage stage={stage} />
+                {/* Trong đếm ngược vẫn hiển thị board nhưng không có khối */}
+                <Stage stage={countdown !== null ? createStage() : stage} />
               </div>
             </StyledTetris>
 
@@ -400,6 +561,20 @@ const Tetris: React.FC = () => {
           {/* Start/Game Over moved under the right panel */}
         </div>
       </div>
+
+      {/* Overlay countdown */}
+      {countdown !== null && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, display: 'grid', placeItems: 'center',
+            background: 'rgba(0,0,0,0.15)', backdropFilter: 'blur(1px)',
+            color: '#fff', fontSize: 80, fontWeight: 800,
+            textShadow: '0 6px 24px rgba(0,0,0,0.4)'
+          }}
+        >
+          {countdown}
+        </div>
+      )}
     </StyledTetrisWrapper>
   );
 };

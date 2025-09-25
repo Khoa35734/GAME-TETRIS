@@ -4,9 +4,10 @@ import { TETROMINOES } from "./tetrominos";
 
 interface CellProps {
   type: string | number;
+  isBuffer?: boolean;
 }
 
-const Cell: React.FC<CellProps> = ({ type }) => {
+const Cell: React.FC<CellProps> = ({ type, isBuffer }) => {
   // Xác định loại tetromino và màu sắc
   let tetrominoType: keyof typeof TETROMINOES;
   
@@ -26,8 +27,7 @@ const Cell: React.FC<CellProps> = ({ type }) => {
   }
   
   const color = TETROMINOES[tetrominoType].color;
-  
-  return <StyledCell type={type} color={color} />;
+  return <StyledCell type={type} color={color} isBuffer={isBuffer} />;
 };
 
 export default Cell;

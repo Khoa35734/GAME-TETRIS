@@ -57,15 +57,47 @@ export const usePlayer = (): [
   };
 
   const spawnFromQueue = useCallback(() => {
-  const t = popNext();  // ✅ lấy khối đầu tiên, push random vào cuối
-  setPlayer({
-    pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
-    tetromino: TETROMINOES[t].shape,
-    type: t,
-    collided: false,
-  });
-  setCanHold(true);
-}, [popNext]);
+    const t = popNext();  // lấy khối đầu tiên, push random vào cuối
+    const base = TETROMINOES[t].shape;
+    // Tính 4 thế xoay (0, 90, 180, 270)
+    const rotations = [0,1,2,3].map(r => {
+      let matOriginal = base;
+      const rot = (m: any[][]) => {
+        const rt = m.map((_, i2) => m.map(c => c[i2]));
+        return rt.map(row => row.reverse());
+      };
+      for (let i = 0; i < r; i++) matOriginal = rot(matOriginal as any) as any;
+      // Tính kích thước thực tế cho tiêu chí chọn (không dùng để chơi)
+      const mat = matOriginal as any[][];
+      let topIdx = 0;
+      while (topIdx < mat.length && mat[topIdx].every(v => v === 0)) topIdx++;
+      let bottomIdx = mat.length - 1;
+      while (bottomIdx >= 0 && mat[bottomIdx].every(v => v === 0)) bottomIdx--;
+      const height = Math.max(0, bottomIdx - topIdx + 1);
+      let leftIdx = 0;
+      let rightIdx = (mat[0]?.length || 0) - 1;
+      const isEmptyCol = (col: number) => mat.every(row => row[col] === 0);
+      while (leftIdx <= rightIdx && isEmptyCol(leftIdx)) leftIdx++;
+      while (rightIdx >= leftIdx && isEmptyCol(rightIdx)) rightIdx--;
+      const width = Math.max(0, rightIdx - leftIdx + 1);
+      return { r, matOriginal, height, width };
+    });
+    // Ưu tiên: height nhỏ nhất (nằm ngang nhất), tie-break width lớn nhất
+    rotations.sort((a,b) => (a.height - b.height) || (b.width - a.width));
+    const best = rotations[0];
+  const pieceWidth = best.width || (best.matOriginal[0]?.length || 0);
+    const startX = Math.floor((STAGE_WIDTH - pieceWidth) / 2);
+    // Spawn ngay dưới vùng buffer để có không gian xoay/rơi
+    const startY = 0; // chúng ta giữ 0 vì stage đã có buffer; vẽ/ẩn top đã xử lý trong Stage.tsx
+
+    setPlayer({
+      pos: { x: startX, y: startY },
+  tetromino: best.matOriginal as any,
+      type: t,
+      collided: false,
+    });
+    setCanHold(true);
+  }, [popNext]);
 
   const resetPlayer = useCallback(() => {
     spawnFromQueue();
