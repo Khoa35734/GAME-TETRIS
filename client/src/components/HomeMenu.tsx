@@ -26,6 +26,7 @@ const HomeMenu: React.FC = () => {
           <Link to="/single"><button style={{ fontSize: 18, fontWeight: 700 }}>Chơi đơn</button></Link>
           <Link to="/online"><button>Chơi trực tuyến</button></Link>
           <Link to="/settings"><button>Cài đặt</button></Link>
+          <Link to="/admin"><button style={{ background:'linear-gradient(90deg,#9333ea,#6366f1)', color:'#fff' }}>Admin Dashboard</button></Link>
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>

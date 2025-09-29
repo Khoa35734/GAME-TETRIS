@@ -3,6 +3,8 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
+import { initRedis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch } from './redisStore';
+import { initPostgres } from './postgres';
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -52,22 +54,29 @@ type Room = {
   gen: Generator<TType, any, any>;
   players: Map<string, PlayerState>;
   started: boolean;
+  seed: number;
 };
 
 const rooms = new Map<string, Room>();
 
+initRedis().catch(err => console.error('[redis] init failed', err));
+initPostgres().catch(err => console.error('[postgres] init skipped/failed', err));
+
 io.on('connection', (socket) => {
   socket.on('room:create', (roomId: string, cb?: (ok: boolean) => void) => {
     if (rooms.has(roomId)) return cb?.(false);
+    const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
     rooms.set(roomId, {
       id: roomId,
       host: socket.id,
-      gen: bagGenerator(Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0)),
+      gen: bagGenerator(seed),
       players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0 }]]),
       started: false,
+      seed,
     });
     socket.join(roomId);
     cb?.(true);
+    saveRoom(rooms.get(roomId));
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
   });
 
@@ -77,6 +86,7 @@ io.on('connection', (socket) => {
     r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0 });
     socket.join(roomId);
     cb?.(true);
+    saveRoom(r);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
   });
 
@@ -85,8 +95,8 @@ io.on('connection', (socket) => {
     if (!r) return;
     r.players.delete(socket.id);
     socket.leave(roomId);
-    if (r.players.size === 0) rooms.delete(roomId);
-    else io.to(roomId).emit('room:update', roomSnapshot(roomId));
+    if (r.players.size === 0) { rooms.delete(roomId); deleteRoom(roomId); }
+    else { saveRoom(r); io.to(roomId).emit('room:update', roomSnapshot(roomId)); }
   });
 
   socket.on('room:ready', (roomId: string, ready: boolean) => {
@@ -95,6 +105,7 @@ io.on('connection', (socket) => {
     const p = r.players.get(socket.id);
     if (!p) return;
     p.ready = ready;
+    saveRoom(r);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
   });
 
@@ -104,6 +115,7 @@ io.on('connection', (socket) => {
     if (![...r.players.values()].every(p => p.ready)) return;
     r.started = true;
     const first = nextPieces(r.gen, 14); // 14 = 7 preview + current for both sides typically
+    saveRoom(r);
     io.to(roomId).emit('game:start', { next: first });
   });
 
@@ -142,6 +154,7 @@ io.on('connection', (socket) => {
     for (const [sid, sp] of r.players) {
       if (sid !== socket.id && sp.alive) io.to(sid).emit('game:garbage', g);
     }
+    saveRoom(r);
   });
 
   socket.on('game:topout', (roomId: string) => {
@@ -150,6 +163,7 @@ io.on('connection', (socket) => {
     const p = r.players.get(socket.id);
     if (!p) return;
     p.alive = false;
+    saveRoom(r);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
     const alive = [...r.players.values()].filter(p => p.alive);
     if (alive.length <= 1) {
@@ -157,15 +171,59 @@ io.on('connection', (socket) => {
       r.started = false;
       // reset ready state
       r.players.forEach(pl => { pl.ready = false; pl.alive = true; pl.combo = 0; pl.b2b = 0; });
+      saveRoom(r);
     }
+  });
+
+  // Ranked queue events
+  socket.on('ranked:enter', async (playerId: string, elo: number, cb?: (ok:boolean)=>void) => {
+    try { await addToRankedQueue(playerId, elo); cb?.(true); } catch { cb?.(false); }
+  });
+  socket.on('ranked:leave', async (playerId: string) => { await removeFromRankedQueue(playerId); });
+  socket.on('ranked:match', async (playerId: string, elo: number, cb?: (data:any)=>void) => {
+    // Try to pop an opponent (excluding self if already in queue)
+    const opponent = await popBestMatch(elo, 150, playerId);
+    if (!opponent) {
+      // No opponent yet, ensure we are in queue
+      await addToRankedQueue(playerId, elo);
+      return cb?.({ match: null });
+    }
+    if (opponent.playerId === playerId) {
+      // Safety: shouldn't happen due to exclude, but guard
+      await addToRankedQueue(playerId, elo);
+      return cb?.({ match: null });
+    }
+    // Create ephemeral room for the match
+    const roomId = `rk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
+    const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+    const room: Room = {
+      id: roomId,
+      host: playerId, // arbitrarily assign requester as host
+      gen: bagGenerator(seed),
+      players: new Map([
+        [playerId, { id: playerId, ready: true, alive: true, combo: 0, b2b: 0 }],
+        [opponent.playerId, { id: opponent.playerId, ready: true, alive: true, combo: 0, b2b: 0 }]
+      ]),
+      started: true,
+      seed,
+    };
+    rooms.set(roomId, room);
+    saveRoom(room);
+    // Notify both sockets if connected
+    io.to(playerId).emit('ranked:found', { roomId, opponent: opponent.playerId, elo: opponent.elo });
+    io.to(opponent.playerId).emit('ranked:found', { roomId, opponent: playerId, elo });
+    const first = nextPieces(room.gen, 14);
+    io.to(playerId).emit('game:start', { next: first, roomId });
+    io.to(opponent.playerId).emit('game:start', { next: first, roomId });
+    cb?.({ match: { roomId, opponent: opponent.playerId, elo: opponent.elo } });
   });
 
   socket.on('disconnect', () => {
     for (const [roomId, r] of rooms) {
       if (r.players.has(socket.id)) {
         r.players.delete(socket.id);
-        io.to(roomId).emit('room:update', roomSnapshot(roomId));
-        if (r.players.size === 0) rooms.delete(roomId);
+        if (r.players.size === 0) { rooms.delete(roomId); deleteRoom(roomId); }
+        else { saveRoom(r); io.to(roomId).emit('room:update', roomSnapshot(roomId)); }
       }
     }
   });

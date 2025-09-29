@@ -6,6 +6,7 @@ import OnlineMenu from "./components/OnlineMenu";
 import Versus from "./components/Versus";
 import OnlineCreateRoom from "./components/OnlineCreateRoom";
 import OnlineJoinRoom from "./components/OnlineJoinRoom";
+import AdminDashboard from "./components/admin/AdminDashboard";
 
 const App: React.FC = () => {
   return (
@@ -18,6 +19,7 @@ const App: React.FC = () => {
   <Route path="/online/create" element={<OnlineCreateRoom />} />
   <Route path="/online/join" element={<OnlineJoinRoom />} />
         <Route path="/settings" element={<div style={{ padding: 16 }}><h2>Cài đặt</h2><p>Tuỳ chọn sẽ sớm có mặt.</p></div>} />
+  <Route path="/admin" element={<AdminDashboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
