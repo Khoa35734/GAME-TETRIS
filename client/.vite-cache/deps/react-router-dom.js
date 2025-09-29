@@ -335,7 +335,7 @@ var require_set_cookie = __commonJS({
   }
 });
 
-// node_modules/react-router/dist/development/chunk-PVWAREVJ.mjs
+// node_modules/react-router/dist/development/chunk-B7RQU5TL.mjs
 var React = __toESM(require_react(), 1);
 var React2 = __toESM(require_react(), 1);
 var React3 = __toESM(require_react(), 1);
@@ -697,13 +697,13 @@ function createBrowserURLImpl(to, isAbsolute = false) {
   }
   return new URL(href2, base);
 }
-function unstable_createContext(defaultValue) {
+function createContext4(defaultValue) {
   return { defaultValue };
 }
 var _map;
-var unstable_RouterContextProvider = class {
+var RouterContextProvider = class {
   /**
-   * Create a new `unstable_RouterContextProvider` instance
+   * Create a new `RouterContextProvider` instance
    * @param init An optional initial context map to populate the provider with
    */
   constructor(init) {
@@ -763,7 +763,7 @@ var unsupportedLazyRouteFunctionKeys = /* @__PURE__ */ new Set([
   "path",
   "id",
   "index",
-  "unstable_middleware",
+  "middleware",
   "children"
 ]);
 function isUnsupportedLazyRouteFunctionKey(key) {
@@ -1799,7 +1799,7 @@ function createRouter(init) {
       pendingNavigationController.signal,
       opts && opts.submission
     );
-    let scopedContext = init.unstable_getContext ? await init.unstable_getContext() : new unstable_RouterContextProvider();
+    let scopedContext = init.getContext ? await init.getContext() : new RouterContextProvider();
     let pendingActionResult;
     if (opts && opts.pendingError) {
       pendingActionResult = [
@@ -2089,7 +2089,7 @@ function createRouter(init) {
       pendingActionResult
     );
     pendingNavigationLoadId = ++incrementingLoadId;
-    if (!init.dataStrategy && !dsMatches.some((m) => m.shouldLoad) && !dsMatches.some((m) => m.route.unstable_middleware) && revalidatingFetchers.length === 0) {
+    if (!init.dataStrategy && !dsMatches.some((m) => m.shouldLoad) && !dsMatches.some((m) => m.route.middleware) && revalidatingFetchers.length === 0) {
       let updatedFetchers2 = markFetchRedirectsDone();
       completeNavigation(
         location2,
@@ -2243,7 +2243,7 @@ function createRouter(init) {
       setFetcherError(key, routeId, error, { flushSync: flushSync3 });
       return;
     }
-    let scopedContext = init.unstable_getContext ? await init.unstable_getContext() : new unstable_RouterContextProvider();
+    let scopedContext = init.getContext ? await init.getContext() : new RouterContextProvider();
     let preventScrollReset = (opts && opts.preventScrollReset) === true;
     if (submission && isMutationMethod(submission.formMethod)) {
       await handleFetcherAction(
@@ -3094,13 +3094,13 @@ function createStaticHandler(routes, opts) {
     skipLoaderErrorBubbling,
     skipRevalidation,
     dataStrategy,
-    unstable_generateMiddlewareResponse: generateMiddlewareResponse
+    generateMiddlewareResponse
   } = {}) {
     let url = new URL(request.url);
     let method = request.method;
     let location2 = createLocation("", createPath(url), null, "default");
     let matches = matchRoutes(dataRoutes, location2, basename);
-    requestContext = requestContext != null ? requestContext : new unstable_RouterContextProvider();
+    requestContext = requestContext != null ? requestContext : new RouterContextProvider();
     if (!isValidMethod(method) && method !== "HEAD") {
       let error = getInternalRouterError(405, { method });
       let { matches: methodNotAllowedMatches, route } = getShortCircuitMatches(dataRoutes);
@@ -3138,8 +3138,8 @@ function createStaticHandler(routes, opts) {
     }
     if (generateMiddlewareResponse) {
       invariant(
-        requestContext instanceof unstable_RouterContextProvider,
-        "When using middleware in `staticHandler.query()`, any provided `requestContext` must be an instance of `unstable_RouterContextProvider`"
+        requestContext instanceof RouterContextProvider,
+        "When using middleware in `staticHandler.query()`, any provided `requestContext` must be an instance of `RouterContextProvider`"
       );
       try {
         await loadLazyMiddlewareForMatches(
@@ -3168,7 +3168,7 @@ function createStaticHandler(routes, opts) {
                   dataStrategy || null,
                   skipLoaderErrorBubbling === true,
                   null,
-                  "filterMatchesToLoad" in opts2 ? opts2.filterMatchesToLoad ?? null : null,
+                  "filterMatchesToLoad" in opts2 ? opts2.filterMatchesToLoad ?? null : filterMatchesToLoad ?? null,
                   skipRevalidation === true
                 );
                 if (isResponse(result2)) {
@@ -3266,13 +3266,13 @@ function createStaticHandler(routes, opts) {
     routeId,
     requestContext,
     dataStrategy,
-    unstable_generateMiddlewareResponse: generateMiddlewareResponse
+    generateMiddlewareResponse
   } = {}) {
     let url = new URL(request.url);
     let method = request.method;
     let location2 = createLocation("", createPath(url), null, "default");
     let matches = matchRoutes(dataRoutes, location2, basename);
-    requestContext = requestContext != null ? requestContext : new unstable_RouterContextProvider();
+    requestContext = requestContext != null ? requestContext : new RouterContextProvider();
     if (!isValidMethod(method) && method !== "HEAD" && method !== "OPTIONS") {
       throw getInternalRouterError(405, { method });
     } else if (!matches) {
@@ -3289,8 +3289,8 @@ function createStaticHandler(routes, opts) {
     }
     if (generateMiddlewareResponse) {
       invariant(
-        requestContext instanceof unstable_RouterContextProvider,
-        "When using middleware in `staticHandler.queryRoute()`, any provided `requestContext` must be an instance of `unstable_RouterContextProvider`"
+        requestContext instanceof RouterContextProvider,
+        "When using middleware in `staticHandler.queryRoute()`, any provided `requestContext` must be an instance of `RouterContextProvider`"
       );
       await loadLazyMiddlewareForMatches(matches, manifest, mapRouteProperties2);
       let response = await runServerMiddlewarePipeline(
@@ -4280,11 +4280,11 @@ function isNonNullable(value) {
 }
 function loadLazyMiddlewareForMatches(matches, manifest, mapRouteProperties2) {
   let promises = matches.map(({ route }) => {
-    if (typeof route.lazy !== "object" || !route.lazy.unstable_middleware) {
+    if (typeof route.lazy !== "object" || !route.lazy.middleware) {
       return void 0;
     }
     return loadLazyRouteProperty({
-      key: "unstable_middleware",
+      key: "middleware",
       route,
       manifest,
       mapRouteProperties: mapRouteProperties2
@@ -4302,7 +4302,7 @@ async function defaultDataStrategy(args) {
   return keyedResults;
 }
 async function defaultDataStrategyWithMiddleware(args) {
-  if (!args.matches.some((m) => m.route.unstable_middleware)) {
+  if (!args.matches.some((m) => m.route.middleware)) {
     return defaultDataStrategy(args);
   }
   return runClientMiddlewarePipeline(args, () => defaultDataStrategy(args));
@@ -4356,7 +4356,7 @@ function runClientMiddlewarePipeline(args, handler) {
 async function runMiddlewarePipeline(args, handler, processResult, isResult, errorHandler) {
   let { matches, request, params, context } = args;
   let tuples = matches.flatMap(
-    (m) => m.route.unstable_middleware ? m.route.unstable_middleware.map((fn) => [m.route.id, fn]) : []
+    (m) => m.route.middleware ? m.route.middleware.map((fn) => [m.route.id, fn]) : []
   );
   let result = await callRouteMiddleware(
     { request, params, context },
@@ -4419,7 +4419,7 @@ async function callRouteMiddleware(args, middlewares, handler, processResult, is
 }
 function getDataStrategyMatchLazyPromises(mapRouteProperties2, manifest, request, match, lazyRoutePropertiesToSkip) {
   let lazyMiddlewarePromise = loadLazyRouteProperty({
-    key: "unstable_middleware",
+    key: "middleware",
     route: match.route,
     manifest,
     mapRouteProperties: mapRouteProperties2
@@ -4519,9 +4519,9 @@ async function callDataStrategyImpl(dataStrategyImpl, request, matches, fetcherK
     context: scopedContext,
     matches
   };
-  let unstable_runClientMiddleware = isStaticHandler ? () => {
+  let runClientMiddleware = isStaticHandler ? () => {
     throw new Error(
-      "You cannot call `unstable_runClientMiddleware()` from a static handler `dataStrategy`. Middleware is run outside of `dataStrategy` during SSR in order to bubble up the Response.  You can enable middleware via the `respond` API in `query`/`queryRoute`"
+      "You cannot call `runClientMiddleware()` from a static handler `dataStrategy`. Middleware is run outside of `dataStrategy` during SSR in order to bubble up the Response.  You can enable middleware via the `respond` API in `query`/`queryRoute`"
     );
   } : (cb) => {
     let typedDataStrategyArgs = dataStrategyArgs;
@@ -4529,9 +4529,9 @@ async function callDataStrategyImpl(dataStrategyImpl, request, matches, fetcherK
       return cb({
         ...typedDataStrategyArgs,
         fetcherKey,
-        unstable_runClientMiddleware: () => {
+        runClientMiddleware: () => {
           throw new Error(
-            "Cannot call `unstable_runClientMiddleware()` from within an `unstable_runClientMiddleware` handler"
+            "Cannot call `runClientMiddleware()` from within an `runClientMiddleware` handler"
           );
         }
       });
@@ -4540,7 +4540,7 @@ async function callDataStrategyImpl(dataStrategyImpl, request, matches, fetcherK
   let results = await dataStrategyImpl({
     ...dataStrategyArgs,
     fetcherKey,
-    unstable_runClientMiddleware
+    runClientMiddleware
   });
   try {
     await Promise.all(
@@ -5256,6 +5256,7 @@ var FetchersContext = React.createContext(
 FetchersContext.displayName = "Fetchers";
 var AwaitContext = React.createContext(null);
 AwaitContext.displayName = "Await";
+var AwaitContextProvider = (props) => React.createElement(AwaitContext.Provider, props);
 var NavigationContext = React.createContext(
   null
 );
@@ -5960,7 +5961,7 @@ var hydrationRouteProperties = [
 function createMemoryRouter(routes, opts) {
   return createRouter({
     basename: opts?.basename,
-    unstable_getContext: opts?.unstable_getContext,
+    getContext: opts?.getContext,
     future: opts?.future,
     history: createMemoryHistory({
       initialEntries: opts?.initialEntries,
@@ -7347,9 +7348,6 @@ var ESCAPE_REGEX = /[&><\u2028\u2029]/g;
 function escapeHtml(html) {
   return html.replace(ESCAPE_REGEX, (match) => ESCAPE_LOOKUP[match]);
 }
-function createHtml(html) {
-  return { __html: html };
-}
 function invariant2(value, message) {
   if (value === false || value === null || typeof value === "undefined") {
     throw new Error(message);
@@ -7443,7 +7441,7 @@ function getTurboStreamSingleFetchDataStrategy(getRouter, manifest, routeModules
     ssr,
     basename
   );
-  return async (args) => args.unstable_runClientMiddleware(dataStrategy);
+  return async (args) => args.runClientMiddleware(dataStrategy);
 }
 function getSingleFetchDataStrategyImpl(getRouter, getRouteInfo, fetchAndDecode, ssr, basename, shouldAllowOptOut = () => true) {
   return async (args) => {
@@ -8218,7 +8216,7 @@ function createClientRoutes(manifest, routeModulesCache, initialState, ssr, isSp
       Object.assign(dataRoute, {
         ...dataRoute,
         ...getRouteComponents(route, routeModule, isSpaMode),
-        unstable_middleware: routeModule.unstable_clientMiddleware,
+        middleware: routeModule.clientMiddleware,
         handle: routeModule.handle,
         shouldRevalidate: getShouldRevalidateFunction(
           dataRoute.path,
@@ -8360,17 +8358,14 @@ function createClientRoutes(manifest, routeModulesCache, initialState, ssr, isSp
             }
           });
         } : void 0,
-        unstable_middleware: route.hasClientMiddleware ? async () => {
-          let { unstable_clientMiddleware } = route.clientMiddlewareModule ? await import(
+        middleware: route.hasClientMiddleware ? async () => {
+          let { clientMiddleware } = route.clientMiddlewareModule ? await import(
             /* @vite-ignore */
             /* webpackIgnore: true */
             route.clientMiddlewareModule
           ) : await getLazyRoute();
-          invariant2(
-            unstable_clientMiddleware,
-            "No `unstable_clientMiddleware` export found"
-          );
-          return unstable_clientMiddleware;
+          invariant2(clientMiddleware, "No `clientMiddleware` export found");
+          return clientMiddleware;
         } : void 0,
         shouldRevalidate: async () => {
           let lazyRoute = await getLazyRoute();
@@ -8451,7 +8446,7 @@ async function loadRouteModuleWithBlockingLinks(route, routeModules) {
   return {
     Component: getRouteModuleComponent(routeModule),
     ErrorBoundary: routeModule.ErrorBoundary,
-    unstable_clientMiddleware: routeModule.unstable_clientMiddleware,
+    clientMiddleware: routeModule.clientMiddleware,
     clientAction: routeModule.clientAction,
     clientLoader: routeModule.clientLoader,
     handle: routeModule.handle,
@@ -8999,7 +8994,7 @@ function Meta() {
           {
             key: `script:ld+json:${json}`,
             type: "application/ld+json",
-            dangerouslySetInnerHTML: { __html: json }
+            dangerouslySetInnerHTML: { __html: escapeHtml(json) }
           }
         );
       } catch (err) {
@@ -9104,7 +9099,7 @@ import(${JSON.stringify(manifest.entry.module)});`;
       {
         ...scriptProps,
         suppressHydrationWarning: true,
-        dangerouslySetInnerHTML: createHtml(contextScript),
+        dangerouslySetInnerHTML: { __html: contextScript },
         type: void 0
       }
     ), React8.createElement(
@@ -9112,7 +9107,7 @@ import(${JSON.stringify(manifest.entry.module)});`;
       {
         ...scriptProps,
         suppressHydrationWarning: true,
-        dangerouslySetInnerHTML: createHtml(routeModulesScript),
+        dangerouslySetInnerHTML: { __html: routeModulesScript },
         type: "module",
         async: true
       }
@@ -9285,14 +9280,14 @@ var isBrowser = typeof window !== "undefined" && typeof window.document !== "und
 try {
   if (isBrowser) {
     window.__reactRouterVersion = // @ts-expect-error
-    "7.8.2";
+    "7.9.1";
   }
 } catch (e) {
 }
 function createBrowserRouter(routes, opts) {
   return createRouter({
     basename: opts?.basename,
-    unstable_getContext: opts?.unstable_getContext,
+    getContext: opts?.getContext,
     future: opts?.future,
     history: createBrowserHistory({ window: opts?.window }),
     hydrationData: opts?.hydrationData || parseHydrationData(),
@@ -9307,7 +9302,7 @@ function createBrowserRouter(routes, opts) {
 function createHashRouter(routes, opts) {
   return createRouter({
     basename: opts?.basename,
-    unstable_getContext: opts?.unstable_getContext,
+    getContext: opts?.getContext,
     future: opts?.future,
     history: createHashHistory({ window: opts?.window }),
     hydrationData: opts?.hydrationData || parseHydrationData(),
@@ -10290,7 +10285,7 @@ function createStaticRouter(routes, context, opts = {}) {
     },
     get future() {
       return {
-        unstable_middleware: false,
+        v8_middleware: false,
         ...opts?.future
       };
     },
@@ -10390,7 +10385,7 @@ function htmlEscape(str) {
   return str.replace(ESCAPE_REGEX2, (match) => ESCAPE_LOOKUP2[match]);
 }
 
-// node_modules/react-router/dist/development/chunk-5UALIXAM.mjs
+// node_modules/react-router/dist/development/chunk-SKNKB5VI.mjs
 var React12 = __toESM(require_react(), 1);
 var React22 = __toESM(require_react(), 1);
 var import_cookie = __toESM(require_dist(), 1);
@@ -10479,7 +10474,7 @@ function createRoutesStub(routes, _context) {
       frameworkContextRef.current = {
         future: {
           unstable_subResourceIntegrity: future?.unstable_subResourceIntegrity === true,
-          unstable_middleware: future?.unstable_middleware === true
+          v8_middleware: future?.v8_middleware === true
         },
         manifest: {
           routes: {},
@@ -10496,7 +10491,7 @@ function createRoutesStub(routes, _context) {
         // @ts-expect-error `StubRouteObject` is stricter about `loader`/`action`
         // types compared to `AgnosticRouteObject`
         convertRoutesToDataRoutes(routes, (r) => r),
-        _context !== void 0 ? _context : future?.unstable_middleware ? new unstable_RouterContextProvider() : {},
+        _context !== void 0 ? _context : future?.v8_middleware ? new RouterContextProvider() : {},
         frameworkContextRef.current.manifest,
         frameworkContextRef.current.routeModules
       );
@@ -10923,7 +10918,7 @@ function createStaticHandlerDataRoutes(manifest, future, parentId = "", routesBy
       hasErrorBoundary: route.id === "root" || route.module.ErrorBoundary != null,
       id: route.id,
       path: route.path,
-      unstable_middleware: route.module.unstable_middleware,
+      middleware: route.module.middleware,
       // Need to use RR's version in the param typed here to permit the optional
       // context even though we know it'll always be provided in remix
       loader: route.module.loader ? async (args) => {
@@ -10987,19 +10982,8 @@ function createStaticHandlerDataRoutes(manifest, future, parentId = "", routesBy
     };
   });
 }
-var ESCAPE_LOOKUP3 = {
-  "&": "\\u0026",
-  ">": "\\u003e",
-  "<": "\\u003c",
-  "\u2028": "\\u2028",
-  "\u2029": "\\u2029"
-};
-var ESCAPE_REGEX3 = /[&><\u2028\u2029]/g;
-function escapeHtml2(html) {
-  return html.replace(ESCAPE_REGEX3, (match) => ESCAPE_LOOKUP3[match]);
-}
 function createServerHandoffString(serverHandoff) {
-  return escapeHtml2(JSON.stringify(serverHandoff));
+  return escapeHtml(JSON.stringify(serverHandoff));
 }
 function getDocumentHeaders(context, build) {
   return getDocumentHeadersImpl(context, (m) => {
@@ -11087,7 +11071,7 @@ async function singleFetchAction(build, serverMode, staticHandler, request, hand
       requestContext: loadContext,
       skipLoaderErrorBubbling: true,
       skipRevalidation: true,
-      unstable_generateMiddlewareResponse: build.future.unstable_middleware ? async (query) => {
+      generateMiddlewareResponse: build.future.v8_middleware ? async (query) => {
         try {
           let innerResult = await query(handlerRequest);
           return handleQueryResult(innerResult);
@@ -11151,7 +11135,7 @@ async function singleFetchLoaders(build, serverMode, staticHandler, request, han
       requestContext: loadContext,
       filterMatchesToLoad: (m) => !loadRouteIds || loadRouteIds.has(m.route.id),
       skipLoaderErrorBubbling: true,
-      unstable_generateMiddlewareResponse: build.future.unstable_middleware ? async (query) => {
+      generateMiddlewareResponse: build.future.v8_middleware ? async (query) => {
         try {
           let innerResult = await query(handlerRequest);
           return handleQueryResult(innerResult);
@@ -11366,15 +11350,15 @@ var createRequestHandler = (build, mode) => {
         request
       });
     };
-    if (_build.future.unstable_middleware) {
-      if (initialContext && !(initialContext instanceof unstable_RouterContextProvider)) {
+    if (_build.future.v8_middleware) {
+      if (initialContext && !(initialContext instanceof RouterContextProvider)) {
         let error = new Error(
-          "Invalid `context` value provided to `handleRequest`. When middleware is enabled you must return an instance of `unstable_RouterContextProvider` from your `getLoadContext` function."
+          "Invalid `context` value provided to `handleRequest`. When middleware is enabled you must return an instance of `RouterContextProvider` from your `getLoadContext` function."
         );
         handleError(error);
         return returnLastResortErrorResponse(error, serverMode);
       }
-      loadContext = initialContext || new unstable_RouterContextProvider();
+      loadContext = initialContext || new RouterContextProvider();
     } else {
       loadContext = initialContext || {};
     }
@@ -11602,7 +11586,7 @@ async function handleDocumentRequest(serverMode, build, staticHandler, request, 
   try {
     let result = await staticHandler.query(request, {
       requestContext: loadContext,
-      unstable_generateMiddlewareResponse: build.future.unstable_middleware ? async (query) => {
+      generateMiddlewareResponse: build.future.v8_middleware ? async (query) => {
         try {
           let innerResult = await query(request);
           if (!isResponse(innerResult)) {
@@ -11738,7 +11722,7 @@ async function handleResourceRequest(serverMode, build, staticHandler, routeId, 
     let result = await staticHandler.queryRoute(request, {
       routeId,
       requestContext: loadContext,
-      unstable_generateMiddlewareResponse: build.future.unstable_middleware ? async (queryRoute) => {
+      generateMiddlewareResponse: build.future.v8_middleware ? async (queryRoute) => {
         try {
           let innerResult = await queryRoute(request);
           return handleQueryRouteResult(innerResult);
@@ -11950,24 +11934,36 @@ function createMemorySessionStorage({ cookie } = {}) {
 }
 function href(path, ...args) {
   let params = args[0];
-  return path.split("/").map((segment) => {
-    if (segment === "*") {
-      return params ? params["*"] : void 0;
+  let result = path.replace(/\/*\*?$/, "").replace(
+    /\/:([\w-]+)(\?)?/g,
+    // same regex as in .\router\utils.ts: compilePath().
+    (_, param, questionMark) => {
+      const isRequired = questionMark === void 0;
+      const value = params ? params[param] : void 0;
+      if (isRequired && value === void 0) {
+        throw new Error(
+          `Path '${path}' requires param '${param}' but it was not provided`
+        );
+      }
+      return value === void 0 ? "" : "/" + value;
     }
-    const match = segment.match(/^:([\w-]+)(\?)?/);
-    if (!match) return segment;
-    const param = match[1];
-    const value = params ? params[param] : void 0;
-    const isRequired = match[2] === void 0;
-    if (isRequired && value === void 0) {
-      throw Error(
-        `Path '${path}' requires param '${param}' but it was not provided`
-      );
+  );
+  if (path.endsWith("*")) {
+    const value = params ? params["*"] : void 0;
+    if (value !== void 0) {
+      result += "/" + value;
     }
-    return value;
-  }).filter((segment) => segment !== void 0).join("/");
+  }
+  return result || "/";
 }
-function getHydrationData(state, routes, getRouteInfo, location2, basename, isSpaMode) {
+function getHydrationData({
+  state,
+  routes,
+  getRouteInfo,
+  location: location2,
+  basename,
+  isSpaMode
+}) {
   let hydrationData = {
     ...state,
     loaderData: { ...state.loaderData }
@@ -12212,7 +12208,7 @@ function createCallServer({
 function createRouterFromPayload({
   fetchImplementation,
   createFromReadableStream,
-  unstable_getContext,
+  getContext,
   payload
 }) {
   const globalVar = window;
@@ -12250,17 +12246,17 @@ function createRouterFromPayload({
   }, []);
   globalVar.__reactRouterDataRouter = createRouter({
     routes,
-    unstable_getContext,
+    getContext,
     basename: payload.basename,
     history: createBrowserHistory(),
-    hydrationData: getHydrationData(
-      {
+    hydrationData: getHydrationData({
+      state: {
         loaderData: payload.loaderData,
         actionData: payload.actionData,
         errors: payload.errors
       },
       routes,
-      (routeId) => {
+      getRouteInfo: (routeId) => {
         let match = payload.matches.find((m) => m.id === routeId);
         invariant(match, "Route not found in payload");
         return {
@@ -12269,10 +12265,10 @@ function createRouterFromPayload({
           hasHydrateFallback: match.hydrateFallbackElement != null
         };
       },
-      payload.location,
-      void 0,
-      false
-    ),
+      location: payload.location,
+      basename: payload.basename,
+      isSpaMode: false
+    }),
     async patchRoutesOnNavigation({ path, signal }) {
       if (discoveredPaths2.has(path)) {
         return;
@@ -12360,7 +12356,7 @@ function createRouterFromPayload({
     routeModules: globalVar.__reactRouterRouteModules
   };
 }
-var renderedRoutesContext = unstable_createContext();
+var renderedRoutesContext = createContext4();
 function getRSCSingleFetchDataStrategy(getRouter, ssr, basename, createFromReadableStream, fetchImplementation) {
   let dataStrategy = getSingleFetchDataStrategyImpl(
     getRouter,
@@ -12387,7 +12383,7 @@ function getRSCSingleFetchDataStrategy(getRouter, ssr, basename, createFromReada
       return M.route.hasComponent && !M.route.element;
     }
   );
-  return async (args) => args.unstable_runClientMiddleware(async () => {
+  return async (args) => args.runClientMiddleware(async () => {
     let context = args.context;
     context.set(renderedRoutesContext, []);
     let results = await dataStrategy(args);
@@ -12473,22 +12469,17 @@ function RSCHydratedRouter({
   fetch: fetchImplementation = fetch,
   payload,
   routeDiscovery = "eager",
-  unstable_getContext
+  getContext
 }) {
   if (payload.type !== "render") throw new Error("Invalid payload type");
   let { router: router2, routeModules } = React42.useMemo(
     () => createRouterFromPayload({
       payload,
       fetchImplementation,
-      unstable_getContext,
+      getContext,
       createFromReadableStream
     }),
-    [
-      createFromReadableStream,
-      payload,
-      fetchImplementation,
-      unstable_getContext
-    ]
+    [createFromReadableStream, payload, fetchImplementation, getContext]
   );
   React42.useEffect(() => {
     setIsHydrated();
@@ -12560,7 +12551,7 @@ function RSCHydratedRouter({
     future: {
       // These flags have no runtime impact so can always be false.  If we add
       // flags that drive runtime behavior they'll need to be proxied through.
-      unstable_middleware: false,
+      v8_middleware: false,
       unstable_subResourceIntegrity: false
     },
     isSpaMode: false,
@@ -12846,19 +12837,48 @@ async function routeRSCServerRequest({
   if (!serverResponse.body) {
     throw new Error("Missing body in server response");
   }
+  const detectRedirectResponse = serverResponse.clone();
   let serverResponseB = null;
   if (hydrate2) {
     serverResponseB = serverResponse.clone();
   }
   const body = serverResponse.body;
-  let payloadPromise;
+  let buffer;
+  let streamControllers = [];
+  const createStream = () => {
+    if (!buffer) {
+      buffer = [];
+      return body.pipeThrough(
+        new TransformStream({
+          transform(chunk, controller) {
+            buffer.push(chunk);
+            controller.enqueue(chunk);
+            streamControllers.forEach((c) => c.enqueue(chunk));
+          },
+          flush() {
+            streamControllers.forEach((c) => c.close());
+            streamControllers = [];
+          }
+        })
+      );
+    }
+    return new ReadableStream({
+      start(controller) {
+        buffer.forEach((chunk) => controller.enqueue(chunk));
+        streamControllers.push(controller);
+      }
+    });
+  };
   const getPayload = async () => {
-    if (payloadPromise) return payloadPromise;
-    payloadPromise = createFromReadableStream(body);
-    return payloadPromise;
+    return createFromReadableStream(createStream());
   };
   try {
-    const payload = await getPayload();
+    if (!detectRedirectResponse.body) {
+      throw new Error("Failed to clone server response");
+    }
+    const payload = await createFromReadableStream(
+      detectRedirectResponse.body
+    );
     if (serverResponse.status === SINGLE_FETCH_REDIRECT_STATUS && payload.type === "redirect") {
       const headers2 = new Headers(serverResponse.headers);
       headers2.delete("Content-Encoding");
@@ -12969,7 +12989,7 @@ function RSCStaticRouter({ getPayload }) {
     future: {
       // These flags have no runtime impact so can always be false.  If we add
       // flags that drive runtime behavior they'll need to be proxied through.
-      unstable_middleware: false,
+      v8_middleware: false,
       unstable_subResourceIntegrity: false
     },
     isSpaMode: false,
@@ -13106,7 +13126,7 @@ function initSsrInfo() {
   }
 }
 function createHydratedRouter({
-  unstable_getContext
+  getContext
 }) {
   initSsrInfo();
   if (!ssrInfo) {
@@ -13150,18 +13170,18 @@ function createHydratedRouter({
       };
     }
   } else {
-    hydrationData = getHydrationData(
-      ssrInfo.context.state,
+    hydrationData = getHydrationData({
+      state: ssrInfo.context.state,
       routes,
-      (routeId) => ({
+      getRouteInfo: (routeId) => ({
         clientLoader: ssrInfo.routeModules[routeId]?.clientLoader,
         hasLoader: ssrInfo.manifest.routes[routeId]?.hasLoader === true,
         hasHydrateFallback: ssrInfo.routeModules[routeId]?.HydrateFallback != null
       }),
-      window.location,
-      window.__reactRouterContext?.basename,
-      ssrInfo.context.isSpaMode
-    );
+      location: window.location,
+      basename: window.__reactRouterContext?.basename,
+      isSpaMode: ssrInfo.context.isSpaMode
+    });
     if (hydrationData && hydrationData.errors) {
       hydrationData.errors = deserializeErrors2(hydrationData.errors);
     }
@@ -13170,12 +13190,12 @@ function createHydratedRouter({
     routes,
     history: createBrowserHistory(),
     basename: ssrInfo.context.basename,
-    unstable_getContext,
+    getContext,
     hydrationData,
     hydrationRouteProperties,
     mapRouteProperties,
     future: {
-      unstable_middleware: ssrInfo.context.future.unstable_middleware
+      middleware: ssrInfo.context.future.v8_middleware
     },
     dataStrategy: getTurboStreamSingleFetchDataStrategy(
       () => router2,
@@ -13206,7 +13226,7 @@ function createHydratedRouter({
 function HydratedRouter(props) {
   if (!router) {
     router = createHydratedRouter({
-      unstable_getContext: props.unstable_getContext
+      getContext: props.getContext
     });
   }
   let [criticalCss, setCriticalCss] = React23.useState(
@@ -13293,6 +13313,7 @@ export {
   PrefetchPageLinks,
   Route,
   Router,
+  RouterContextProvider,
   RouterProvider2 as RouterProvider,
   Routes,
   Scripts,
@@ -13300,6 +13321,7 @@ export {
   ServerRouter,
   StaticRouter,
   StaticRouterProvider,
+  AwaitContextProvider as UNSAFE_AwaitContextProvider,
   DataRouterContext as UNSAFE_DataRouterContext,
   DataRouterStateContext as UNSAFE_DataRouterStateContext,
   ErrorResponseImpl as UNSAFE_ErrorResponseImpl,
@@ -13335,6 +13357,7 @@ export {
   withErrorBoundaryProps as UNSAFE_withErrorBoundaryProps,
   withHydrateFallbackProps as UNSAFE_withHydrateFallbackProps,
   createBrowserRouter,
+  createContext4 as createContext,
   createCookie,
   createCookieSessionStorage,
   createHashRouter,
@@ -13367,9 +13390,7 @@ export {
   HistoryRouter as unstable_HistoryRouter,
   RSCHydratedRouter as unstable_RSCHydratedRouter,
   RSCStaticRouter as unstable_RSCStaticRouter,
-  unstable_RouterContextProvider,
   createCallServer as unstable_createCallServer,
-  unstable_createContext,
   getRSCStream as unstable_getRSCStream,
   routeRSCServerRequest as unstable_routeRSCServerRequest,
   setDevServerHooks as unstable_setDevServerHooks,
@@ -13406,12 +13427,12 @@ export {
 };
 /*! Bundled license information:
 
-react-router/dist/development/chunk-PVWAREVJ.mjs:
-react-router/dist/development/chunk-5UALIXAM.mjs:
+react-router/dist/development/chunk-B7RQU5TL.mjs:
+react-router/dist/development/chunk-SKNKB5VI.mjs:
 react-router/dist/development/dom-export.mjs:
 react-router/dist/development/index.mjs:
   (**
-   * react-router v7.8.2
+   * react-router v7.9.1
    *
    * Copyright (c) Remix Software Inc.
    *
@@ -13423,7 +13444,7 @@ react-router/dist/development/index.mjs:
 
 react-router-dom/dist/index.mjs:
   (**
-   * react-router-dom v7.8.2
+   * react-router-dom v7.9.1
    *
    * Copyright (c) Remix Software Inc.
    *

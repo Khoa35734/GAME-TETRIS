@@ -28,4 +28,5 @@ export const StyledCell = styled.div<Props>`
     if (props.type === 'ghost') return 'rgba(0,0,0,0.35)';
     return '#000';
   }};
+
 `;
