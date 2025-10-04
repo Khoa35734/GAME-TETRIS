@@ -29,5 +29,19 @@ export function useQueue(previewSize = 5) {
 
   const nextN = useMemo(() => queue.slice(0, previewSize), [queue, previewSize]);
 
-  return { nextN, popNext, peekNext };
+  // External controls for server-synced queues
+  const setSeed = useCallback((pieces: TType[]) => {
+    const seed = pieces.length >= previewSize ? pieces.slice(0, pieces.length) : [...pieces];
+    queueRef.current = seed;
+    setQueue(seed);
+  }, [previewSize]);
+
+  const pushMany = useCallback((pieces: TType[]) => {
+    if (!pieces || pieces.length === 0) return;
+    const updated = [...queueRef.current, ...pieces];
+    queueRef.current = updated;
+    setQueue(updated);
+  }, []);
+
+  return { nextN, popNext, peekNext, setSeed, pushMany };
 }
