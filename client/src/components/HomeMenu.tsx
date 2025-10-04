@@ -50,9 +50,9 @@ const HomeMenu: React.FC = () => {
   // Animate statistics with a single interval
   const animateStats = () => {
     const targets = {
-      totalPlayers: 9466792,
-      gamesPlayed: 894264989,
-      hoursPlayed: 43006822,
+      totalPlayers: 3,
+      gamesPlayed: 6,
+      hoursPlayed: 9,
     };
 
     const increments = {
@@ -336,36 +336,18 @@ const HomeMenu: React.FC = () => {
           flexDirection: "column",
         }}
       >
-        {/* Logo */}
-        <div
-          style={{
-            textAlign: "center",
-            marginBottom: "40px",
-            animation: "pulse 2s infinite",
-          }}
-        >
+                    {/* Logo Game */}
+        <div style={{ textAlign: "center", marginBottom: "20px" }}>
           <img
-            src="/path/to/your/logo.png" // Replace with the actual path to your logo file
-            alt="TETR.IO Logo"
+            src="/logogame.webp"
+            alt="Logo Game"
             style={{
-              width: "200px",
+              width: "150px",
               height: "auto",
-              filter: "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)",
-              transition: "transform 0.3s ease, filter 0.3s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "scale(1.1)";
-              e.currentTarget.style.filter =
-                "drop-shadow(0 0 15px #4ecdc4) drop-shadow(0 0 30px #ff6b6b)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "scale(1)";
-              e.currentTarget.style.filter =
-                "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)";
+              filter: "drop-shadow(0 0 10px #4ecdc4)",
             }}
           />
         </div>
-
         {/* Stats Header */}
         <div
           style={{
