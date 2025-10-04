@@ -1,13 +1,9 @@
 import styled from "styled-components";
 
-// Giả sử bạn có ảnh này trong cấu trúc thư mục của mình
-import bgImage from "../../../img/bg.jpg";
-
 export const StyledTetrisWrapper = styled.div`
   width: 100vw;
   height: 100vh;
-  background: url(${bgImage}) #000;
-  background-size: cover;
+  background: #000;
   overflow: hidden;
 `;
 

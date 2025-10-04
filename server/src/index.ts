@@ -7,10 +7,56 @@ import { initRedis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueu
 import { initPostgres } from './postgres';
 
 const PORT = Number(process.env.PORT) || 4000;
+const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces for LAN access
 
 const app = express();
+
+function normalizeIp(ip: string | undefined | null): string {
+  if (!ip) return '';
+  let v = String(ip).trim();
+  if (v.startsWith('::ffff:')) v = v.slice(7);
+  if (v === '::1') v = '127.0.0.1';
+  return v;
+}
 app.use(cors());
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/whoami', (req, res) => {
+  // Express req.ip returns remote address (e.g., ::ffff:192.168.1.10)
+  const raw = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+  const ip = normalizeIp(raw);
+  res.json({ ip });
+});
+
+// Simple test page for socket connectivity
+app.get('/ws-test', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.end(`<!doctype html>
+  <html>
+    <head><meta charset="utf-8" /><title>WS Test</title></head>
+    <body style="font-family: sans-serif;">
+      <h3>Socket Test</h3>
+      <div id="log"></div>
+      <input id="msg" placeholder="type message"/>
+      <button id="send">Send</button>
+      <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+      <script>
+        const log = (...a)=>{
+          const el = document.getElementById('log');
+          const p = document.createElement('div'); p.textContent = a.join(' ');
+          el.appendChild(p);
+        };
+        const url = location.origin.replace(/^http/,'ws').replace(/^ws\:/,'http:');
+        const socket = io(url, { transports: ['websocket','polling'] });
+        socket.on('connect', ()=>{ log('connected:', socket.id); socket.emit('ping'); });
+        socket.on('pong', ()=> log('pong')); 
+        socket.on('chat:message', (data)=> log('chat:', JSON.stringify(data)));
+        document.getElementById('send').onclick = ()=>{
+          const v = document.getElementById('msg').value; socket.emit('chat:message', { text: v });
+        };
+      </script>
+    </body>
+  </html>`);
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -58,11 +104,27 @@ type Room = {
 };
 
 const rooms = new Map<string, Room>();
+// Track IP to live socket ids (can be multiple tabs)
+const ipToSockets = new Map<string, Set<string>>();
 
 initRedis().catch(err => console.error('[redis] init failed', err));
 initPostgres().catch(err => console.error('[postgres] init skipped/failed', err));
 
 io.on('connection', (socket) => {
+  // Map this socket to client IP
+  const rawIp = (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || socket.handshake.address;
+  const ip = normalizeIp(typeof rawIp === 'string' ? rawIp : '');
+  if (ip) {
+    const set = ipToSockets.get(ip) ?? new Set<string>();
+    set.add(socket.id);
+    ipToSockets.set(ip, set);
+  }
+  // Basic connectivity test
+  socket.on('ping', () => socket.emit('pong'));
+  // Broadcast chat for quick manual test
+  socket.on('chat:message', (data: any) => {
+    io.emit('chat:message', { from: socket.id, ...data });
+  });
   socket.on('room:create', (roomId: string, cb?: (ok: boolean) => void) => {
     if (rooms.has(roomId)) return cb?.(false);
     const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
@@ -125,6 +187,12 @@ io.on('connection', (socket) => {
     io.to(socket.id).emit('game:next', nextPieces(r.gen, n));
   });
 
+  // Relay real-time board state to other players in the same room
+  socket.on('game:state', (roomId: string, payload: any) => {
+    if (!rooms.has(roomId)) return;
+    socket.to(roomId).emit('game:state', { ...payload, from: socket.id });
+  });
+
   // Garbage logic (simple guideline-ish)
   socket.on('game:lock', (roomId: string, payload: { lines: number; tspin?: boolean; pc?: boolean }) => {
     const r = rooms.get(roomId);
@@ -181,7 +249,7 @@ io.on('connection', (socket) => {
   });
   socket.on('ranked:leave', async (playerId: string) => { await removeFromRankedQueue(playerId); });
   socket.on('ranked:match', async (playerId: string, elo: number, cb?: (data:any)=>void) => {
-    // Try to pop an opponent (excluding self if already in queue)
+    // playerId here is IP identity; we still operate room with socket ids
     const opponent = await popBestMatch(elo, 150, playerId);
     if (!opponent) {
       // No opponent yet, ensure we are in queue
@@ -193,37 +261,82 @@ io.on('connection', (socket) => {
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
+    // Resolve opponent's live socket by IP id or treat as socket id
+    const resolveOpponentSocketId = (pid: string): string | undefined => {
+      const byIp = ipToSockets.get(String(pid));
+      if (byIp && byIp.size > 0) return Array.from(byIp)[0];
+      // As a fallback, if pid looks like a socket id and exists, use it
+      return io.sockets.sockets.has(pid as any) ? pid : undefined;
+    };
+
+    const oppSocketId = resolveOpponentSocketId(String(opponent.playerId));
+    if (!oppSocketId) {
+      // Opponent not currently connected; requeue and exit
+      await addToRankedQueue(playerId, elo);
+      cb?.({ match: null });
+      return;
+    }
+
     // Create ephemeral room for the match
     const roomId = `rk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
     const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
     const room: Room = {
       id: roomId,
-      host: playerId, // arbitrarily assign requester as host
+      host: socket.id, // requester is host
       gen: bagGenerator(seed),
       players: new Map([
-        [playerId, { id: playerId, ready: true, alive: true, combo: 0, b2b: 0 }],
-        [opponent.playerId, { id: opponent.playerId, ready: true, alive: true, combo: 0, b2b: 0 }]
+        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0 }],
+        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0 }]
       ]),
       started: true,
       seed,
     };
-    rooms.set(roomId, room);
-    saveRoom(room);
-    // Notify both sockets if connected
-    io.to(playerId).emit('ranked:found', { roomId, opponent: opponent.playerId, elo: opponent.elo });
-    io.to(opponent.playerId).emit('ranked:found', { roomId, opponent: playerId, elo });
+  rooms.set(roomId, room);
+  saveRoom(room);
+  // Join sockets into the room
+  try { socket.join(roomId); } catch {}
+    const oppSocket = oppSocketId ? io.sockets.sockets.get(oppSocketId) : undefined;
+  try { oppSocket?.join(roomId); } catch {}
+  // Notify both sockets if connected
+    socket.emit('ranked:found', { roomId, opponent: opponent.playerId, elo: opponent.elo });
+  if (oppSocketId) io.to(oppSocketId).emit('ranked:found', { roomId, opponent: playerId, elo });
+  // Broadcast room update
+  io.to(roomId).emit('room:update', roomSnapshot(roomId));
     const first = nextPieces(room.gen, 14);
-    io.to(playerId).emit('game:start', { next: first, roomId });
-    io.to(opponent.playerId).emit('game:start', { next: first, roomId });
+    io.to(socket.id).emit('game:start', { next: first, roomId });
+    if (oppSocketId) io.to(oppSocketId).emit('game:start', { next: first, roomId });
     cb?.({ match: { roomId, opponent: opponent.playerId, elo: opponent.elo } });
   });
 
   socket.on('disconnect', () => {
     for (const [roomId, r] of rooms) {
-      if (r.players.has(socket.id)) {
-        r.players.delete(socket.id);
-        if (r.players.size === 0) { rooms.delete(roomId); deleteRoom(roomId); }
-        else { saveRoom(r); io.to(roomId).emit('room:update', roomSnapshot(roomId)); }
+      const p = r.players.get(socket.id);
+      if (!p) continue;
+      // Mark temporarily disconnected
+      p.alive = false;
+      saveRoom(r);
+      io.to(roomId).emit('room:update', roomSnapshot(roomId));
+      // After 10s, if still not back and game started, declare the other as winner
+      setTimeout(() => {
+        const rr = rooms.get(roomId);
+        if (!rr || !rr.started) return;
+        const pp = rr.players.get(socket.id);
+        if (pp && pp.alive === false) {
+          // pp loses
+          const alive = [...rr.players.values()].filter(x => x.id !== socket.id);
+          io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null, reason: 'disconnect' });
+          rr.started = false;
+          rr.players.forEach(pl => { pl.ready = false; pl.alive = true; pl.combo = 0; pl.b2b = 0; });
+          saveRoom(rr);
+        }
+      }, 10000);
+    }
+    // Remove mapping
+    if (ip) {
+      const set = ipToSockets.get(ip);
+      if (set) {
+        set.delete(socket.id);
+        if (set.size === 0) ipToSockets.delete(ip);
       }
     }
   });
@@ -240,6 +353,6 @@ function roomSnapshot(roomId: string) {
   };
 }
 
-server.listen(PORT, () => {
-  console.log(`Versus server listening on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Versus server listening on http://${HOST}:${PORT}`);
 });

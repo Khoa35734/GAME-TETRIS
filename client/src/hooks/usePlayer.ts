@@ -30,9 +30,12 @@ export const usePlayer = (): [
   boolean,        // canHold
   TType[],        // nextFour
   () => void,     // holdSwap
-  () => void      // clearHold
+  () => void,     // clearHold
+  // server sync helpers
+  (seed: TType[]) => void,
+  (more: TType[]) => void
 ] => {
-  const { nextN, popNext, peekNext } = useQueue(5); // 5 khối hiển thị
+  const { nextN, popNext, peekNext, setSeed, pushMany } = useQueue(5); // 5 khối hiển thị
 
 
   const [player, setPlayer] = useState<Player>({
@@ -160,5 +163,7 @@ export const usePlayer = (): [
     nextN,
     holdSwap,
     clearHold,
+    setSeed,
+    pushMany,
   ];
 };

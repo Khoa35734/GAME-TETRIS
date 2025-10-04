@@ -1,6 +1,7 @@
 // Import cac panel tu SidePanels
 import { HoldPanel, NextPanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from 'react-router-dom';
 import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from "../gamehelper";
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
@@ -47,6 +48,7 @@ const NEXT_SHIFT_X = 50;
 const NEXT_SHIFT_Y = 0;
 
 const Tetris: React.FC = () => {
+  const navigate = useNavigate();
   // Hold state
   const [hasHeld, setHasHeld] = useState(false);
   const [dropTime, setDropTime] = useState<number | null>(null);
@@ -477,6 +479,24 @@ const Tetris: React.FC = () => {
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
     >
+      {/* Nút Thoát về menu */}
+      <button
+        onClick={() => navigate('/')}
+        style={{
+          position: 'fixed',
+          top: 12,
+          left: 12,
+          zIndex: 999,
+          background: 'rgba(255,255,255,0.1)',
+          border: '1px solid rgba(255,255,255,0.25)',
+          color: '#fff',
+          padding: '8px 12px',
+          borderRadius: 8,
+          cursor: 'pointer'
+        }}
+      >
+        ← Thoát
+      </button>
       <div
         style={{
           display: "flex",

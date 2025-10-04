@@ -17,11 +17,16 @@ interface GameModeProps {
 
 const HomeMenu: React.FC = () => {
   const navigate = useNavigate();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const s = localStorage.getItem('tetris:user');
+      return s ? (JSON.parse(s) as User) : null;
+    } catch { return null; }
+  });
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
-  const [showGameModes, setShowGameModes] = useState(false);
+  const [showGameModes, setShowGameModes] = useState<boolean>(() => !!localStorage.getItem('tetris:user'));
 
   // Stats state
   const [stats, setStats] = useState({
@@ -113,6 +118,7 @@ const HomeMenu: React.FC = () => {
       setCurrentUser(user);
       setShowGameModes(true);
       setLoadingMessage("");
+      try { localStorage.setItem('tetris:user', JSON.stringify(user)); } catch {}
     }, 1500);
   };
 
@@ -151,6 +157,7 @@ const HomeMenu: React.FC = () => {
       setCurrentUser(user);
       setShowGameModes(true);
       setLoadingMessage("");
+      try { localStorage.setItem('tetris:user', JSON.stringify(user)); } catch {}
     }, 2000);
   };
 
@@ -163,6 +170,7 @@ const HomeMenu: React.FC = () => {
     };
     setCurrentUser(user);
     setShowGameModes(true);
+    try { localStorage.setItem('tetris:user', JSON.stringify(user)); } catch {}
   };
 
   // Logout
@@ -172,6 +180,7 @@ const HomeMenu: React.FC = () => {
     setLoginForm({ username: "", password: "" });
     setRegisterForm({ username: "", email: "", password: "", confirmPassword: "" });
     setActiveTab("login");
+    try { localStorage.removeItem('tetris:user'); } catch {}
   };
 
   // Start single player
@@ -299,83 +308,104 @@ const HomeMenu: React.FC = () => {
       style={{
         width: "100%",
         minHeight: "100vh",
-        background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)",
+        background: "#000", // nền đen
         color: "#ffffff",
         position: "relative",
         overflow: "hidden",
         fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
       }}
     >
-      {/* Animated Background */}
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          background: `
-            linear-gradient(45deg, transparent 49%, rgba(255,255,255,0.02) 50%, transparent 51%),
-            linear-gradient(-45deg, transparent 49%, rgba(255,255,255,0.02) 50%, transparent 51%)
-          `,
-          backgroundSize: "50px 50px",
-          animation: "gridMove 20s linear infinite",
-          zIndex: 0,
-        }}
-      />
+      {/* Animated Background (ẩn để tránh cảm giác không full nền đen) */}
+      {/* Intentionally removed for clean black background */}
+
+      {/* Top user bar */}
+      {currentUser && (
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, height: 56,
+            background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 16px', zIndex: 1000,
+            borderBottom: '1px solid rgba(255,255,255,0.12)'
+          }}
+        >
+          <div style={{ color: '#fff', fontWeight: 700 }}>
+            Xin chào, {currentUser.username}{currentUser.isGuest ? ' (Khách)' : ''}
+          </div>
+          <button
+            onClick={logout}
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.3)',
+              color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.18)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
+          >
+            Đăng xuất
+          </button>
+        </div>
+      )}
 
       <div
         style={{
           position: "relative",
           zIndex: 1,
+          width: "100%",
           maxWidth: "1200px",
           margin: "0 auto",
           padding: "20px",
           minHeight: "100vh",
           display: "flex",
           flexDirection: "column",
+          justifyContent: !showGameModes ? "center" : undefined,
+          // tránh đè lên thanh người dùng
+          marginTop: currentUser ? 56 : 0,
         }}
       >
-        {/* Logo */}
-        <div
-          style={{
-            textAlign: "center",
-            marginBottom: "40px",
-            animation: "pulse 2s infinite",
-          }}
-        >
-          <img
-            src="/path/to/your/logo.png" // Replace with the actual path to your logo file
-            alt="TETR.IO Logo"
+        {/* Logo (ẩn khi ở màn đăng nhập để canh giữa tuyệt đối) */}
+        {showGameModes && (
+          <div
             style={{
-              width: "200px",
-              height: "auto",
-              filter: "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)",
-              transition: "transform 0.3s ease, filter 0.3s ease",
+              textAlign: "center",
+              marginBottom: "40px",
+              animation: "pulse 2s infinite",
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "scale(1.1)";
-              e.currentTarget.style.filter =
-                "drop-shadow(0 0 15px #4ecdc4) drop-shadow(0 0 30px #ff6b6b)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "scale(1)";
-              e.currentTarget.style.filter =
-                "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)";
-            }}
-          />
-        </div>
+          >
+            <img
+              src="/path/to/your/logo.png" // Replace with the actual path to your logo file
+              alt="TETR.IO Logo"
+              style={{
+                width: "200px",
+                height: "auto",
+                filter: "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)",
+                transition: "transform 0.3s ease, filter 0.3s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "scale(1.1)";
+                e.currentTarget.style.filter =
+                  "drop-shadow(0 0 15px #4ecdc4) drop-shadow(0 0 30px #ff6b6b)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "scale(1)";
+                e.currentTarget.style.filter =
+                  "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)";
+              }}
+            />
+          </div>
+        )}
 
-        {/* Stats Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-around",
-            padding: "40px 0",
-            marginBottom: "40px",
-            animation: "fadeInDown 1s ease-out",
-          }}
-        >
+        {/* Stats Header (ẩn khi ở màn đăng nhập để form ở chính giữa) */}
+        {showGameModes && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-around",
+              padding: "40px 0",
+              marginBottom: "40px",
+              animation: "fadeInDown 1s ease-out",
+            }}
+          >
           <div style={{ textAlign: "center" }}>
             <div
               style={{
@@ -448,64 +478,10 @@ const HomeMenu: React.FC = () => {
               Hours Played
             </div>
           </div>
-        </div>
-
-        {/* User Status */}
-        {currentUser && (
-          <div
-            style={{
-              position: "fixed",
-              top: "20px",
-              right: "20px",
-              background: "rgba(0, 0, 0, 0.8)",
-              backdropFilter: "blur(10px)",
-              borderRadius: "25px",
-              padding: "10px 20px",
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              zIndex: 1000,
-            }}
-          >
-            <div
-              style={{
-                width: "30px",
-                height: "30px",
-                borderRadius: "50%",
-                background: "linear-gradient(45deg, #ff6b6b, #4ecdc4)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: "bold",
-                fontSize: "0.8rem",
-              }}
-            >
-              {currentUser.isGuest ? "G" : currentUser.username.charAt(0).toUpperCase()}
-            </div>
-            <span>{currentUser.username}</span>
-            <button
-              style={{
-                background: "none",
-                border: "none",
-                color: "#ff6b6b",
-                cursor: "pointer",
-                fontSize: "0.8rem",
-                padding: "5px 10px",
-                borderRadius: "15px",
-                transition: "background 0.3s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255, 107, 107, 0.1)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "none";
-              }}
-              onClick={logout}
-            >
-              Đăng xuất
-            </button>
           </div>
         )}
+
+        {/* User status moved to top bar */}
 
         {/* Main Content */}
         <div
@@ -514,6 +490,8 @@ const HomeMenu: React.FC = () => {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            // đảm bảo khối đăng nhập luôn ở chính giữa viewport khi chưa vào game modes
+            minHeight: !showGameModes ? "calc(100vh - 40px)" : undefined,
           }}
         >
           <div
@@ -546,7 +524,7 @@ const HomeMenu: React.FC = () => {
                     animation: "pulse 2s infinite",
                   }}
                 >
-                  Welcome to TETR.IO
+                  Welcome to D.TETRIS
                 </h1>
                 <p
                   style={{
@@ -1096,7 +1074,7 @@ const HomeMenu: React.FC = () => {
                     icon="⚔️"
                     title="Đối kháng"
                     description="Chơi 1v1 với người chơi khác trực tuyến"
-                    locked={currentUser?.isGuest}
+                    onClick={() => navigate('/online/ranked')}
                   />
                   <GameModeCard
                     icon="👥"
@@ -1108,7 +1086,7 @@ const HomeMenu: React.FC = () => {
                     icon="🏆"
                     title="Xếp hạng"
                     description="Thi đấu và leo rank trong hệ thống xếp hạng"
-                    locked={currentUser?.isGuest}
+                    onClick={() => navigate('/online/ranked')}
                   />
                 </div>
 

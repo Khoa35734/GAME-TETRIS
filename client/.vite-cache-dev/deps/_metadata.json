@@ -1,58 +1,67 @@
 {
-  "hash": "65083486",
+  "hash": "e6801dc0",
   "configHash": "8dc96de1",
-  "lockfileHash": "7d37ccba",
-  "browserHash": "c58b253c",
+  "lockfileHash": "61686f1f",
+  "browserHash": "ffbf0d7a",
   "optimized": {
     "react": {
       "src": "../../node_modules/react/index.js",
       "file": "react.js",
-      "fileHash": "97ccc6d5",
+      "fileHash": "66ccb797",
       "needsInterop": true
     },
     "react-dom": {
       "src": "../../node_modules/react-dom/index.js",
       "file": "react-dom.js",
-      "fileHash": "b628bbf1",
+      "fileHash": "2cf69fd6",
       "needsInterop": true
     },
     "react/jsx-dev-runtime": {
       "src": "../../node_modules/react/jsx-dev-runtime.js",
       "file": "react_jsx-dev-runtime.js",
-      "fileHash": "074015b5",
+      "fileHash": "0b3e39b7",
       "needsInterop": true
     },
     "react/jsx-runtime": {
       "src": "../../node_modules/react/jsx-runtime.js",
       "file": "react_jsx-runtime.js",
-      "fileHash": "25ee691e",
+      "fileHash": "8bfb9e5a",
       "needsInterop": true
     },
     "react-dom/client": {
       "src": "../../node_modules/react-dom/client.js",
       "file": "react-dom_client.js",
-      "fileHash": "5fbe1468",
+      "fileHash": "6a2c6b82",
       "needsInterop": true
     },
     "react-router-dom": {
       "src": "../../node_modules/react-router-dom/dist/index.mjs",
       "file": "react-router-dom.js",
-      "fileHash": "eea38624",
+      "fileHash": "8e85177e",
+      "needsInterop": false
+    },
+    "socket.io-client": {
+      "src": "../../node_modules/socket.io-client/build/esm/index.js",
+      "file": "socket__io-client.js",
+      "fileHash": "0a13d833",
       "needsInterop": false
     },
     "styled-components": {
       "src": "../../node_modules/styled-components/dist/styled-components.browser.esm.js",
       "file": "styled-components.js",
-      "fileHash": "9fc39641",
+      "fileHash": "14445eba",
       "needsInterop": false
     }
   },
   "chunks": {
-    "chunk-IMO6PYY2": {
-      "file": "chunk-IMO6PYY2.js"
+    "chunk-PFG2UKEP": {
+      "file": "chunk-PFG2UKEP.js"
     },
-    "chunk-WYQRYOQT": {
-      "file": "chunk-WYQRYOQT.js"
+    "chunk-32EALFBN": {
+      "file": "chunk-32EALFBN.js"
+    },
+    "chunk-G3PMV62Z": {
+      "file": "chunk-G3PMV62Z.js"
     }
   }
 }
