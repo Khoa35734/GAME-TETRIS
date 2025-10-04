@@ -6,10 +6,27 @@ export type CellValue = string | number;
 export type Cell = [CellValue, string];
 export type Stage = Cell[][];
 
-export const useStage = (player: Player): [Stage, React.Dispatch<React.SetStateAction<Stage>>, number, number] => {
+type PlacementInfo = {
+  mergedStage: Stage;
+  cleared: number;
+};
+
+const emptyPlacement: PlacementInfo = {
+  mergedStage: createStage(),
+  cleared: 0,
+};
+
+export const useStage = (player: Player): [
+  Stage,
+  React.Dispatch<React.SetStateAction<Stage>>,
+  number,
+  number,
+  PlacementInfo
+] => {
   const [stage, setStage] = useState<Stage>(createStage());
   const [rowsCleared, setRowsCleared] = useState(0);
   const [clearEventId, setClearEventId] = useState(0);
+  const [lastPlacement, setLastPlacement] = useState<PlacementInfo>(emptyPlacement);
 
   useEffect(() => {
     setRowsCleared(0);
@@ -67,6 +84,8 @@ export const useStage = (player: Player): [Stage, React.Dispatch<React.SetStateA
         });
       });
 
+      const placedSnapshot = newStage.map((row) => row.map((cell) => [cell[0], cell[1]] as Cell)) as Stage;
+
       if (player.collided) {
         const { stage: swept, cleared } = sweepRows(newStage);
         if (cleared > 0) {
@@ -75,14 +94,16 @@ export const useStage = (player: Player): [Stage, React.Dispatch<React.SetStateA
         } else {
           setRowsCleared(0);
         }
+        setLastPlacement({ mergedStage: placedSnapshot, cleared });
         return swept;
       }
       setRowsCleared(0);
+      setLastPlacement({ mergedStage: placedSnapshot, cleared: 0 });
       return newStage;
     };
 
     setStage((prev) => updateStage(prev));
   }, [player]);
 
-  return [stage, setStage, rowsCleared, clearEventId];
+  return [stage, setStage, rowsCleared, clearEventId, lastPlacement];
 };

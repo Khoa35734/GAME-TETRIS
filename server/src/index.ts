@@ -92,6 +92,7 @@ type PlayerState = {
   alive: boolean;
   combo: number;
   b2b: number; // back-to-back
+  name?: string;
 };
 
 type Room = {
@@ -101,6 +102,13 @@ type Room = {
   players: Map<string, PlayerState>;
   started: boolean;
   seed: number;
+  maxPlayers: number;
+};
+
+type RoomAck = {
+  ok: boolean;
+  error?: 'exists' | 'not-found' | 'started' | 'full' | 'unknown';
+  roomId?: string;
 };
 
 const rooms = new Map<string, Room>();
@@ -125,31 +133,88 @@ io.on('connection', (socket) => {
   socket.on('chat:message', (data: any) => {
     io.emit('chat:message', { from: socket.id, ...data });
   });
-  socket.on('room:create', (roomId: string, cb?: (ok: boolean) => void) => {
-    if (rooms.has(roomId)) return cb?.(false);
+  socket.on('room:create', (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
+    let options: { maxPlayers?: number; name?: string } | undefined;
+    let cb: ((result: RoomAck) => void) | undefined;
+
+    if (typeof optsOrCb === 'function') {
+      cb = optsOrCb as (result: RoomAck) => void;
+    } else {
+      options = optsOrCb;
+      if (typeof cbMaybe === 'function') cb = cbMaybe;
+    }
+
+    if (rooms.has(roomId)) {
+      cb?.({ ok: false, error: 'exists' });
+      return;
+    }
+
+    const maxPlayers = Math.max(2, Math.min(Number(options?.maxPlayers) || 2, 6));
     const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-    rooms.set(roomId, {
+    const displayName = typeof options?.name === 'string' ? options.name : undefined;
+
+    const room: Room = {
       id: roomId,
       host: socket.id,
       gen: bagGenerator(seed),
-      players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0 }]]),
+      players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName }]]),
       started: false,
       seed,
-    });
+      maxPlayers,
+    };
+    rooms.set(roomId, room);
     socket.join(roomId);
-    cb?.(true);
-    saveRoom(rooms.get(roomId));
+    cb?.({ ok: true, roomId });
+    saveRoom(room);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
   });
 
-  socket.on('room:join', (roomId: string, cb?: (ok: boolean) => void) => {
+  socket.on('room:join', (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
+    let options: { name?: string } | undefined;
+    let cb: ((result: RoomAck) => void) | undefined;
+
+    if (typeof optsOrCb === 'function') {
+      cb = optsOrCb as (result: RoomAck) => void;
+    } else {
+      options = optsOrCb;
+      if (typeof cbMaybe === 'function') cb = cbMaybe;
+    }
+
     const r = rooms.get(roomId);
-    if (!r || r.started) return cb?.(false);
-    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0 });
+    if (!r) {
+      cb?.({ ok: false, error: 'not-found' });
+      return;
+    }
+    if (r.started) {
+      cb?.({ ok: false, error: 'started' });
+      return;
+    }
+    if (r.players.size >= r.maxPlayers && !r.players.has(socket.id)) {
+      cb?.({ ok: false, error: 'full' });
+      return;
+    }
+
+    const displayName = typeof options?.name === 'string' ? options.name : undefined;
+
+    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName });
     socket.join(roomId);
-    cb?.(true);
+    cb?.({ ok: true, roomId });
     saveRoom(r);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
+  });
+
+  socket.on('room:sync', (roomId: string, cb?: (result: any) => void) => {
+    if (typeof roomId !== 'string' || !roomId.trim()) {
+      cb?.({ ok: false, error: 'invalid-room' });
+      return;
+    }
+    const snapshot = roomSnapshot(roomId.trim());
+    if (!snapshot) {
+      cb?.({ ok: false, error: 'not-found' });
+      return;
+    }
+    io.to(socket.id).emit('room:update', snapshot);
+    cb?.({ ok: true, data: snapshot });
   });
 
   socket.on('room:leave', (roomId: string) => {
@@ -191,6 +256,25 @@ io.on('connection', (socket) => {
   socket.on('game:state', (roomId: string, payload: any) => {
     if (!rooms.has(roomId)) return;
     socket.to(roomId).emit('game:state', { ...payload, from: socket.id });
+  });
+
+  socket.on('room:chat', (roomId: string, message: any, cb?: (ack: RoomAck) => void) => {
+    const r = rooms.get(roomId);
+    if (!r) {
+      cb?.({ ok: false, error: 'not-found' });
+      return;
+    }
+    if (!r.players.has(socket.id)) {
+      cb?.({ ok: false, error: 'unknown' });
+      return;
+    }
+    const payload = {
+      from: socket.id,
+      message,
+      ts: Date.now(),
+    };
+    io.to(roomId).emit('room:chat', payload);
+    cb?.({ ok: true, roomId });
   });
 
   // Garbage logic (simple guideline-ish)
@@ -285,11 +369,12 @@ io.on('connection', (socket) => {
       host: socket.id, // requester is host
       gen: bagGenerator(seed),
       players: new Map([
-        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0 }],
-        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0 }]
+        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0, name: socket.id }],
+        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0, name: opponent.playerId }]
       ]),
       started: true,
       seed,
+      maxPlayers: 2,
     };
   rooms.set(roomId, room);
   saveRoom(room);
@@ -349,7 +434,8 @@ function roomSnapshot(roomId: string) {
     id: r.id,
     host: r.host,
     started: r.started,
-    players: [...r.players.values()].map(p => ({ id: p.id, ready: p.ready, alive: p.alive }))
+    maxPlayers: r.maxPlayers,
+    players: [...r.players.values()].map(p => ({ id: p.id, ready: p.ready, alive: p.alive, name: p.name ?? null }))
   };
 }
 

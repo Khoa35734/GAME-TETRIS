@@ -308,7 +308,7 @@ const HomeMenu: React.FC = () => {
       style={{
         width: "100%",
         minHeight: "100vh",
-        background: "#000", // nền đen
+        background: `url('/img/bg2.gif') center/cover, #000`, // nền đen
         color: "#ffffff",
         position: "relative",
         overflow: "hidden",
@@ -1081,6 +1081,10 @@ const HomeMenu: React.FC = () => {
                     title="Phòng tùy chỉnh"
                     description="Tạo hoặc tham gia phòng chơi với bạn bè"
                     locked={currentUser?.isGuest}
+                    onClick={() => {
+                      if (currentUser?.isGuest) return;
+                      navigate('/online');
+                    }}
                   />
                   <GameModeCard
                     icon="🏆"

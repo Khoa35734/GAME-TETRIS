@@ -19,18 +19,15 @@ const getFallSpeed = (lvl: number) => Math.max(MIN_SPEED_MS, Math.round(INITIAL_
 type MatchOutcome = 'win' | 'lose' | 'draw';
 type MatchSummary = { outcome: MatchOutcome; reason?: string } | null;
 
+const STANDARD_BASE = [0, 1, 2, 4];
+const TSPIN_BASE = [2, 4, 6, 0];
+const MAX_COMBO_BONUS = 5;
+
 const cloneStageForNetwork = (stage: StageType): StageType =>
   stage.map(row => row.map(cell => [cell[0], cell[1]] as StageCell));
 
 const createGarbageRow = (width: number, hole: number): StageCell[] =>
   Array.from({ length: width }, (_, x) => (x === hole ? [0, 'clear'] : ['garbage', 'merged'])) as StageCell[];
-
-const computeGarbageFromLines = (lines: number): number => {
-  if (lines === 2) return 1;
-  if (lines === 3) return 2;
-  if (lines >= 4) return 3;
-  return 0;
-};
 
 const isPerfectClearBoard = (stage: StageType): boolean =>
   stage.every(row => row.every(([value]) =>
@@ -47,7 +44,7 @@ const Versus: React.FC = () => {
   
   // Your (Right side) board state
   const [player, updatePlayerPos, resetPlayer, playerRotate, hold, canHold, nextFour, holdSwap, clearHold, setQueueSeed, pushQueue] = usePlayer();
-  const [stage, setStage, rowsCleared] = useStage(player);
+  const [stage, setStage, rowsCleared, , lastPlacement] = useStage(player);
   const [, , rows, setRows, level, setLevel] = useGameStatus();
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState(false);
@@ -70,27 +67,31 @@ const Versus: React.FC = () => {
   const [oppHold, setOppHold] = useState<any>(null);
   const [oppNextFour, setOppNextFour] = useState<any[]>([]);
   const [garbageToSend, setGarbageToSend] = useState(0);
-  const stageRef = useRef<StageType>(stage);
-  useEffect(() => { stageRef.current = stage; }, [stage]);
+  const comboRef = useRef(0);
+  const b2bRef = useRef(0);
 
   const pendingGarbageRef = useRef(0);
   useEffect(() => { pendingGarbageRef.current = pendingGarbageLeft; }, [pendingGarbageLeft]);
 
-  const lastLockInfoRef = useRef<{ pending: boolean; tspin: boolean; lines: number }>({ pending: false, tspin: false, lines: 0 });
-
-  const applyGarbageRows = useCallback((count: number) => {
-    if (count <= 0) return;
+  const applyGarbageRows = useCallback((count: number): StageType | null => {
+    if (count <= 0) return null;
+    let updated: StageType | null = null;
     setStage(prev => {
-      if (!prev.length) return prev;
+      if (!prev.length) {
+        updated = prev;
+        return prev;
+      }
       const width = prev[0].length;
-      const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell));
+      const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell)) as StageType;
       for (let i = 0; i < count; i++) {
         const hole = Math.floor(Math.random() * width);
         cloned.shift();
         cloned.push(createGarbageRow(width, hole));
       }
-      return cloned as StageType;
+      updated = cloned;
+      return cloned;
     });
+    return updated;
   }, [setStage]);
 
   // --- Core Game Logic ---
@@ -105,11 +106,12 @@ const Versus: React.FC = () => {
     clearHold();
     setHasHeld(false);
     setLocking(false);
-  setPendingGarbageLeft(0);
-  pendingGarbageRef.current = 0;
-  setGarbageToSend(0);
-  setMatchResult(null);
-  lastLockInfoRef.current = { pending: false, tspin: false, lines: 0 };
+    setPendingGarbageLeft(0);
+    pendingGarbageRef.current = 0;
+    setGarbageToSend(0);
+    setMatchResult(null);
+    comboRef.current = 0;
+    b2bRef.current = 0;
 
     setOppStage(createStage());
     setOppGameOver(false);
@@ -335,76 +337,92 @@ const Versus: React.FC = () => {
     }, [locking, updatePlayerPos]);
     
     useEffect(() => {
-        if (!player.collided) return;
-        lastLockInfoRef.current = {
-          pending: true,
-          tspin: player.type === 'T' && isTSpin(player as any, stageRef.current as any),
-          lines: 0,
-        };
-    }, [player.collided, player.type]);
+      if (rowsCleared > 0) {
+        setRows(prev => {
+          const next = prev + rowsCleared;
+          setLevel(Math.floor(next / 10));
+          return next;
+        });
+      }
+    }, [rowsCleared, setRows, setLevel]);
 
-    useEffect(() => {
-        if(player.collided) {
-            setLocking(false);
-            if (isGameOverFromBuffer(stage)) {
-                setGameOver(true);
-                setDropTime(null);
-                setTimerOn(false);
-                if (roomId) socket.emit('game:topout', roomId);
-                return;
-            }
-            resetPlayer();
-            setHasHeld(false);
-            setDropTime(getFallSpeed(level)); // Resume gravity after piece locks
-            pieceCountRef.current += 1;
-            if (roomId && pieceCountRef.current % 7 === 0) {
-              socket.emit('game:requestNext', roomId, 7);
-            }
-        }
-    }, [player, resetPlayer, stage, roomId, level]);
+    const calculateLockGarbage = useCallback((lines: number, tspin: boolean, pc: boolean) => {
+      let garbage = 0;
+      if (pc) {
+        garbage += 10;
+      } else {
+        const base = tspin ? TSPIN_BASE : STANDARD_BASE;
+        garbage += base[lines] ?? 0;
 
-    useEffect(() => {
-        if (rowsCleared > 0) {
-            setRows(prev => prev + rowsCleared);
-            if (lastLockInfoRef.current.pending) {
-              lastLockInfoRef.current.lines = rowsCleared;
-            }
-        }
-    }, [rowsCleared, setRows]);
-
-    useEffect(() => {
-        if (player.collided) return;
-        const info = lastLockInfoRef.current;
-        if (!info.pending) return;
-        if (matchResult !== null) {
-          lastLockInfoRef.current = { pending: false, tspin: false, lines: 0 };
-          return;
-        }
-
-        const lines = info.lines;
-        const tspin = lines > 0 && info.tspin;
-        const pc = lines > 0 && isPerfectClearBoard(stageRef.current);
-
-        if (roomId) {
-          socket.emit('game:lock', roomId, { lines, tspin, pc });
+        if ((tspin && lines > 0) || lines === 4) {
+          if (b2bRef.current >= 1) garbage += 1;
+          b2bRef.current += 1;
+        } else if (lines > 0) {
+          b2bRef.current = 0;
         }
 
         if (lines > 0) {
-          setGarbageToSend(prev => prev + computeGarbageFromLines(lines));
+          comboRef.current += 1;
+        } else {
+          comboRef.current = -1;
         }
 
-        let leftover = pendingGarbageRef.current;
-        if (lines > 0) {
-          leftover = Math.max(0, leftover - lines);
+        if (comboRef.current >= 1) {
+          garbage += Math.min(MAX_COMBO_BONUS, Math.floor((comboRef.current + 1) / 2));
         }
-        if (leftover > 0) {
-          applyGarbageRows(leftover);
-        }
-        setPendingGarbageLeft(leftover);
-        pendingGarbageRef.current = leftover;
+      }
+      return garbage;
+    }, []);
 
-        lastLockInfoRef.current = { pending: false, tspin: false, lines: 0 };
-    }, [player.collided, roomId, applyGarbageRows, matchResult]);
+    useEffect(() => {
+      if (!player.collided) return;
+
+      setLocking(false);
+
+  const lines = lastPlacement.cleared;
+  const mergedStage = lastPlacement.mergedStage;
+      const tspin = lines > 0 && player.type === 'T' && isTSpin(player as any, mergedStage as any);
+      const pc = lines > 0 && isPerfectClearBoard(stage);
+
+      if (roomId) {
+        socket.emit('game:lock', roomId, { lines, tspin, pc });
+      }
+
+      const sentGarbage = calculateLockGarbage(lines, tspin, pc);
+      if (sentGarbage > 0) {
+        setGarbageToSend(prev => prev + sentGarbage);
+      }
+
+      let pendingGarbage = pendingGarbageRef.current;
+      if (lines > 0 && pendingGarbage > 0) {
+        pendingGarbage = Math.max(0, pendingGarbage - lines);
+      }
+
+      let stageAfterGarbage: StageType = stage;
+      if (pendingGarbage > 0) {
+        const updated = applyGarbageRows(pendingGarbage);
+        stageAfterGarbage = updated ?? stage;
+      }
+
+      setPendingGarbageLeft(pendingGarbage);
+      pendingGarbageRef.current = pendingGarbage;
+
+      if (isGameOverFromBuffer(stageAfterGarbage)) {
+        setGameOver(true);
+        setDropTime(null);
+        setTimerOn(false);
+        if (roomId) socket.emit('game:topout', roomId);
+        return;
+      }
+
+      resetPlayer();
+      setHasHeld(false);
+      setDropTime(getFallSpeed(level));
+      pieceCountRef.current += 1;
+      if (roomId && pieceCountRef.current % 7 === 0) {
+        socket.emit('game:requestNext', roomId, 7);
+      }
+  }, [player.collided, lastPlacement, stage, roomId, level, calculateLockGarbage, applyGarbageRows, resetPlayer]);
 
   // Send your state to opponent
   useEffect(() => {
@@ -440,7 +458,7 @@ const Versus: React.FC = () => {
       style={{ 
         width: '100vw',
         height: '100vh',
-        background: `url('/img/bg.jpg') center/cover, #000`,
+        background: `url('/img/bg1.gif') center/cover, #000`,
         overflow: 'hidden',
         display: 'grid', 
         placeItems: 'center' 
@@ -458,6 +476,30 @@ const Versus: React.FC = () => {
       >
         ← Thoát
       </button>
+      {matchResult && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 800,
+            pointerEvents: 'none',
+            color: '#fff',
+            textAlign: 'center'
+          }}
+        >
+          <div style={{ fontSize: 56, fontWeight: 800, textShadow: '0 8px 30px rgba(0,0,0,0.5)', lineHeight: 1.2 }}>
+            {matchResult.outcome === 'win' ? 'Bạn thắng!' : matchResult.outcome === 'lose' ? 'Bạn thua!' : 'Hòa trận!'}
+          </div>
+          {matchResult.reason && (
+            <div style={{ marginTop: 12, fontSize: 18, opacity: 0.75 }}>
+              Lý do: {matchResult.reason}
+            </div>
+          )}
+        </div>
+      )}
       {waiting && !roomId ? (
         <div style={{ color: '#fff', fontSize: 20, textAlign: 'center', padding: 20 }}>
           <div>🔍 Đang tìm trận...</div>
