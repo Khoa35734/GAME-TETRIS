@@ -278,29 +278,57 @@ io.on('connection', (socket) => {
   });
 
   // Garbage logic (simple guideline-ish)
-  socket.on('game:lock', (roomId: string, payload: { lines: number; tspin?: boolean; pc?: boolean }) => {
+  socket.on('game:lock', (roomId: string, payload: { lines: number; tspinType?: 'none' | 'mini' | 'normal'; pc?: boolean }) => {
     const r = rooms.get(roomId);
     if (!r || !r.started) return;
     const p = r.players.get(socket.id);
     if (!p) return;
 
-    let g = 0;
-    if (payload.pc) {
-      g += 10;
-    } else {
-      const base = payload.tspin ? [2,4,6,0] : [0,1,2,4]; // 0/Single/Double/Triple/Quad
-      g += base[payload.lines] || 0;
-      // B2B bonus for T-Spin or Quad
-      if (payload.tspin && payload.lines > 0 || payload.lines === 4) {
-        g += p.b2b >= 1 ? 1 : 0;
-        p.b2b += 1;
-      } else if (payload.lines > 0) {
-        p.b2b = 0;
-      }
-      // Combo
-      if (payload.lines > 0) p.combo += 1; else p.combo = -1;
-      if (p.combo >= 1) g += Math.min(5, Math.floor((p.combo + 1) / 2));
+    const lines = Math.max(0, Math.min(4, Number(payload?.lines) || 0));
+    const tspinType = payload?.tspinType ?? 'none';
+    const pc = Boolean(payload?.pc);
+
+    const isTetris = tspinType === 'none' && lines === 4;
+    const isTSpinClear = tspinType !== 'none' && lines > 0;
+
+    let b2bBonus = 0;
+    if (lines > 0 && (isTetris || isTSpinClear)) {
+      b2bBonus = p.b2b >= 1 ? 1 : 0;
+      p.b2b += 1;
+    } else if (lines > 0) {
+      p.b2b = 0;
     }
+
+    if (lines > 0) {
+      p.combo = Math.max(1, p.combo + 1);
+    } else {
+      p.combo = 0;
+    }
+
+    const comboChain = Math.max(0, p.combo - 1);
+    let comboBonus = 0;
+    if (comboChain >= 9) comboBonus = 5;
+    else if (comboChain >= 7) comboBonus = 4;
+    else if (comboChain >= 5) comboBonus = 3;
+    else if (comboChain >= 3) comboBonus = 2;
+    else if (comboChain >= 1) comboBonus = 1;
+
+    let g = 0;
+    if (pc) {
+      g = 10;
+    } else if (isTSpinClear) {
+      if (tspinType === 'mini' && lines === 1) {
+        g = 0;
+      } else {
+        const tspinBase = [0, 2, 4, 6];
+        g = tspinBase[lines] ?? 0;
+      }
+    } else {
+      const standardBase = [0, 0, 1, 2, 4];
+      g = standardBase[lines] ?? 0;
+    }
+
+    g += b2bBonus + comboBonus;
 
     // Send garbage to all other players in room
     for (const [sid, sp] of r.players) {

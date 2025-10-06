@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Tốc Độ Rơi Tetris</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            opacity: 0.8;
+            margin-bottom: 30px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            padding: 12px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        th {
+            background: rgba(255, 255, 255, 0.1);
+            font-weight: bold;
+        }
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .level-0-5 { background: rgba(76, 175, 80, 0.2); }
+        .level-6-10 { background: rgba(255, 193, 7, 0.2); }
+        .level-11-15 { background: rgba(255, 152, 0, 0.2); }
+        .level-16-20 { background: rgba(244, 67, 54, 0.2); }
+        .level-21 { background: rgba(156, 39, 176, 0.3); font-weight: bold; }
+        .visual-bar {
+            display: inline-block;
+            height: 20px;
+            background: linear-gradient(90deg, #4ade80, #ef4444);
+            border-radius: 4px;
+            margin-left: 10px;
+        }
+        .info-box {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .info-box h3 {
+            margin-top: 0;
+        }
+        .formula {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⏱️ Tốc Độ Rơi Tetris</h1>
+        <div class="subtitle">Kiểm tra tốc độ rơi từ Level 1 đến Level 22</div>
+        
+        <div class="info-box">
+            <h3>📋 Thông Tin</h3>
+            <p><strong>Tốc độ ban đầu:</strong> 800ms (0.8 giây) mỗi ô ở Level 1</p>
+            <p><strong>Tốc độ tối đa:</strong> ~16.67ms mỗi ô ở Level 22 (instant drop)</p>
+            <p><strong>Công thức:</strong></p>
+            <div class="formula">
+                progress = level / 21<br>
+                speed = 800 × (16.67 / 800)^progress
+            </div>
+            <p><strong>Độ giảm:</strong> Giảm theo hàm mũ (exponential) để có độ chuyển tiếp mượt mà</p>
+        </div>
+
+        <table id="speedTable">
+            <thead>
+                <tr>
+                    <th>Level Game</th>
+                    <th>Level Hiển Thị</th>
+                    <th>Tốc Độ (ms)</th>
+                    <th>Tốc Độ (giây)</th>
+                    <th>Trực Quan</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+
+        <div class="info-box">
+            <h3>🎮 Giải Thích</h3>
+            <ul>
+                <li><strong style="color: #4ade80;">Level 1-5:</strong> Chậm, dễ chơi (800ms → 520ms)</li>
+                <li><strong style="color: #ffc107;">Level 6-10:</strong> Trung bình (520ms → 340ms)</li>
+                <li><strong style="color: #ff9800;">Level 11-15:</strong> Nhanh (340ms → 220ms)</li>
+                <li><strong style="color: #f44336;">Level 16-20:</strong> Rất nhanh (220ms → 140ms)</li>
+                <li><strong style="color: #9c27b0;">Level 21-22:</strong> Instant drop (~16ms)</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <h3>📊 So Sánh</h3>
+            <p><strong>Trước đây (Guideline):</strong> Level 1 rơi quá nhanh (~450ms), khó chơi cho người mới</p>
+            <p><strong>Bây giờ:</strong> Level 1 bắt đầu ở 800ms (0.8s), dễ tiếp cận hơn nhiều</p>
+            <p><strong>Level tăng:</strong> Mỗi 10 dòng xóa → tăng 1 level (standard Tetris)</p>
+        </div>
+    </div>
+
+    <script>
+        const MAX_LEVEL = 22;
+        const START_SPEED = 800;
+        const END_SPEED = 16.67;
+
+        function getFallSpeed(lvl) {
+            const L = Math.min(lvl, MAX_LEVEL - 1);
+            
+            if (L >= MAX_LEVEL - 1) {
+                return END_SPEED;
+            }
+            
+            const progress = L / (MAX_LEVEL - 1);
+            const speed = START_SPEED * Math.pow(END_SPEED / START_SPEED, progress);
+            
+            return Math.max(END_SPEED, speed);
+        }
+
+        function getRowClass(level) {
+            if (level >= 0 && level <= 5) return 'level-0-5';
+            if (level >= 6 && level <= 10) return 'level-6-10';
+            if (level >= 11 && level <= 15) return 'level-11-15';
+            if (level >= 16 && level <= 20) return 'level-16-20';
+            return 'level-21';
+        }
+
+        function generateTable() {
+            const tbody = document.getElementById('tableBody');
+            
+            for (let level = 0; level < MAX_LEVEL; level++) {
+                const speed = getFallSpeed(level);
+                const displayLevel = level + 1; // Hiển thị level bắt đầu từ 1
+                
+                const row = document.createElement('tr');
+                row.className = getRowClass(level);
+                
+                // Tính độ rộng thanh visual (100% ở level 0, 0% ở level 21)
+                const barWidth = Math.max(5, (1 - level / (MAX_LEVEL - 1)) * 100);
+                
+                row.innerHTML = `
+                    <td>${level}</td>
+                    <td><strong>${displayLevel}</strong></td>
+                    <td><strong>${speed.toFixed(2)}</strong> ms</td>
+                    <td>${(speed / 1000).toFixed(3)} s</td>
+                    <td>
+                        <span class="visual-bar" style="width: ${barWidth}%"></span>
+                    </td>
+                `;
+                
+                tbody.appendChild(row);
+            }
+        }
+
+        generateTable();
+    </script>
+</body>
+</html>

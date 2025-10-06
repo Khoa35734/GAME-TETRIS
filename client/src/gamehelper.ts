@@ -3,6 +3,7 @@ export type Player = {
   pos: { x: number; y: number };
   tetromino: (string | number)[][];
   collided: boolean;
+  type?: string;
 };
 
 export type Cell = [string | number, string];
@@ -126,4 +127,46 @@ export const isTSpin = (player: Player, stage: Stage): boolean => {
   let occ = 0;
   for (const [x, y] of corners) if (isOccupied(stage, x, y)) occ++;
   return occ >= 3;
+};
+
+export type TSpinType = 'none' | 'mini' | 'normal';
+
+type TOrientation = 'up' | 'right' | 'down' | 'left';
+
+const detectTOrientation = (matrix: (string | number)[][]): TOrientation => {
+  if (matrix[0]?.[1] && matrix[0][1] !== 0) return 'up';
+  if (matrix[1]?.[2] && matrix[1][2] !== 0) return 'right';
+  if (matrix[2]?.[1] && matrix[2][1] !== 0) return 'down';
+  if (matrix[1]?.[0] && matrix[1][0] !== 0) return 'left';
+  return 'up';
+};
+
+const FRONT_OFFSETS: Record<TOrientation, Array<[number, number]>> = {
+  up: [[-1, -1], [1, -1]],
+  right: [[1, -1], [1, 1]],
+  down: [[-1, 1], [1, 1]],
+  left: [[-1, -1], [-1, 1]],
+};
+
+export const getTSpinType = (
+  player: Player & { type?: string },
+  stage: Stage,
+  linesCleared: number
+): TSpinType => {
+  if ((player.type ?? '').toUpperCase() !== 'T') return 'none';
+  if (!isTSpin(player, stage)) return 'none';
+  if (linesCleared >= 2) return 'normal';
+
+  const orientation = detectTOrientation(player.tetromino);
+  const cx = player.pos.x + 1;
+  const cy = player.pos.y + 1;
+  const fronts = FRONT_OFFSETS[orientation];
+  const occupiedFronts = fronts.reduce((acc, [dx, dy]) => {
+    return acc + (isOccupied(stage, cx + dx, cy + dy) ? 1 : 0);
+  }, 0);
+
+  if (linesCleared === 0) {
+    return occupiedFronts >= 2 ? 'normal' : 'mini';
+  }
+  return occupiedFronts >= 2 ? 'normal' : 'mini';
 };

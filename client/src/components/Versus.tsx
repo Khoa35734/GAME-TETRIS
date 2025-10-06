@@ -3,25 +3,47 @@ import { useNavigate } from 'react-router-dom';
 import socket, { SERVER_URL } from '../socket.ts';
 import Stage from './Stage';
 import { HoldPanel, NextPanel } from './SidePanels';
-import { checkCollision, createStage, isGameOverFromBuffer, isTSpin } from '../gamehelper';
-import type { Stage as StageType, Cell as StageCell } from '../gamehelper';
+import { checkCollision, createStage, getTSpinType, isGameOverFromBuffer } from '../gamehelper';
+import type { Stage as StageType, Cell as StageCell, TSpinType } from '../gamehelper';
 import { usePlayer } from '../hooks/usePlayer';
 import { useStage } from '../hooks/useStage';
 import { useGameStatus } from '../hooks/useGameStatus';
 import { useInterval } from '../hooks/useInterval';
 
-// Movement/Gravity settings
-const INITIAL_SPEED_MS: number = 1000;
-const SPEED_FACTOR: number = 0.85;
-const MIN_SPEED_MS: number = 60;
-const getFallSpeed = (lvl: number) => Math.max(MIN_SPEED_MS, Math.round(INITIAL_SPEED_MS * Math.pow(SPEED_FACTOR, lvl)));
+// --- DAS/ARR Movement Settings ---
+const DAS_DELAY: number = 120; // Delayed Auto Shift: thời gian giữ phím trước khi tự động lặp (ms)
+const MOVE_INTERVAL: number = 40; // Auto Repeat Rate: khoảng cách giữa các lần di chuyển tự động (ms)
+
+// --- Gravity/Speed Settings ---
+// Tốc độ rơi: Bắt đầu 800ms ở level 1, giảm dần đến ~16ms ở level 22
+const MAX_LEVEL = 22; // Level tối đa
+
+const getFallSpeed = (lvl: number): number => {
+  // Cap level tại 22
+  const L = Math.min(lvl, MAX_LEVEL - 1); // lvl từ 0-21, map sang level 1-22
+  
+  // Level 0 (hiển thị level 1): 800ms
+  // Level 21 (hiển thị level 22): ~16ms
+  const START_SPEED = 800; // 0.8 giây ở level 1
+  const END_SPEED = 16.67;  // ~16.67ms ở level 22 (instant)
+  
+  if (L >= MAX_LEVEL - 1) {
+    return END_SPEED;
+  }
+  
+  // Giảm dần theo hàm mũ để có độ chuyển tiếp mượt
+  const progress = L / (MAX_LEVEL - 1); // 0 → 1
+  const speed = START_SPEED * Math.pow(END_SPEED / START_SPEED, progress);
+  
+  return Math.max(END_SPEED, speed);
+};
+
+// --- Lock Delay Settings ---
+const INACTIVITY_LOCK_MS = 750; // Không thao tác trong 0.75s → lock
+const HARD_CAP_MS = 3000; // Sau 3s từ lúc chạm đất đầu tiên → lock ngay
 
 type MatchOutcome = 'win' | 'lose' | 'draw';
 type MatchSummary = { outcome: MatchOutcome; reason?: string } | null;
-
-const STANDARD_BASE = [0, 1, 2, 4];
-const TSPIN_BASE = [2, 4, 6, 0];
-const MAX_COMBO_BONUS = 5;
 
 const cloneStageForNetwork = (stage: StageType): StageType =>
   stage.map(row => row.map(cell => [cell[0], cell[1]] as StageCell));
@@ -55,6 +77,24 @@ const Versus: React.FC = () => {
   const [timerOn, setTimerOn] = useState(false);
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+  
+  // DAS/ARR movement state
+  const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
+  
+  // Lock delay state
+  const [isGrounded, setIsGrounded] = useState(false);
+  const inactivityTimeoutRef = useRef<number | null>(null);
+  const capTimeoutRef = useRef<number | null>(null);
+  const capExpiredRef = useRef<boolean>(false);
+  const groundedSinceRef = useRef<number | null>(null);
+  const lastGroundActionRef = useRef<number | null>(null);
+  const prevPlayerRef = useRef<{ x: number; y: number; rotKey: string } | null>(null);
+  
+  // AFK Detection & Disconnect Handling
+  const [showAFKWarning, setShowAFKWarning] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const afkTimeoutRef = useRef<number | null>(null);
+  const lastKeyPressRef = useRef<number>(Date.now());
   
   const wrapperRef = useRef<HTMLDivElement>(null);
   const matchTimer = useRef<number | null>(null);
@@ -94,6 +134,63 @@ const Versus: React.FC = () => {
     return updated;
   }, [setStage]);
 
+  // --- Lock Delay & Movement Helpers ---
+  const clearInactivity = useCallback(() => {
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+      inactivityTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearCap = useCallback(() => {
+    if (capTimeoutRef.current) {
+      clearTimeout(capTimeoutRef.current);
+      capTimeoutRef.current = null;
+    }
+  }, []);
+
+  const doLock = useCallback(() => {
+    clearInactivity();
+    clearCap();
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    capExpiredRef.current = false;
+    setIsGrounded(false);
+    setLocking(true);
+  }, [clearInactivity, clearCap]);
+
+  const startGroundTimers = useCallback(() => {
+    if (capExpiredRef.current) {
+      doLock();
+      return;
+    }
+
+    clearInactivity();
+    inactivityTimeoutRef.current = setTimeout(() => {
+      doLock();
+    }, INACTIVITY_LOCK_MS);
+
+    if (!groundedSinceRef.current) {
+      groundedSinceRef.current = Date.now();
+      capTimeoutRef.current = setTimeout(() => {
+        capExpiredRef.current = true;
+        doLock();
+      }, HARD_CAP_MS);
+    }
+  }, [doLock, clearInactivity]);
+
+  const onGroundAction = useCallback(() => {
+    lastGroundActionRef.current = Date.now();
+    clearInactivity();
+    if (capExpiredRef.current) {
+      doLock();
+      return;
+    }
+    inactivityTimeoutRef.current = setTimeout(() => {
+      doLock();
+    }, INACTIVITY_LOCK_MS);
+  }, [doLock, clearInactivity]);
+
   // --- Core Game Logic ---
   const startGame = useCallback(() => {
     setStage(createStage());
@@ -112,6 +209,19 @@ const Versus: React.FC = () => {
     setMatchResult(null);
     comboRef.current = 0;
     b2bRef.current = 0;
+    
+    // Reset movement state
+    setMoveIntent(null);
+    
+    // Reset lock delay state
+    if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
+    if (capTimeoutRef.current) clearTimeout(capTimeoutRef.current);
+    inactivityTimeoutRef.current = null;
+    capTimeoutRef.current = null;
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
 
     setOppStage(createStage());
     setOppGameOver(false);
@@ -258,6 +368,18 @@ const Versus: React.FC = () => {
     };
     socket.on('game:state', onGameState);
 
+    // Player disconnect handler (opponent disconnected)
+    const onPlayerDisconnect = (data: any) => {
+      if (data?.playerId === opponentId) {
+        // Opponent disconnected → auto win
+        setTimerOn(false);
+        setDropTime(null);
+        setOppGameOver(true);
+        setMatchResult({ outcome: 'win', reason: 'Đối thủ đã ngắt kết nối' });
+      }
+    };
+    socket.on('player:disconnect', onPlayerDisconnect);
+
     return () => {
       stopMatchmaking();
       socket.off('ranked:found', onFound);
@@ -266,112 +388,314 @@ const Versus: React.FC = () => {
       socket.off('game:over', onGameOver);
       socket.off('game:garbage', onGarbage);
       socket.off('game:state', onGameState);
+      socket.off('player:disconnect', onPlayerDisconnect);
     };
-  }, [meId, waiting]);
+  }, [meId, waiting, opponentId]);
 
   // Unmount cleanup
   useEffect(() => {
     return () => {
       if (meId) socket.emit('ranked:leave', meId);
+      clearAFKTimer();
     };
   }, [meId]);
+
+  // Beforeunload handler - Detect tab close/refresh
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (matchResult === null && !gameOver && countdown === null) {
+        // Đang trong trận → warning
+        e.preventDefault();
+        e.returnValue = 'Bạn đang trong trận đấu. Thoát sẽ bị tính thua!';
+        
+        // Emit forfeit when leaving
+        socket.emit('game:forfeit', { 
+          roomId, 
+          playerId: meId,
+          reason: 'Người chơi đóng tab/refresh' 
+        });
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [matchResult, gameOver, countdown, roomId, meId]);
+
+  // AFK Detection
+  useEffect(() => {
+    if (countdown === null && !gameOver && matchResult === null && !showAFKWarning) {
+      resetAFKTimer();
+    } else {
+      clearAFKTimer();
+    }
+    return () => clearAFKTimer();
+  }, [countdown, gameOver, matchResult, showAFKWarning]);
 
   // ... (rest of the component logic: controls, gravity, etc.)
   // This part is extensive but assumed to be functionally correct for gameplay.
   // The provided code will be inserted here without changes.
   const pieceCountRef = useRef(0);
 
-    const hardDrop = () => {
-        if (gameOver || countdown !== null || matchResult !== null) return;
-        let dropDistance = 0;
-        while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
-        updatePlayerPos({ x: 0, y: dropDistance, collided: true });
-        setLocking(true);
-      };
+  const movePlayer = useCallback((dir: number) => {
+    if (gameOver || countdown !== null || matchResult !== null) return false;
+    if (!checkCollision(player, stage, { x: dir, y: 0 })) {
+      updatePlayerPos({ x: dir, y: 0, collided: false });
+      return true;
+    }
+    return false;
+  }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos]);
+
+  const movePlayerToSide = useCallback((dir: number) => {
+    if (gameOver || countdown !== null || matchResult !== null) return;
+    let moved = false;
+    while (!checkCollision(player, stage, { x: dir, y: 0 })) {
+      updatePlayerPos({ x: dir, y: 0, collided: false });
+      moved = true;
+    }
+    if (moved && isGrounded) {
+      onGroundAction();
+    }
+  }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos, isGrounded, onGroundAction]);
+
+  const hardDrop = () => {
+    if (gameOver || countdown !== null || matchResult !== null) return;
+    let dropDistance = 0;
+    while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
+    updatePlayerPos({ x: 0, y: dropDistance, collided: true });
+    setLocking(true);
+  };
+
+  // AFK Timer Management
+  const clearAFKTimer = () => {
+    if (afkTimeoutRef.current) {
+      clearTimeout(afkTimeoutRef.current);
+      afkTimeoutRef.current = null;
+    }
+  };
+
+  const resetAFKTimer = () => {
+    clearAFKTimer();
+    lastKeyPressRef.current = Date.now();
     
-      const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-        if (gameOver || countdown !== null || matchResult !== null) return;
-        if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) e.preventDefault();
-      
-        const { keyCode } = e;
-        if (keyCode === 37 || keyCode === 39) { // Left / Right
-          const dir = keyCode === 37 ? -1 : 1;
-          if (!checkCollision(player, stage, { x: dir, y: 0 })) {
-            updatePlayerPos({ x: dir, y: 0, collided: false });
+    // Chỉ start AFK timer khi game đang chơi
+    if (countdown === null && !gameOver && matchResult === null && !showAFKWarning) {
+      afkTimeoutRef.current = window.setTimeout(() => {
+        // 5 giây không nhấn phím → AFK → tự động thua
+        handleForfeit('AFK');
+      }, 5000);
+    }
+  };
 
-          }
-        } else if (keyCode === 40) { // Down
-          if (!checkCollision(player, stage, { x: 0, y: 1 })) {
-            updatePlayerPos({ x: 0, y: 1, collided: false });
-          }
-        } else if (keyCode === 38) { // Up (Rotate)
-            playerRotate(stage, 1);
-        } else if (keyCode === 32) { // Space (Hard Drop)
-          hardDrop();
-        } else if (keyCode === 67) { // C (Hold)
-          if (!hasHeld && canHold) {
-            holdSwap();
-            setHasHeld(true);
-          }
-        }
-      };
-
-    const handleKeyUp = (_e: React.KeyboardEvent<HTMLDivElement>) => {
-        // Placeholder for key release logic if needed
-    };
-
-    useInterval(() => { // Gravity
-        if (gameOver || locking || countdown !== null || matchResult !== null) return;
-        if (!checkCollision(player, stage, { x: 0, y: 1 })) {
-          updatePlayerPos({ x: 0, y: 1, collided: false });
-        } else {
-          setLocking(true);
-        }
-      }, dropTime);
-
-
-    useEffect(() => {
-        if (locking) {
-            updatePlayerPos({x: 0, y: 0, collided: true});
-        }
-    }, [locking, updatePlayerPos]);
+  // Forfeit handler - emit thua cho server
+  const handleForfeit = (reason: string) => {
+    if (matchResult !== null) return; // Đã kết thúc rồi
     
-    useEffect(() => {
-      if (rowsCleared > 0) {
-        setRows(prev => {
-          const next = prev + rowsCleared;
-          setLevel(Math.floor(next / 10));
-          return next;
-        });
+    setShowAFKWarning(true);
+    setDropTime(null); // Pause game
+    setGameOver(true);
+    setTimerOn(false);
+    
+    // Emit forfeit event
+    socket.emit('game:forfeit', { 
+      roomId, 
+      playerId: meId,
+      reason 
+    });
+    
+    setMatchResult({ outcome: 'lose', reason: `Bạn đã thua: ${reason}` });
+  };
+
+  // Exit button handler with confirmation
+  const handleExitClick = () => {
+    if (matchResult !== null) {
+      // Đã kết thúc rồi → cho phép thoát tự do
+      navigate('/online');
+      return;
+    }
+    
+    // Đang chơi → hiện confirm dialog
+    setShowExitConfirm(true);
+  };
+
+  const confirmExit = () => {
+    handleForfeit('Người chơi thoát trận');
+    setTimeout(() => navigate('/online'), 1000);
+  };
+
+  const cancelExit = () => {
+    setShowExitConfirm(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Reset AFK timer khi có input
+    if (showAFKWarning) {
+      // Đang hiện warning → nhấn phím bất kỳ để resume
+      setShowAFKWarning(false);
+      setDropTime(getFallSpeed(level)); // Resume game
+      resetAFKTimer();
+      socket.emit('player:active', { roomId, playerId: meId }); // Thông báo cho server là player đã active lại
+      return;
+    }
+    
+    resetAFKTimer(); // Reset AFK mỗi khi nhấn phím
+
+    if (gameOver || countdown !== null || matchResult !== null) return;
+    if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) e.preventDefault();
+  
+    const { keyCode } = e;
+    if (keyCode === 37 || keyCode === 39) { // Left / Right
+      const dir = keyCode === 37 ? -1 : 1;
+      if (e.repeat) return;
+      setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
+      movePlayer(dir);
+      if (isGrounded) {
+        onGroundAction();
       }
-    }, [rowsCleared, setRows, setLevel]);
+    } else if (keyCode === 40) { // Down
+      if (!e.repeat) {
+        setDropTime(MOVE_INTERVAL);
+      }
+    } else if (keyCode === 38) { // Up (Rotate)
+      playerRotate(stage, 1);
+      if (isGrounded) {
+        onGroundAction();
+      }
+    } else if (keyCode === 32) { // Space (Hard Drop)
+      hardDrop();
+    } else if (keyCode === 67) { // C (Hold)
+      if (!hasHeld && canHold) {
+        holdSwap();
+        setHasHeld(true);
+      }
+    }
+  };
 
-    const calculateLockGarbage = useCallback((lines: number, tspin: boolean, pc: boolean) => {
+  const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const { keyCode } = e;
+    if (keyCode === 37 || keyCode === 39) { // Left / Right
+      const dir = keyCode === 37 ? -1 : 1;
+      if (moveIntent?.dir === dir) {
+        setMoveIntent(null);
+      }
+    } else if (keyCode === 40) { // Down
+      setDropTime(getFallSpeed(level));
+    }
+  };
+
+  useInterval(() => { // Gravity
+    if (gameOver || locking || countdown !== null || matchResult !== null) return;
+    if (!checkCollision(player, stage, { x: 0, y: 1 })) {
+      updatePlayerPos({ x: 0, y: 1, collided: false });
+    } else {
+      setLocking(true);
+    }
+  }, dropTime);
+
+  // DAS Charging
+  useInterval(() => {
+    if (!moveIntent || moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null) return;
+    const elapsed = Date.now() - moveIntent.startTime;
+    if (elapsed >= DAS_DELAY) {
+      setMoveIntent(prev => prev ? { ...prev, dasCharged: true } : null);
+    }
+  }, moveIntent && !moveIntent.dasCharged ? 16 : null);
+
+  // ARR Movement
+  useInterval(() => {
+    if (!moveIntent || !moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null) return;
+    const moved = movePlayer(moveIntent.dir);
+    if (moved && isGrounded) {
+      onGroundAction();
+    }
+  }, moveIntent?.dasCharged ? MOVE_INTERVAL : null);
+
+
+  useEffect(() => {
+    if (locking) {
+      updatePlayerPos({x: 0, y: 0, collided: true});
+    }
+  }, [locking, updatePlayerPos]);
+  
+  useEffect(() => {
+    if (rowsCleared > 0) {
+      setRows(prev => {
+        const next = prev + rowsCleared;
+        setLevel(Math.floor(next / 10));
+        return next;
+      });
+    }
+  }, [rowsCleared, setRows, setLevel]);
+
+  // Lock Delay Tracking
+  useEffect(() => {
+    if (gameOver || countdown !== null || matchResult !== null || locking) {
+      setIsGrounded(false);
+      clearInactivity();
+      clearCap();
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      capExpiredRef.current = false;
+      return;
+    }
+
+    const grounded = checkCollision(player, stage, { x: 0, y: 1 });
+    setIsGrounded(grounded);
+
+    if (grounded) {
+      startGroundTimers();
+    } else {
+      clearInactivity();
+      clearCap();
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      capExpiredRef.current = false;
+    }
+  }, [player, stage, gameOver, countdown, matchResult, locking, startGroundTimers, clearInactivity, clearCap]);
+
+    const calculateLockGarbage = useCallback((lines: number, tspinType: TSpinType, pc: boolean) => {
+      const boundedLines = Math.max(0, Math.min(4, lines));
+      const isTetris = tspinType === 'none' && boundedLines === 4;
+      const isTSpinClear = tspinType !== 'none' && boundedLines > 0;
+
+      let b2bBonus = 0;
+      const prevB2B = b2bRef.current;
+      if (boundedLines > 0 && (isTetris || isTSpinClear)) {
+        b2bBonus = prevB2B >= 1 ? 1 : 0;
+        b2bRef.current = prevB2B + 1;
+      } else if (boundedLines > 0) {
+        b2bRef.current = 0;
+      }
+
+      if (boundedLines > 0) {
+        comboRef.current += 1;
+      } else {
+        comboRef.current = 0;
+      }
+
+      const comboChain = Math.max(0, comboRef.current - 1);
+      let comboBonus = 0;
+      if (comboChain >= 9) comboBonus = 5;
+      else if (comboChain >= 7) comboBonus = 4;
+      else if (comboChain >= 5) comboBonus = 3;
+      else if (comboChain >= 3) comboBonus = 2;
+      else if (comboChain >= 1) comboBonus = 1;
+
       let garbage = 0;
       if (pc) {
-        garbage += 10;
-      } else {
-        const base = tspin ? TSPIN_BASE : STANDARD_BASE;
-        garbage += base[lines] ?? 0;
-
-        if ((tspin && lines > 0) || lines === 4) {
-          if (b2bRef.current >= 1) garbage += 1;
-          b2bRef.current += 1;
-        } else if (lines > 0) {
-          b2bRef.current = 0;
-        }
-
-        if (lines > 0) {
-          comboRef.current += 1;
+        garbage = 10;
+      } else if (isTSpinClear) {
+        if (tspinType === 'mini' && boundedLines === 1) {
+          garbage = 0;
         } else {
-          comboRef.current = -1;
+          const tspinBase = [0, 2, 4, 6];
+          garbage = tspinBase[boundedLines] ?? 0;
         }
-
-        if (comboRef.current >= 1) {
-          garbage += Math.min(MAX_COMBO_BONUS, Math.floor((comboRef.current + 1) / 2));
-        }
+      } else {
+        const standardBase = [0, 0, 1, 2, 4];
+        garbage = standardBase[boundedLines] ?? 0;
       }
-      return garbage;
+
+      return garbage + b2bBonus + comboBonus;
     }, []);
 
     useEffect(() => {
@@ -381,14 +705,14 @@ const Versus: React.FC = () => {
 
   const lines = lastPlacement.cleared;
   const mergedStage = lastPlacement.mergedStage;
-      const tspin = lines > 0 && player.type === 'T' && isTSpin(player as any, mergedStage as any);
+      const tspinType: TSpinType = getTSpinType(player as any, mergedStage as any, lines);
       const pc = lines > 0 && isPerfectClearBoard(stage);
 
       if (roomId) {
-        socket.emit('game:lock', roomId, { lines, tspin, pc });
+        socket.emit('game:lock', roomId, { lines, tspinType, pc });
       }
 
-      const sentGarbage = calculateLockGarbage(lines, tspin, pc);
+      const sentGarbage = calculateLockGarbage(lines, tspinType, pc);
       if (sentGarbage > 0) {
         setGarbageToSend(prev => prev + sentGarbage);
       }
@@ -458,7 +782,7 @@ const Versus: React.FC = () => {
       style={{ 
         width: '100vw',
         height: '100vh',
-        background: `url('/img/bg1.gif') center/cover, #000`,
+        background: `url('/img/bg.jpg') center/cover, #000`,
         overflow: 'hidden',
         display: 'grid', 
         placeItems: 'center' 
@@ -529,25 +853,21 @@ const Versus: React.FC = () => {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 36, alignItems: 'start' }}>
-          {/* Left side: OPPONENT */}
+          {/* Left side: YOU (ĐÃ ĐỔI - Board của bạn bên TRÁI với viền xanh lá) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
-            <div style={{ gridColumn: '1 / -1', color: '#fff', marginBottom: 4, fontWeight: 700 }}>{opponentId ? `Đối thủ: ${opponentId}` : 'Đối thủ'}</div>
-            <HoldPanel hold={oppHold} />
-            <Stage stage={(netOppStage as any) ?? oppStage} />
-            <div style={{ display: 'grid', gap: 12 }}>
-              {countdown === null && <NextPanel queue={oppNextFour as any} />}
-              <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>OPP STATUS</div>
-                <div>GameOver: {oppGameOver ? 'YES' : 'NO'}</div>
-                <div>Hold: {oppHold ? oppHold.shape || 'None' : 'None'}</div>
-              </div>
+            <div style={{ gridColumn: '1 / -1', color: '#4ecdc4', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
+              {meId ? `🎮 Bạn: ${meId}` : '🎮 Bạn'}
             </div>
-          </div>
-          {/* Right side: YOU */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
-            <div style={{ gridColumn: '1 / -1', color: '#fff', marginBottom: 4, fontWeight: 700 }}>{meId ? `Bạn: ${meId}` : 'Bạn'}</div>
             <HoldPanel hold={hold as any} />
-            <Stage stage={stage} />
+            <div style={{ 
+              border: '4px solid #4ecdc4', 
+              borderRadius: '8px',
+              boxShadow: '0 0 20px rgba(78, 205, 196, 0.5), inset 0 0 10px rgba(78, 205, 196, 0.1)',
+              padding: '4px',
+              background: 'rgba(78, 205, 196, 0.05)'
+            }}>
+              <Stage stage={stage} />
+            </div>
             <div style={{ display: 'grid', gap: 12 }}>
               <NextPanel queue={nextFour as any} />
               <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
@@ -557,6 +877,31 @@ const Versus: React.FC = () => {
                 <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
                 <div>Incoming: {pendingGarbageLeft}</div>
                 <div>Sent: {garbageToSend}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right side: OPPONENT (ĐÃ ĐỔI - Board đối thủ bên PHẢI với viền đỏ) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
+            <div style={{ gridColumn: '1 / -1', color: '#ff6b6b', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
+              {opponentId ? `⚔️ Đối thủ: ${opponentId}` : '⚔️ Đối thủ'}
+            </div>
+            <HoldPanel hold={oppHold} />
+            <div style={{ 
+              border: '4px solid #ff6b6b', 
+              borderRadius: '8px',
+              boxShadow: '0 0 20px rgba(255, 107, 107, 0.5), inset 0 0 10px rgba(255, 107, 107, 0.1)',
+              padding: '4px',
+              background: 'rgba(255, 107, 107, 0.05)'
+            }}>
+              <Stage stage={(netOppStage as any) ?? oppStage} />
+            </div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              {countdown === null && <NextPanel queue={oppNextFour as any} />}
+              <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>OPP STATUS</div>
+                <div>GameOver: {oppGameOver ? 'YES' : 'NO'}</div>
+                <div>Hold: {oppHold ? oppHold.shape || 'None' : 'None'}</div>
               </div>
             </div>
           </div>
