@@ -341,8 +341,15 @@ const Versus: React.FC = () => {
     };
     socket.on('game:over', onGameOver);
 
-    const onGarbage = (g: number) => {
-      setPendingGarbageLeft((prev: number) => prev + (g || 0));
+    const onGarbage = (payload: any) => {
+      const amount = typeof payload === 'number'
+        ? payload
+        : Number(payload?.amount ?? 0) || 0;
+      if (!amount) {
+        // Ignore empty payloads so we do not show phantom garbage
+        return;
+      }
+      setPendingGarbageLeft((prev: number) => prev + amount);
     };
     socket.on('game:garbage', onGarbage);
     

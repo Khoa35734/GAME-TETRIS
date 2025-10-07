@@ -330,9 +330,14 @@ io.on('connection', (socket) => {
 
     g += b2bBonus + comboBonus;
 
-    // Send garbage to all other players in room
-    for (const [sid, sp] of r.players) {
-      if (sid !== socket.id && sp.alive) io.to(sid).emit('game:garbage', g);
+    if (g > 0) {
+      const payload = { amount: g, from: socket.id, roomId };
+      const targets = [...r.players.values()]
+        .filter(pl => pl.id !== socket.id && pl.alive)
+        .map(pl => pl.id);
+      if (targets.length) {
+        io.to(targets).emit('game:garbage', payload);
+      }
     }
     saveRoom(r);
   });
