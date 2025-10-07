@@ -5,6 +5,7 @@ interface User {
   username: string;
   email?: string;
   isGuest: boolean;
+  accountId: number; // Thêm accountId để định danh duy nhất
 }
 
 interface GameModeProps {
@@ -88,10 +89,23 @@ const HomeMenu: React.FC = () => {
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
+      
+      // Generate accountId từ username (hash simple) hoặc check localStorage
+      const storedAccounts = JSON.parse(localStorage.getItem('tetris:accounts') || '{}');
+      let accountId = storedAccounts[loginForm.username];
+      
+      if (!accountId) {
+        // Tạo accountId mới nếu chưa có (số từ 10000 - 99999)
+        accountId = 10000 + Math.floor(Math.random() * 90000);
+        storedAccounts[loginForm.username] = accountId;
+        localStorage.setItem('tetris:accounts', JSON.stringify(storedAccounts));
+      }
+      
       const user: User = {
         username: loginForm.username,
         email: loginForm.username.includes("@") ? loginForm.username : `${loginForm.username}@example.com`,
         isGuest: false,
+        accountId: accountId,
       };
       setCurrentUser(user);
       setShowGameModes(true);
@@ -127,10 +141,18 @@ const HomeMenu: React.FC = () => {
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
+      
+      // Generate accountId mới cho tài khoản đăng ký
+      const storedAccounts = JSON.parse(localStorage.getItem('tetris:accounts') || '{}');
+      const accountId = 10000 + Math.floor(Math.random() * 90000);
+      storedAccounts[username] = accountId;
+      localStorage.setItem('tetris:accounts', JSON.stringify(storedAccounts));
+      
       const user: User = {
         username,
         email,
         isGuest: false,
+        accountId: accountId,
       };
       setCurrentUser(user);
       setShowGameModes(true);
@@ -142,9 +164,13 @@ const HomeMenu: React.FC = () => {
   // Play as guest
   const playAsGuest = () => {
     const guestId = "Guest_" + Math.random().toString(36).substr(2, 9);
+    // Guest cũng cần accountId (số âm để phân biệt với tk thật)
+    const accountId = -Math.floor(Math.random() * 90000) - 10000; // -10000 đến -99999
+    
     const user: User = {
       username: guestId,
       isGuest: true,
+      accountId: accountId,
     };
     setCurrentUser(user);
     setShowGameModes(true);
@@ -341,7 +367,7 @@ const HomeMenu: React.FC = () => {
 
             {/* Player Details */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {/* Username */}
+              {/* Username + Account ID */}
               <div style={{ 
                 color: '#fff', 
                 fontWeight: 700, 
@@ -362,6 +388,15 @@ const HomeMenu: React.FC = () => {
                     Khách
                   </span>
                 )}
+              </div>
+
+              {/* Account ID - Hiển thị cho tất cả */}
+              <div style={{ 
+                fontSize: '0.85rem', 
+                color: '#888',
+                fontWeight: 500
+              }}>
+                ID: #{currentUser.accountId}
               </div>
 
               {/* Level & Stars - Chỉ hiện khi KHÔNG phải khách */}

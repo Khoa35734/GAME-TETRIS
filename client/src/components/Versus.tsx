@@ -56,6 +56,52 @@ const isPerfectClearBoard = (stage: StageType): boolean =>
     value === 0 || value === '0' || (typeof value === 'string' && value.startsWith('ghost'))
   ));
 
+// Calculate garbage lines from clear action
+const calculateGarbageLines = (
+  lines: number, 
+  tspinType: TSpinType, 
+  pc: boolean,
+  combo: number,
+  b2b: number
+): number => {
+  if (lines === 0) return 0;
+
+  let garbage = 0;
+
+  // Perfect Clear bonus
+  if (pc) {
+    garbage = 10;
+  } else if (tspinType !== 'none' && lines > 0) {
+    // T-Spin clears
+    if (tspinType === 'mini' && lines === 1) {
+      garbage = 0;
+    } else {
+      const tspinBase = [0, 2, 4, 6];
+      garbage = tspinBase[lines] ?? 0;
+    }
+  } else {
+    // Standard clears
+    const standardBase = [0, 0, 1, 2, 4];
+    garbage = standardBase[lines] ?? 0;
+  }
+
+  // B2B bonus (Back-to-Back Tetris or T-Spin)
+  const isTetris = tspinType === 'none' && lines === 4;
+  const isTSpinClear = tspinType !== 'none' && lines > 0;
+  if (b2b >= 1 && (isTetris || isTSpinClear)) {
+    garbage += 1;
+  }
+
+  // Combo bonus (combo >= 2)
+  if (combo >= 9) garbage += 5;
+  else if (combo >= 7) garbage += 4;
+  else if (combo >= 5) garbage += 3;
+  else if (combo >= 3) garbage += 2;
+  else if (combo >= 2) garbage += 1;
+
+  return garbage;
+};
+
 const Versus: React.FC = () => {
   const navigate = useNavigate();
   const [meId, setMeId] = useState<string | null>(null);
@@ -78,6 +124,11 @@ const Versus: React.FC = () => {
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
   
+  // NEW: Garbage queue and combo/b2b tracking
+  const [incomingGarbage, setIncomingGarbage] = useState(0); // Garbage queued from opponent
+  const [combo, setCombo] = useState(0);
+  const [b2b, setB2b] = useState(0);
+  
   // DAS/ARR movement state
   const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
   
@@ -88,13 +139,9 @@ const Versus: React.FC = () => {
   const capExpiredRef = useRef<boolean>(false);
   const groundedSinceRef = useRef<number | null>(null);
   const lastGroundActionRef = useRef<number | null>(null);
-  const prevPlayerRef = useRef<{ x: number; y: number; rotKey: string } | null>(null);
   
-  // AFK Detection & Disconnect Handling
-  const [showAFKWarning, setShowAFKWarning] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  // AFK Detection - DISABLED FOR TESTING
   const afkTimeoutRef = useRef<number | null>(null);
-  const lastKeyPressRef = useRef<number>(Date.now());
   
   const wrapperRef = useRef<HTMLDivElement>(null);
   const matchTimer = useRef<number | null>(null);
@@ -107,14 +154,14 @@ const Versus: React.FC = () => {
   const [oppHold, setOppHold] = useState<any>(null);
   const [oppNextFour, setOppNextFour] = useState<any[]>([]);
   const [garbageToSend, setGarbageToSend] = useState(0);
-  const comboRef = useRef(0);
-  const b2bRef = useRef(0);
 
   const pendingGarbageRef = useRef(0);
+  const pendingLockRef = useRef(false);
   useEffect(() => { pendingGarbageRef.current = pendingGarbageLeft; }, [pendingGarbageLeft]);
 
   const applyGarbageRows = useCallback((count: number): StageType | null => {
     if (count <= 0) return null;
+    console.log(`[applyGarbageRows] Applying ${count} garbage rows...`);
     let updated: StageType | null = null;
     setStage(prev => {
       if (!prev.length) {
@@ -125,10 +172,11 @@ const Versus: React.FC = () => {
       const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell)) as StageType;
       for (let i = 0; i < count; i++) {
         const hole = Math.floor(Math.random() * width);
-        cloned.shift();
-        cloned.push(createGarbageRow(width, hole));
+        cloned.shift(); // Remove top row
+        cloned.push(createGarbageRow(width, hole)); // Add garbage row at bottom
       }
       updated = cloned;
+      console.log(`[applyGarbageRows] Applied! Result has ${cloned.filter(row => row.some(cell => cell[0] === 'garbage')).length} garbage rows`);
       return cloned;
     });
     return updated;
@@ -207,8 +255,11 @@ const Versus: React.FC = () => {
     pendingGarbageRef.current = 0;
     setGarbageToSend(0);
     setMatchResult(null);
-    comboRef.current = 0;
-    b2bRef.current = 0;
+    
+    // Reset NEW garbage system
+    setIncomingGarbage(0);
+    setCombo(0);
+    setB2b(0);
     
     // Reset movement state
     setMoveIntent(null);
@@ -269,19 +320,27 @@ const Versus: React.FC = () => {
 
     const run = async () => {
       try {
-        setDebugInfo(prev => [...prev, "Fetching IP..."]);
-        const res = await fetch(`${SERVER_URL}/whoami`);
-        const data = await res.json();
-        const ip = (data?.ip as string) || socket.id || 'me';
-        setMeId(ip);
-        setDebugInfo(prev => [...prev, `Got IP: ${ip}`]);
+        // Lấy accountId từ localStorage thay vì IP
+        const userStr = localStorage.getItem('tetris:user');
+        if (!userStr) {
+          console.error('No user found in localStorage');
+          setDebugInfo(prev => [...prev, 'ERROR: Not logged in']);
+          return;
+        }
+        
+        const user = JSON.parse(userStr);
+        const accountId = user.accountId?.toString() || socket.id;
+        
+        setMeId(accountId);
+        setDebugInfo(prev => [...prev, `Account ID: ${accountId} (${user.username})`]);
+        
         const elo = 1000;
-        socket.emit('ranked:enter', ip, elo);
-        socket.emit('ranked:match', ip, elo);
+        socket.emit('ranked:enter', accountId, elo);
+        socket.emit('ranked:match', accountId, elo);
         setDebugInfo(prev => [...prev, "Matchmaking started"]);
         
         matchTimer.current = window.setInterval(() => {
-          socket.emit('ranked:match', ip, elo);
+          socket.emit('ranked:match', accountId, elo);
         }, 2000);
 
       } catch (error) {
@@ -341,8 +400,52 @@ const Versus: React.FC = () => {
     };
     socket.on('game:over', onGameOver);
 
+    // NEW: Incoming garbage notification (queued, not applied yet)
+    const onIncomingGarbage = (data: { lines: number }) => {
+      console.log('� Incoming garbage queued:', data.lines);
+      setIncomingGarbage(data.lines);
+    };
+    socket.on('game:incomingGarbage', onIncomingGarbage);
+
+    // NEW: Garbage cancelled by counter-attack
+    const onGarbageCancelled = (data: { cancelled: number; remaining: number }) => {
+      console.log('🛡️ Garbage cancelled:', data.cancelled, 'remaining:', data.remaining);
+      setIncomingGarbage(data.remaining);
+    };
+    socket.on('game:garbageCancelled', onGarbageCancelled);
+
+    // NEW: Apply garbage (after delay from server)
+    const onApplyGarbage = (data: { lines: number }) => {
+      console.log('💥 Applying garbage:', data.lines);
+      if (data.lines > 0 && !gameOver) {
+        const updated = applyGarbageRows(data.lines);
+
+        // ✅ Xóa hàng rác chờ sau khi đã nhận
+        setIncomingGarbage(0);
+
+        if (updated && isGameOverFromBuffer(updated)) {
+          console.log('⚠️ Game over from garbage!');
+          setGameOver(true);
+          setDropTime(null);
+          setTimerOn(false);
+          if (roomId) socket.emit('game:topout', roomId);
+        }
+      }
+    };
+    socket.on('game:applyGarbage', onApplyGarbage);
+
+    // OLD: Keep for backward compatibility
     const onGarbage = (g: number) => {
-      setPendingGarbageLeft((prev: number) => prev + (g || 0));
+      console.log('🗑️ [LEGACY] Received garbage:', g);
+      if (g > 0 && !gameOver) {
+        const updated = applyGarbageRows(g);
+        if (updated && isGameOverFromBuffer(updated)) {
+          setGameOver(true);
+          setDropTime(null);
+          setTimerOn(false);
+          if (roomId) socket.emit('game:topout', roomId);
+        }
+      }
     };
     socket.on('game:garbage', onGarbage);
     
@@ -356,6 +459,11 @@ const Versus: React.FC = () => {
             return [0, 'clear'] as StageCell;
           }) : row
         ) as StageType;
+        
+        // Debug: Check for garbage in received board
+        const garbageRows = incoming.filter(row => row.some(cell => cell[0] === 'garbage')).length;
+        console.log('📥 Received opponent board - Garbage rows:', garbageRows);
+        
         setOppStage(incoming);
         setNetOppStage(incoming);
       }
@@ -380,60 +488,51 @@ const Versus: React.FC = () => {
     };
     socket.on('player:disconnect', onPlayerDisconnect);
 
+    // [THÊM MỚI] Lắng nghe sự kiện xác nhận đã gửi rác từ server
+    const onAttackSent = (data: { amount: number }) => {
+        if (data && typeof data.amount === 'number' && data.amount > 0) {
+            setGarbageToSend(prev => prev + data.amount);
+        }
+    };
+    socket.on('game:attack_sent', onAttackSent);
+
+
     return () => {
       stopMatchmaking();
       socket.off('ranked:found', onFound);
       socket.off('game:start', onGameStart);
       socket.off('game:next', onGameNext);
       socket.off('game:over', onGameOver);
+      socket.off('game:incomingGarbage', onIncomingGarbage);
+      socket.off('game:garbageCancelled', onGarbageCancelled);
+      socket.off('game:applyGarbage', onApplyGarbage);
       socket.off('game:garbage', onGarbage);
       socket.off('game:state', onGameState);
       socket.off('player:disconnect', onPlayerDisconnect);
+      socket.off('game:attack_sent', onAttackSent);
     };
-  }, [meId, waiting, opponentId]);
+  }, [
+    meId, 
+    waiting, 
+    opponentId, 
+    gameOver, 
+    roomId, 
+    applyGarbageRows, 
+    isGameOverFromBuffer, 
+    setGameOver, 
+    setDropTime, 
+    setTimerOn,
+    setIncomingGarbage
+  ]);
 
   // Unmount cleanup
   useEffect(() => {
     return () => {
       if (meId) socket.emit('ranked:leave', meId);
-      clearAFKTimer();
+      if (afkTimeoutRef.current) clearTimeout(afkTimeoutRef.current);
     };
   }, [meId]);
-
-  // Beforeunload handler - Detect tab close/refresh
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (matchResult === null && !gameOver && countdown === null) {
-        // Đang trong trận → warning
-        e.preventDefault();
-        e.returnValue = 'Bạn đang trong trận đấu. Thoát sẽ bị tính thua!';
-        
-        // Emit forfeit when leaving
-        socket.emit('game:forfeit', { 
-          roomId, 
-          playerId: meId,
-          reason: 'Người chơi đóng tab/refresh' 
-        });
-      }
-    };
-    
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [matchResult, gameOver, countdown, roomId, meId]);
-
-  // AFK Detection
-  useEffect(() => {
-    if (countdown === null && !gameOver && matchResult === null && !showAFKWarning) {
-      resetAFKTimer();
-    } else {
-      clearAFKTimer();
-    }
-    return () => clearAFKTimer();
-  }, [countdown, gameOver, matchResult, showAFKWarning]);
-
-  // ... (rest of the component logic: controls, gravity, etc.)
-  // This part is extensive but assumed to be functionally correct for gameplay.
-  // The provided code will be inserted here without changes.
+  
   const pieceCountRef = useRef(0);
 
   const movePlayer = useCallback((dir: number) => {
@@ -445,18 +544,6 @@ const Versus: React.FC = () => {
     return false;
   }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos]);
 
-  const movePlayerToSide = useCallback((dir: number) => {
-    if (gameOver || countdown !== null || matchResult !== null) return;
-    let moved = false;
-    while (!checkCollision(player, stage, { x: dir, y: 0 })) {
-      updatePlayerPos({ x: dir, y: 0, collided: false });
-      moved = true;
-    }
-    if (moved && isGrounded) {
-      onGroundAction();
-    }
-  }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos, isGrounded, onGroundAction]);
-
   const hardDrop = () => {
     if (gameOver || countdown !== null || matchResult !== null) return;
     let dropDistance = 0;
@@ -465,80 +552,7 @@ const Versus: React.FC = () => {
     setLocking(true);
   };
 
-  // AFK Timer Management
-  const clearAFKTimer = () => {
-    if (afkTimeoutRef.current) {
-      clearTimeout(afkTimeoutRef.current);
-      afkTimeoutRef.current = null;
-    }
-  };
-
-  const resetAFKTimer = () => {
-    clearAFKTimer();
-    lastKeyPressRef.current = Date.now();
-    
-    // Chỉ start AFK timer khi game đang chơi
-    if (countdown === null && !gameOver && matchResult === null && !showAFKWarning) {
-      afkTimeoutRef.current = window.setTimeout(() => {
-        // 5 giây không nhấn phím → AFK → tự động thua
-        handleForfeit('AFK');
-      }, 5000);
-    }
-  };
-
-  // Forfeit handler - emit thua cho server
-  const handleForfeit = (reason: string) => {
-    if (matchResult !== null) return; // Đã kết thúc rồi
-    
-    setShowAFKWarning(true);
-    setDropTime(null); // Pause game
-    setGameOver(true);
-    setTimerOn(false);
-    
-    // Emit forfeit event
-    socket.emit('game:forfeit', { 
-      roomId, 
-      playerId: meId,
-      reason 
-    });
-    
-    setMatchResult({ outcome: 'lose', reason: `Bạn đã thua: ${reason}` });
-  };
-
-  // Exit button handler with confirmation
-  const handleExitClick = () => {
-    if (matchResult !== null) {
-      // Đã kết thúc rồi → cho phép thoát tự do
-      navigate('/online');
-      return;
-    }
-    
-    // Đang chơi → hiện confirm dialog
-    setShowExitConfirm(true);
-  };
-
-  const confirmExit = () => {
-    handleForfeit('Người chơi thoát trận');
-    setTimeout(() => navigate('/online'), 1000);
-  };
-
-  const cancelExit = () => {
-    setShowExitConfirm(false);
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Reset AFK timer khi có input
-    if (showAFKWarning) {
-      // Đang hiện warning → nhấn phím bất kỳ để resume
-      setShowAFKWarning(false);
-      setDropTime(getFallSpeed(level)); // Resume game
-      resetAFKTimer();
-      socket.emit('player:active', { roomId, playerId: meId }); // Thông báo cho server là player đã active lại
-      return;
-    }
-    
-    resetAFKTimer(); // Reset AFK mỗi khi nhấn phím
-
     if (gameOver || countdown !== null || matchResult !== null) return;
     if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) e.preventDefault();
   
@@ -652,112 +666,112 @@ const Versus: React.FC = () => {
     }
   }, [player, stage, gameOver, countdown, matchResult, locking, startGroundTimers, clearInactivity, clearCap]);
 
-    const calculateLockGarbage = useCallback((lines: number, tspinType: TSpinType, pc: boolean) => {
-      const boundedLines = Math.max(0, Math.min(4, lines));
-      const isTetris = tspinType === 'none' && boundedLines === 4;
-      const isTSpinClear = tspinType !== 'none' && boundedLines > 0;
-
-      let b2bBonus = 0;
-      const prevB2B = b2bRef.current;
-      if (boundedLines > 0 && (isTetris || isTSpinClear)) {
-        b2bBonus = prevB2B >= 1 ? 1 : 0;
-        b2bRef.current = prevB2B + 1;
-      } else if (boundedLines > 0) {
-        b2bRef.current = 0;
-      }
-
-      if (boundedLines > 0) {
-        comboRef.current += 1;
-      } else {
-        comboRef.current = 0;
-      }
-
-      const comboChain = Math.max(0, comboRef.current - 1);
-      let comboBonus = 0;
-      if (comboChain >= 9) comboBonus = 5;
-      else if (comboChain >= 7) comboBonus = 4;
-      else if (comboChain >= 5) comboBonus = 3;
-      else if (comboChain >= 3) comboBonus = 2;
-      else if (comboChain >= 1) comboBonus = 1;
-
-      let garbage = 0;
-      if (pc) {
-        garbage = 10;
-      } else if (isTSpinClear) {
-        if (tspinType === 'mini' && boundedLines === 1) {
-          garbage = 0;
-        } else {
-          const tspinBase = [0, 2, 4, 6];
-          garbage = tspinBase[boundedLines] ?? 0;
-        }
-      } else {
-        const standardBase = [0, 0, 1, 2, 4];
-        garbage = standardBase[boundedLines] ?? 0;
-      }
-
-      return garbage + b2bBonus + comboBonus;
-    }, []);
-
     useEffect(() => {
       if (!player.collided) return;
+      pendingLockRef.current = true;
+    }, [player.collided]);
 
-      setLocking(false);
+    useEffect(() => {
+    if (!pendingLockRef.current) return;
 
-  const lines = lastPlacement.cleared;
-  const mergedStage = lastPlacement.mergedStage;
-      const tspinType: TSpinType = getTSpinType(player as any, mergedStage as any, lines);
-      const pc = lines > 0 && isPerfectClearBoard(stage);
+    pendingLockRef.current = false;
+    setLocking(false);
 
-      if (roomId) {
-        socket.emit('game:lock', roomId, { lines, tspinType, pc });
-      }
+    const lines = lastPlacement.cleared;
+    const mergedStage = lastPlacement.mergedStage;
+    const tspinType: TSpinType = getTSpinType(player as any, mergedStage as any, lines);
+    const pc = lines > 0 && isPerfectClearBoard(stage);
 
-      const sentGarbage = calculateLockGarbage(lines, tspinType, pc);
-      if (sentGarbage > 0) {
-        setGarbageToSend(prev => prev + sentGarbage);
-      }
+    console.log('🔒 LOCK - Lines:', lines, '(rowsCleared:', rowsCleared, ') T-Spin:', tspinType, 'PC:', pc, 'Combo:', combo, 'B2B:', b2b);
 
-      let pendingGarbage = pendingGarbageRef.current;
-      if (lines > 0 && pendingGarbage > 0) {
-        pendingGarbage = Math.max(0, pendingGarbage - lines);
-      }
+    // --- LOGIC ĐÃ SỬA ---
 
-      let stageAfterGarbage: StageType = stage;
-      if (pendingGarbage > 0) {
-        const updated = applyGarbageRows(pendingGarbage);
-        stageAfterGarbage = updated ?? stage;
-      }
+    // 1. TÍNH TOÁN newCombo VÀ newB2b TRƯỚC TIÊN
+    const isTetris = tspinType === 'none' && lines === 4;
+    const isTSpinClear = tspinType !== 'none' && lines > 0;
 
-      setPendingGarbageLeft(pendingGarbage);
-      pendingGarbageRef.current = pendingGarbage;
+    let newB2b = b2b;
+    let newCombo = combo;
 
-      if (isGameOverFromBuffer(stageAfterGarbage)) {
+    if (lines > 0) {
+        // Combo tăng lên với mỗi lần xóa dòng liên tiếp
+        newCombo = combo + 1;
+        // B2B tăng nếu là Tetris hoặc T-Spin, nếu không thì reset
+        if (isTetris || isTSpinClear) {
+            newB2b = b2b + 1;
+        } else {
+            newB2b = 0;
+        }
+    } else {
+        // Reset combo nếu không xóa dòng nào
+        newCombo = 0;
+    }
+
+    // 2. SỬ DỤNG CÁC GIÁ TRỊ MỚI ĐỂ TÍNH TOÁN GARBAGE
+    if (lines > 0 && roomId) {
+        // Truyền newCombo và newB2b vào hàm tính toán
+        const garbageLines = calculateGarbageLines(lines, tspinType, pc, newCombo, newB2b);
+        console.log('💣 Calculated garbage:', garbageLines, '(lines:', lines, 'newCombo:', newCombo, 'newB2b:', newB2b, ')');
+
+        if (garbageLines > 0) {
+            console.log('📤 Emitting game:attack with', garbageLines, 'lines');
+            socket.emit('game:attack', roomId, { lines: garbageLines });
+            // Lưu ý: State garbageToSend chỉ để hiển thị. Logic gửi đã xong.
+            // setGarbageToSend(prev => prev + garbageLines); // Dòng này có thể không cần thiết nếu server xác nhận lại
+        } else {
+            console.log('⚠️ No garbage to send (calculated 0)');
+        }
+    }
+
+    // 3. CẬP NHẬT STATE SAU KHI TÍNH TOÁN XONG
+    console.log('📊 Updating state: combo', combo, '→', newCombo, '| b2b', b2b, '→', newB2b);
+    setCombo(newCombo);
+    setB2b(newB2b);
+
+    // 4. TIẾP TỤC LOGIC GAME CÒN LẠI
+    if (isGameOverFromBuffer(stage)) {
         setGameOver(true);
         setDropTime(null);
         setTimerOn(false);
         if (roomId) socket.emit('game:topout', roomId);
         return;
-      }
+    }
 
-      resetPlayer();
-      setHasHeld(false);
-      setDropTime(getFallSpeed(level));
-      pieceCountRef.current += 1;
-      if (roomId && pieceCountRef.current % 7 === 0) {
+    resetPlayer();
+    setHasHeld(false);
+    setDropTime(getFallSpeed(level));
+    pieceCountRef.current += 1;
+    if (roomId && pieceCountRef.current % 7 === 0) {
         socket.emit('game:requestNext', roomId, 7);
-      }
-  }, [player.collided, lastPlacement, stage, roomId, level, calculateLockGarbage, applyGarbageRows, resetPlayer]);
+    }
+}, [lastPlacement, stage, roomId, level, combo, b2b, rowsCleared, resetPlayer, player]);
+
 
   // Send your state to opponent
+  const lastSyncTime = useRef<number>(0);
+  const lastSyncedStage = useRef<StageType | null>(null);
+  
   useEffect(() => {
-    if (!roomId || waiting) return;
+    if (!roomId || waiting || gameOver || countdown !== null) return;
+    
+    const stageChanged = JSON.stringify(lastSyncedStage.current) !== JSON.stringify(stage);
+    if (!stageChanged) return;
+    
+    const now = Date.now();
+    if (now - lastSyncTime.current < 100) return;
+    lastSyncTime.current = now;
+    lastSyncedStage.current = stage;
+    
     const gameState = {
       matrix: cloneStageForNetwork(stage),
       hold,
       next: nextFour
     };
     socket.emit('game:state', roomId, gameState);
-  }, [stage, hold, nextFour, roomId, waiting]);
+    
+    const garbageCount = stage.filter(row => row.some(cell => cell[0] === 'garbage')).length;
+    console.log('📤 Normal sync - Stage has', garbageCount, 'garbage rows');
+  }, [stage, hold, nextFour, roomId, waiting, gameOver, countdown]);
 
   // Timer for elapsed time
   useEffect(() => {
@@ -852,7 +866,33 @@ const Versus: React.FC = () => {
           {countdown}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 36, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 36, alignItems: 'start', position: 'relative' }}>
+          
+          {/* 🧪 TEST BUTTON - Test new attack system */}
+          <button 
+            onClick={() => {
+              console.log('🧪 TEST: Sending 2-line attack');
+              socket.emit('game:attack', roomId, { lines: 2 });
+            }}
+            style={{
+              position: 'fixed',
+              top: 10,
+              right: 10,
+              zIndex: 9999,
+              padding: '8px 16px',
+              background: '#ff6b6b',
+              color: 'white',
+              border: '2px solid #ff5252',
+              borderRadius: '5px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '12px',
+              boxShadow: '0 2px 8px rgba(255, 107, 107, 0.5)'
+            }}
+          >
+            🧪 TEST ATTACK (2 lines)
+          </button>
+
           {/* Left side: YOU (ĐÃ ĐỔI - Board của bạn bên TRÁI với viền xanh lá) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
             <div style={{ gridColumn: '1 / -1', color: '#4ecdc4', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
@@ -875,8 +915,12 @@ const Versus: React.FC = () => {
                 <div>Rows: {rows}</div>
                 <div>Level: {level}</div>
                 <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
-                <div>Incoming: {pendingGarbageLeft}</div>
-                <div>Sent: {garbageToSend}</div>
+                <div>Combo: {combo}</div>
+                <div>B2B: {b2b}</div>
+                <div style={{ color: incomingGarbage > 0 ? '#ff6b6b' : '#888' }}>
+                  ⚠️ Incoming: {incomingGarbage}
+                </div>
+                <div style={{ color: '#4ecdc4' }}>💣 Sent: {garbageToSend}</div>
               </div>
             </div>
           </div>

@@ -57,12 +57,16 @@ export async function deleteRoom(id: string) {
 }
 
 // Ranked queue operations
-export async function addToRankedQueue(playerId: string, elo: number) {
-  await redis.zAdd(RANKED_QUEUE_KEY, [{ score: elo, value: playerId }]);
+export async function addToRankedQueue(playerId: string | number, elo: number) {
+  // Convert playerId to string to ensure Redis compatibility
+  const playerIdStr = String(playerId);
+  await redis.zAdd(RANKED_QUEUE_KEY, [{ score: elo, value: playerIdStr }]);
 }
 
-export async function removeFromRankedQueue(playerId: string) {
-  await redis.zRem(RANKED_QUEUE_KEY, playerId);
+export async function removeFromRankedQueue(playerId: string | number) {
+  // Convert playerId to string to ensure Redis compatibility
+  const playerIdStr = String(playerId);
+  await redis.zRem(RANKED_QUEUE_KEY, playerIdStr);
 }
 
 export async function popBestMatch(targetElo: number, range = 100, exclude?: string) {

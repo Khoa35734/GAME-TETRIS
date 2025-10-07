@@ -93,6 +93,8 @@ type PlayerState = {
   combo: number;
   b2b: number; // back-to-back
   name?: string;
+  pendingGarbage: number; // Garbage queued to receive
+  lastAttackTime: number; // Timestamp of last attack
 };
 
 type Room = {
@@ -112,7 +114,9 @@ type RoomAck = {
 };
 
 const rooms = new Map<string, Room>();
-// Track IP to live socket ids (can be multiple tabs)
+// Track accountId to socket.id mapping (1 accountId = 1 active socket)
+const accountToSocket = new Map<string, string>();
+// Track IP to live socket ids (can be multiple tabs) - DEPRECATED, giữ lại cho legacy
 const ipToSockets = new Map<string, Set<string>>();
 
 initRedis().catch(err => console.error('[redis] init failed', err));
@@ -157,7 +161,7 @@ io.on('connection', (socket) => {
       id: roomId,
       host: socket.id,
       gen: bagGenerator(seed),
-      players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName }]]),
+      players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName, pendingGarbage: 0, lastAttackTime: 0 }]]),
       started: false,
       seed,
       maxPlayers,
@@ -196,7 +200,7 @@ io.on('connection', (socket) => {
 
     const displayName = typeof options?.name === 'string' ? options.name : undefined;
 
-    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName });
+    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName, pendingGarbage: 0, lastAttackTime: 0 });
     socket.join(roomId);
     cb?.({ ok: true, roomId });
     saveRoom(r);
@@ -277,7 +281,71 @@ io.on('connection', (socket) => {
     cb?.({ ok: true, roomId });
   });
 
-  // Garbage logic (simple guideline-ish)
+  // NEW: Client sends attack (garbage) to server
+  socket.on('game:attack', (roomId: string, payload: { lines: number }) => {
+    const r = rooms.get(roomId);
+    if (!r || !r.started) return;
+    const p = r.players.get(socket.id);
+    if (!p || !p.alive) return;
+
+    const lines = Math.max(0, Math.min(10, Number(payload?.lines) || 0));
+    if (lines === 0) return;
+
+    console.log(`[ATTACK] Player ${socket.id} sending ${lines} garbage lines`);
+
+    p.lastAttackTime = Date.now();
+
+    // Find opponents
+    const opponents = [...r.players.entries()].filter(([sid, sp]) => sid !== socket.id && sp.alive);
+    if (opponents.length === 0) {
+      console.log('[ATTACK] No alive opponents');
+      return;
+    }
+
+    // Queue garbage to each opponent with delay
+    for (const [oppId, opp] of opponents) {
+      // Cancel mechanic: if opponent has pending garbage, reduce it first
+      if (opp.pendingGarbage > 0) {
+        const cancelled = Math.min(opp.pendingGarbage, lines);
+        opp.pendingGarbage -= cancelled;
+        const remaining = lines - cancelled;
+        console.log(`[ATTACK] Cancelled ${cancelled} garbage for ${oppId}, remaining: ${remaining}`);
+        
+        // Notify opponent about cancel
+        io.to(oppId).emit('game:garbageCancelled', { cancelled, remaining: opp.pendingGarbage });
+        
+        if (remaining > 0) {
+          opp.pendingGarbage += remaining;
+        }
+      } else {
+        opp.pendingGarbage += lines;
+      }
+
+      console.log(`[ATTACK] Queued ${lines} garbage to ${oppId}, total pending: ${opp.pendingGarbage}`);
+      
+      // Notify opponent of incoming garbage (they see it in queue)
+      io.to(oppId).emit('game:incomingGarbage', { lines: opp.pendingGarbage });
+
+      // Schedule actual application after delay (~500ms)
+      setTimeout(() => {
+        const rr = rooms.get(roomId);
+        if (!rr) return;
+        const oo = rr.players.get(oppId);
+        if (!oo || !oo.alive) return;
+        
+        const toApply = oo.pendingGarbage;
+        if (toApply > 0) {
+          oo.pendingGarbage = 0;
+          console.log(`[ATTACK] Applying ${toApply} garbage to ${oppId}`);
+          io.to(oppId).emit('game:applyGarbage', { lines: toApply });
+        }
+      }, 500);
+    }
+
+    saveRoom(r);
+  });
+
+  // Keep old game:lock for backward compatibility / other logic
   socket.on('game:lock', (roomId: string, payload: { lines: number; tspinType?: 'none' | 'mini' | 'normal'; pc?: boolean }) => {
     const r = rooms.get(roomId);
     if (!r || !r.started) return;
@@ -288,12 +356,13 @@ io.on('connection', (socket) => {
     const tspinType = payload?.tspinType ?? 'none';
     const pc = Boolean(payload?.pc);
 
+    console.log(`[LOCK] Player ${socket.id} locked piece: ${lines} lines, tspinType: ${tspinType}, pc: ${pc}`);
+
+    // Update combo and b2b state
     const isTetris = tspinType === 'none' && lines === 4;
     const isTSpinClear = tspinType !== 'none' && lines > 0;
 
-    let b2bBonus = 0;
     if (lines > 0 && (isTetris || isTSpinClear)) {
-      b2bBonus = p.b2b >= 1 ? 1 : 0;
       p.b2b += 1;
     } else if (lines > 0) {
       p.b2b = 0;
@@ -305,35 +374,6 @@ io.on('connection', (socket) => {
       p.combo = 0;
     }
 
-    const comboChain = Math.max(0, p.combo - 1);
-    let comboBonus = 0;
-    if (comboChain >= 9) comboBonus = 5;
-    else if (comboChain >= 7) comboBonus = 4;
-    else if (comboChain >= 5) comboBonus = 3;
-    else if (comboChain >= 3) comboBonus = 2;
-    else if (comboChain >= 1) comboBonus = 1;
-
-    let g = 0;
-    if (pc) {
-      g = 10;
-    } else if (isTSpinClear) {
-      if (tspinType === 'mini' && lines === 1) {
-        g = 0;
-      } else {
-        const tspinBase = [0, 2, 4, 6];
-        g = tspinBase[lines] ?? 0;
-      }
-    } else {
-      const standardBase = [0, 0, 1, 2, 4];
-      g = standardBase[lines] ?? 0;
-    }
-
-    g += b2bBonus + comboBonus;
-
-    // Send garbage to all other players in room
-    for (const [sid, sp] of r.players) {
-      if (sid !== socket.id && sp.alive) io.to(sid).emit('game:garbage', g);
-    }
     saveRoom(r);
   });
 
@@ -350,40 +390,54 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null });
       r.started = false;
       // reset ready state
-      r.players.forEach(pl => { pl.ready = false; pl.alive = true; pl.combo = 0; pl.b2b = 0; });
+      r.players.forEach(pl => { 
+        pl.ready = false; 
+        pl.alive = true; 
+        pl.combo = 0; 
+        pl.b2b = 0;
+        pl.pendingGarbage = 0;
+        pl.lastAttackTime = 0;
+      });
       saveRoom(r);
     }
   });
 
   // Ranked queue events
   socket.on('ranked:enter', async (playerId: string, elo: number, cb?: (ok:boolean)=>void) => {
-    try { await addToRankedQueue(playerId, elo); cb?.(true); } catch { cb?.(false); }
+    // playerId giờ là accountId (string number)
+    try { 
+      accountToSocket.set(playerId, socket.id); // Map accountId → socket.id
+      await addToRankedQueue(playerId, elo); 
+      cb?.(true); 
+    } catch { cb?.(false); }
   });
-  socket.on('ranked:leave', async (playerId: string) => { await removeFromRankedQueue(playerId); });
+  
+  socket.on('ranked:leave', async (playerId: string) => { 
+    accountToSocket.delete(playerId);
+    await removeFromRankedQueue(playerId); 
+  });
+  
   socket.on('ranked:match', async (playerId: string, elo: number, cb?: (data:any)=>void) => {
-    // playerId here is IP identity; we still operate room with socket ids
+    // playerId là accountId
     const opponent = await popBestMatch(elo, 150, playerId);
     if (!opponent) {
       // No opponent yet, ensure we are in queue
+      accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
     if (opponent.playerId === playerId) {
       // Safety: shouldn't happen due to exclude, but guard
+      accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
-    // Resolve opponent's live socket by IP id or treat as socket id
-    const resolveOpponentSocketId = (pid: string): string | undefined => {
-      const byIp = ipToSockets.get(String(pid));
-      if (byIp && byIp.size > 0) return Array.from(byIp)[0];
-      // As a fallback, if pid looks like a socket id and exists, use it
-      return io.sockets.sockets.has(pid as any) ? pid : undefined;
-    };
-
-    const oppSocketId = resolveOpponentSocketId(String(opponent.playerId));
-    if (!oppSocketId) {
+    
+    // Resolve opponent's socket.id từ accountId
+    const oppSocketId = accountToSocket.get(String(opponent.playerId));
+    if (!oppSocketId || !io.sockets.sockets.has(oppSocketId as any)) {
       // Opponent not currently connected; requeue and exit
+      accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       cb?.({ match: null });
       return;
@@ -397,8 +451,8 @@ io.on('connection', (socket) => {
       host: socket.id, // requester is host
       gen: bagGenerator(seed),
       players: new Map([
-        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0, name: socket.id }],
-        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0, name: opponent.playerId }]
+        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0, name: playerId, pendingGarbage: 0, lastAttackTime: 0 }],
+        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0, name: opponent.playerId, pendingGarbage: 0, lastAttackTime: 0 }]
       ]),
       started: true,
       seed,
@@ -439,12 +493,27 @@ io.on('connection', (socket) => {
           const alive = [...rr.players.values()].filter(x => x.id !== socket.id);
           io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null, reason: 'disconnect' });
           rr.started = false;
-          rr.players.forEach(pl => { pl.ready = false; pl.alive = true; pl.combo = 0; pl.b2b = 0; });
+          rr.players.forEach(pl => { 
+            pl.ready = false; 
+            pl.alive = true; 
+            pl.combo = 0; 
+            pl.b2b = 0;
+            pl.pendingGarbage = 0;
+            pl.lastAttackTime = 0;
+          });
           saveRoom(rr);
         }
       }, 10000);
     }
-    // Remove mapping
+    
+    // Remove accountId → socket.id mapping
+    for (const [accountId, sockId] of accountToSocket.entries()) {
+      if (sockId === socket.id) {
+        accountToSocket.delete(accountId);
+      }
+    }
+    
+    // Remove legacy IP mapping
     if (ip) {
       const set = ipToSockets.get(ip);
       if (set) {

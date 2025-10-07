@@ -102,7 +102,7 @@ const Tetris: React.FC = () => {
   // progress not exposed to UI; animation drives stage directly
   const whiteoutRaf = useRef<number | null>(null);
 
-  // AFK Warning System (5 giây không nhấn phím)
+  // AFK Warning System (5 giây không nhấn phím) - DISABLED FOR TESTING
   const [showAFKWarning, setShowAFKWarning] = useState(false);
   const afkTimeoutRef = useRef<number | null>(null);
   const lastKeyPressRef = useRef<number>(Date.now());
@@ -238,7 +238,7 @@ const Tetris: React.FC = () => {
     inactivityTimeoutRef.current = window.setTimeout(() => doLock(), INACTIVITY_LOCK_MS);
   };
 
-  // AFK Timer Management
+  // AFK Timer Management - DISABLED FOR TESTING
   const clearAFKTimer = () => {
     if (afkTimeoutRef.current) {
       clearTimeout(afkTimeoutRef.current);
@@ -250,6 +250,8 @@ const Tetris: React.FC = () => {
     clearAFKTimer();
     lastKeyPressRef.current = Date.now();
     
+    // DISABLED: Không start AFK timer để test garbage mechanics
+    /*
     // Chỉ start AFK timer khi game đang chơi (không countdown, không game over, không warning)
     if (countdown === null && !gameOver && !startGameOverSequence && !showAFKWarning) {
       afkTimeoutRef.current = window.setTimeout(() => {
@@ -258,6 +260,7 @@ const Tetris: React.FC = () => {
         setDropTime(null); // Pause game
       }, 5000);
     }
+    */
   };
 
   const drop = (): void => {
@@ -301,7 +304,8 @@ const Tetris: React.FC = () => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    // Reset AFK timer khi có bất kỳ phím nào được nhấn
+    // Reset AFK timer khi có bất kỳ phím nào được nhấn - DISABLED
+    /*
     if (showAFKWarning) {
       // Đang hiện warning → nhấn phím bất kỳ để resume
       setShowAFKWarning(false);
@@ -309,8 +313,9 @@ const Tetris: React.FC = () => {
       resetAFKTimer();
       return;
     }
+    */
     
-    resetAFKTimer(); // Reset AFK mỗi khi nhấn phím
+    // resetAFKTimer(); // DISABLED - Reset AFK mỗi khi nhấn phím
 
     if (gameOver || startGameOverSequence || countdown !== null) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
@@ -530,13 +535,15 @@ const Tetris: React.FC = () => {
   // Dọn dẹp khi unmount
   useEffect(() => () => { clearInactivity(); clearCap(); clearAFKTimer(); }, []);
 
-  // AFK Timer: Bắt đầu khi game start, reset khi có input
+  // AFK Timer: Bắt đầu khi game start, reset khi có input - DISABLED FOR TESTING
   useEffect(() => {
+    /*
     if (countdown === null && !gameOver && !startGameOverSequence && !showAFKWarning) {
       resetAFKTimer();
     } else {
       clearAFKTimer();
     }
+    */
     // Cleanup on unmount or state change
     return () => clearAFKTimer();
   }, [countdown, gameOver, startGameOverSequence, showAFKWarning]);
