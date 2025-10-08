@@ -24,7 +24,8 @@ export async function saveRoom(room: any) {
     host: room.host,
     started: room.started ? '1' : '0',
     seed: String(room.seed ?? 0),
-    players: JSON.stringify([...room.players.values()].map((p: any) => ({ id: p.id, ready: p.ready, alive: p.alive, combo: p.combo, b2b: p.b2b })) ),
+    maxPlayers: String(room.maxPlayers ?? 2),
+  players: JSON.stringify([...room.players.values()].map((p: any) => ({ id: p.id, ready: p.ready, alive: p.alive, combo: p.combo, b2b: p.b2b, name: p.name })) ),
     updatedAt: Date.now().toString()
   });
   // Optional TTL to auto-expire inactive rooms (e.g., 1 hour)
@@ -42,6 +43,7 @@ export async function loadRoom(id: string) {
       host: data.host,
       started: data.started === '1',
       seed: Number(data.seed) || Date.now(),
+      maxPlayers: Number(data.maxPlayers) || 2,
       playersArr,
       updatedAt: Number(data.updatedAt)
     };
@@ -55,12 +57,16 @@ export async function deleteRoom(id: string) {
 }
 
 // Ranked queue operations
-export async function addToRankedQueue(playerId: string, elo: number) {
-  await redis.zAdd(RANKED_QUEUE_KEY, [{ score: elo, value: playerId }]);
+export async function addToRankedQueue(playerId: string | number, elo: number) {
+  // Convert playerId to string to ensure Redis compatibility
+  const playerIdStr = String(playerId);
+  await redis.zAdd(RANKED_QUEUE_KEY, [{ score: elo, value: playerIdStr }]);
 }
 
-export async function removeFromRankedQueue(playerId: string) {
-  await redis.zRem(RANKED_QUEUE_KEY, playerId);
+export async function removeFromRankedQueue(playerId: string | number) {
+  // Convert playerId to string to ensure Redis compatibility
+  const playerIdStr = String(playerId);
+  await redis.zRem(RANKED_QUEUE_KEY, playerIdStr);
 }
 
 export async function popBestMatch(targetElo: number, range = 100, exclude?: string) {

@@ -92,6 +92,9 @@ type PlayerState = {
   alive: boolean;
   combo: number;
   b2b: number; // back-to-back
+  name?: string;
+  pendingGarbage: number; // Garbage queued to receive
+  lastAttackTime: number; // Timestamp of last attack
 };
 
 type Room = {
@@ -101,10 +104,19 @@ type Room = {
   players: Map<string, PlayerState>;
   started: boolean;
   seed: number;
+  maxPlayers: number;
+};
+
+type RoomAck = {
+  ok: boolean;
+  error?: 'exists' | 'not-found' | 'started' | 'full' | 'unknown';
+  roomId?: string;
 };
 
 const rooms = new Map<string, Room>();
-// Track IP to live socket ids (can be multiple tabs)
+// Track accountId to socket.id mapping (1 accountId = 1 active socket)
+const accountToSocket = new Map<string, string>();
+// Track IP to live socket ids (can be multiple tabs) - DEPRECATED, giữ lại cho legacy
 const ipToSockets = new Map<string, Set<string>>();
 
 initRedis().catch(err => console.error('[redis] init failed', err));
@@ -125,31 +137,88 @@ io.on('connection', (socket) => {
   socket.on('chat:message', (data: any) => {
     io.emit('chat:message', { from: socket.id, ...data });
   });
-  socket.on('room:create', (roomId: string, cb?: (ok: boolean) => void) => {
-    if (rooms.has(roomId)) return cb?.(false);
+  socket.on('room:create', (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
+    let options: { maxPlayers?: number; name?: string } | undefined;
+    let cb: ((result: RoomAck) => void) | undefined;
+
+    if (typeof optsOrCb === 'function') {
+      cb = optsOrCb as (result: RoomAck) => void;
+    } else {
+      options = optsOrCb;
+      if (typeof cbMaybe === 'function') cb = cbMaybe;
+    }
+
+    if (rooms.has(roomId)) {
+      cb?.({ ok: false, error: 'exists' });
+      return;
+    }
+
+    const maxPlayers = Math.max(2, Math.min(Number(options?.maxPlayers) || 2, 6));
     const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-    rooms.set(roomId, {
+    const displayName = typeof options?.name === 'string' ? options.name : undefined;
+
+    const room: Room = {
       id: roomId,
       host: socket.id,
       gen: bagGenerator(seed),
-      players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0 }]]),
+      players: new Map([[socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName, pendingGarbage: 0, lastAttackTime: 0 }]]),
       started: false,
       seed,
-    });
+      maxPlayers,
+    };
+    rooms.set(roomId, room);
     socket.join(roomId);
-    cb?.(true);
-    saveRoom(rooms.get(roomId));
+    cb?.({ ok: true, roomId });
+    saveRoom(room);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
   });
 
-  socket.on('room:join', (roomId: string, cb?: (ok: boolean) => void) => {
+  socket.on('room:join', (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
+    let options: { name?: string } | undefined;
+    let cb: ((result: RoomAck) => void) | undefined;
+
+    if (typeof optsOrCb === 'function') {
+      cb = optsOrCb as (result: RoomAck) => void;
+    } else {
+      options = optsOrCb;
+      if (typeof cbMaybe === 'function') cb = cbMaybe;
+    }
+
     const r = rooms.get(roomId);
-    if (!r || r.started) return cb?.(false);
-    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0 });
+    if (!r) {
+      cb?.({ ok: false, error: 'not-found' });
+      return;
+    }
+    if (r.started) {
+      cb?.({ ok: false, error: 'started' });
+      return;
+    }
+    if (r.players.size >= r.maxPlayers && !r.players.has(socket.id)) {
+      cb?.({ ok: false, error: 'full' });
+      return;
+    }
+
+    const displayName = typeof options?.name === 'string' ? options.name : undefined;
+
+    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName, pendingGarbage: 0, lastAttackTime: 0 });
     socket.join(roomId);
-    cb?.(true);
+    cb?.({ ok: true, roomId });
     saveRoom(r);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
+  });
+
+  socket.on('room:sync', (roomId: string, cb?: (result: any) => void) => {
+    if (typeof roomId !== 'string' || !roomId.trim()) {
+      cb?.({ ok: false, error: 'invalid-room' });
+      return;
+    }
+    const snapshot = roomSnapshot(roomId.trim());
+    if (!snapshot) {
+      cb?.({ ok: false, error: 'not-found' });
+      return;
+    }
+    io.to(socket.id).emit('room:update', snapshot);
+    cb?.({ ok: true, data: snapshot });
   });
 
   socket.on('room:leave', (roomId: string) => {
@@ -193,35 +262,118 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('game:state', { ...payload, from: socket.id });
   });
 
-  // Garbage logic (simple guideline-ish)
-  socket.on('game:lock', (roomId: string, payload: { lines: number; tspin?: boolean; pc?: boolean }) => {
+  socket.on('room:chat', (roomId: string, message: any, cb?: (ack: RoomAck) => void) => {
+    const r = rooms.get(roomId);
+    if (!r) {
+      cb?.({ ok: false, error: 'not-found' });
+      return;
+    }
+    if (!r.players.has(socket.id)) {
+      cb?.({ ok: false, error: 'unknown' });
+      return;
+    }
+    const payload = {
+      from: socket.id,
+      message,
+      ts: Date.now(),
+    };
+    io.to(roomId).emit('room:chat', payload);
+    cb?.({ ok: true, roomId });
+  });
+
+  // NEW: Client sends attack (garbage) to server
+  socket.on('game:attack', (roomId: string, payload: { lines: number }) => {
+    const r = rooms.get(roomId);
+    if (!r || !r.started) return;
+    const p = r.players.get(socket.id);
+    if (!p || !p.alive) return;
+
+    const lines = Math.max(0, Math.min(10, Number(payload?.lines) || 0));
+    if (lines === 0) return;
+
+    console.log(`[ATTACK] Player ${socket.id} sending ${lines} garbage lines`);
+
+    p.lastAttackTime = Date.now();
+
+    // Find opponents
+    const opponents = [...r.players.entries()].filter(([sid, sp]) => sid !== socket.id && sp.alive);
+    if (opponents.length === 0) {
+      console.log('[ATTACK] No alive opponents');
+      return;
+    }
+
+    // Queue garbage to each opponent with delay
+    for (const [oppId, opp] of opponents) {
+      // Cancel mechanic: if opponent has pending garbage, reduce it first
+      if (opp.pendingGarbage > 0) {
+        const cancelled = Math.min(opp.pendingGarbage, lines);
+        opp.pendingGarbage -= cancelled;
+        const remaining = lines - cancelled;
+        console.log(`[ATTACK] Cancelled ${cancelled} garbage for ${oppId}, remaining: ${remaining}`);
+        
+        // Notify opponent about cancel
+        io.to(oppId).emit('game:garbageCancelled', { cancelled, remaining: opp.pendingGarbage });
+        
+        if (remaining > 0) {
+          opp.pendingGarbage += remaining;
+        }
+      } else {
+        opp.pendingGarbage += lines;
+      }
+
+      console.log(`[ATTACK] Queued ${lines} garbage to ${oppId}, total pending: ${opp.pendingGarbage}`);
+      
+      // Notify opponent of incoming garbage (they see it in queue)
+      io.to(oppId).emit('game:incomingGarbage', { lines: opp.pendingGarbage });
+
+      // Schedule actual application after delay (~500ms)
+      setTimeout(() => {
+        const rr = rooms.get(roomId);
+        if (!rr) return;
+        const oo = rr.players.get(oppId);
+        if (!oo || !oo.alive) return;
+        
+        const toApply = oo.pendingGarbage;
+        if (toApply > 0) {
+          oo.pendingGarbage = 0;
+          console.log(`[ATTACK] Applying ${toApply} garbage to ${oppId}`);
+          io.to(oppId).emit('game:applyGarbage', { lines: toApply });
+        }
+      }, 500);
+    }
+
+    saveRoom(r);
+  });
+
+  // Keep old game:lock for backward compatibility / other logic
+  socket.on('game:lock', (roomId: string, payload: { lines: number; tspinType?: 'none' | 'mini' | 'normal'; pc?: boolean }) => {
     const r = rooms.get(roomId);
     if (!r || !r.started) return;
     const p = r.players.get(socket.id);
     if (!p) return;
 
-    let g = 0;
-    if (payload.pc) {
-      g += 10;
-    } else {
-      const base = payload.tspin ? [2,4,6,0] : [0,1,2,4]; // 0/Single/Double/Triple/Quad
-      g += base[payload.lines] || 0;
-      // B2B bonus for T-Spin or Quad
-      if (payload.tspin && payload.lines > 0 || payload.lines === 4) {
-        g += p.b2b >= 1 ? 1 : 0;
-        p.b2b += 1;
-      } else if (payload.lines > 0) {
-        p.b2b = 0;
-      }
-      // Combo
-      if (payload.lines > 0) p.combo += 1; else p.combo = -1;
-      if (p.combo >= 1) g += Math.min(5, Math.floor((p.combo + 1) / 2));
+    const lines = Math.max(0, Math.min(4, Number(payload?.lines) || 0));
+    const tspinType = payload?.tspinType ?? 'none';
+    const pc = Boolean(payload?.pc);
+
+    console.log(`[LOCK] Player ${socket.id} locked piece: ${lines} lines, tspinType: ${tspinType}, pc: ${pc}`);
+
+    // Update combo and b2b state
+    const isTetris = tspinType === 'none' && lines === 4;
+    const isTSpinClear = tspinType !== 'none' && lines > 0;
+
+    if (lines > 0 && (isTetris || isTSpinClear)) {
+      p.b2b += 1;
+    } else if (lines > 0) {
+      p.b2b = 0;
     }
 
-    // Send garbage to all other players in room
-    for (const [sid, sp] of r.players) {
-      if (sid !== socket.id && sp.alive) io.to(sid).emit('game:garbage', g);
+    if (lines > 0) {
+      p.combo = Math.max(1, p.combo + 1);
+    } else {
+      p.combo = 0;
     }
+
     saveRoom(r);
   });
 
@@ -238,40 +390,54 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null });
       r.started = false;
       // reset ready state
-      r.players.forEach(pl => { pl.ready = false; pl.alive = true; pl.combo = 0; pl.b2b = 0; });
+      r.players.forEach(pl => { 
+        pl.ready = false; 
+        pl.alive = true; 
+        pl.combo = 0; 
+        pl.b2b = 0;
+        pl.pendingGarbage = 0;
+        pl.lastAttackTime = 0;
+      });
       saveRoom(r);
     }
   });
 
   // Ranked queue events
   socket.on('ranked:enter', async (playerId: string, elo: number, cb?: (ok:boolean)=>void) => {
-    try { await addToRankedQueue(playerId, elo); cb?.(true); } catch { cb?.(false); }
+    // playerId giờ là accountId (string number)
+    try { 
+      accountToSocket.set(playerId, socket.id); // Map accountId → socket.id
+      await addToRankedQueue(playerId, elo); 
+      cb?.(true); 
+    } catch { cb?.(false); }
   });
-  socket.on('ranked:leave', async (playerId: string) => { await removeFromRankedQueue(playerId); });
+  
+  socket.on('ranked:leave', async (playerId: string) => { 
+    accountToSocket.delete(playerId);
+    await removeFromRankedQueue(playerId); 
+  });
+  
   socket.on('ranked:match', async (playerId: string, elo: number, cb?: (data:any)=>void) => {
-    // playerId here is IP identity; we still operate room with socket ids
+    // playerId là accountId
     const opponent = await popBestMatch(elo, 150, playerId);
     if (!opponent) {
       // No opponent yet, ensure we are in queue
+      accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
     if (opponent.playerId === playerId) {
       // Safety: shouldn't happen due to exclude, but guard
+      accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
-    // Resolve opponent's live socket by IP id or treat as socket id
-    const resolveOpponentSocketId = (pid: string): string | undefined => {
-      const byIp = ipToSockets.get(String(pid));
-      if (byIp && byIp.size > 0) return Array.from(byIp)[0];
-      // As a fallback, if pid looks like a socket id and exists, use it
-      return io.sockets.sockets.has(pid as any) ? pid : undefined;
-    };
-
-    const oppSocketId = resolveOpponentSocketId(String(opponent.playerId));
-    if (!oppSocketId) {
+    
+    // Resolve opponent's socket.id từ accountId
+    const oppSocketId = accountToSocket.get(String(opponent.playerId));
+    if (!oppSocketId || !io.sockets.sockets.has(oppSocketId as any)) {
       // Opponent not currently connected; requeue and exit
+      accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       cb?.({ match: null });
       return;
@@ -285,11 +451,12 @@ io.on('connection', (socket) => {
       host: socket.id, // requester is host
       gen: bagGenerator(seed),
       players: new Map([
-        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0 }],
-        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0 }]
+        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0, name: playerId, pendingGarbage: 0, lastAttackTime: 0 }],
+        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0, name: opponent.playerId, pendingGarbage: 0, lastAttackTime: 0 }]
       ]),
       started: true,
       seed,
+      maxPlayers: 2,
     };
   rooms.set(roomId, room);
   saveRoom(room);
@@ -326,12 +493,27 @@ io.on('connection', (socket) => {
           const alive = [...rr.players.values()].filter(x => x.id !== socket.id);
           io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null, reason: 'disconnect' });
           rr.started = false;
-          rr.players.forEach(pl => { pl.ready = false; pl.alive = true; pl.combo = 0; pl.b2b = 0; });
+          rr.players.forEach(pl => { 
+            pl.ready = false; 
+            pl.alive = true; 
+            pl.combo = 0; 
+            pl.b2b = 0;
+            pl.pendingGarbage = 0;
+            pl.lastAttackTime = 0;
+          });
           saveRoom(rr);
         }
       }, 10000);
     }
-    // Remove mapping
+    
+    // Remove accountId → socket.id mapping
+    for (const [accountId, sockId] of accountToSocket.entries()) {
+      if (sockId === socket.id) {
+        accountToSocket.delete(accountId);
+      }
+    }
+    
+    // Remove legacy IP mapping
     if (ip) {
       const set = ipToSockets.get(ip);
       if (set) {
@@ -349,7 +531,8 @@ function roomSnapshot(roomId: string) {
     id: r.id,
     host: r.host,
     started: r.started,
-    players: [...r.players.values()].map(p => ({ id: p.id, ready: p.ready, alive: p.alive }))
+    maxPlayers: r.maxPlayers,
+    players: [...r.players.values()].map(p => ({ id: p.id, ready: p.ready, alive: p.alive, name: p.name ?? null }))
   };
 }
 

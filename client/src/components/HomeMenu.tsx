@@ -5,6 +5,7 @@ interface User {
   username: string;
   email?: string;
   isGuest: boolean;
+  accountId: number; // Thêm accountId để định danh duy nhất
 }
 
 interface GameModeProps {
@@ -12,6 +13,7 @@ interface GameModeProps {
   title: string;
   description: string;
   locked?: boolean;
+  lockedReason?: string;
   onClick?: () => void;
 }
 
@@ -27,13 +29,37 @@ const HomeMenu: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [showGameModes, setShowGameModes] = useState<boolean>(() => !!localStorage.getItem('tetris:user'));
+  const [showSettings, setShowSettings] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
 
-  // Stats state
-  const [stats, setStats] = useState({
-    totalPlayers: 0,
-    gamesPlayed: 0,
-    hoursPlayed: 0,
+  // Player stats (mặc định)
+  const [playerStats, setPlayerStats] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tetris:playerStats');
+      return saved ? JSON.parse(saved) : { level: 1, stars: 0 };
+    } catch {
+      return { level: 1, stars: 0 };
+    }
   });
+
+  // Guest restrictions
+  const isGuest = currentUser?.isGuest ?? false;
+  const guestLockReason = isGuest ? "Vui lòng đăng nhập tài khoản để vào chế độ này" : undefined;
+
+  // Mock leaderboard data (sau này sẽ lấy từ server)
+  const [leaderboardData] = useState([
+    { username: 'ProGamer123', level: 22, stars: 1500, rank: 1 },
+    { username: 'TetrisMaster', level: 20, stars: 1350, rank: 2 },
+    { username: 'BlockBuster', level: 19, stars: 1200, rank: 3 },
+    { username: 'SpeedRunner', level: 18, stars: 1100, rank: 4 },
+    { username: 'ComboKing', level: 17, stars: 980, rank: 5 },
+    { username: 'PuzzlePro', level: 16, stars: 850, rank: 6 },
+    { username: 'LineClearer', level: 15, stars: 720, rank: 7 },
+    { username: 'TetrisAce', level: 14, stars: 650, rank: 8 },
+    { username: 'BlockMaster', level: 13, stars: 580, rank: 9 },
+    { username: 'GridWarrior', level: 12, stars: 500, rank: 10 },
+  ]);
 
   // Form states
   const [loginForm, setLoginForm] = useState({
@@ -110,10 +136,23 @@ const HomeMenu: React.FC = () => {
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
+      
+      // Generate accountId từ username (hash simple) hoặc check localStorage
+      const storedAccounts = JSON.parse(localStorage.getItem('tetris:accounts') || '{}');
+      let accountId = storedAccounts[loginForm.username];
+      
+      if (!accountId) {
+        // Tạo accountId mới nếu chưa có (số từ 10000 - 99999)
+        accountId = 10000 + Math.floor(Math.random() * 90000);
+        storedAccounts[loginForm.username] = accountId;
+        localStorage.setItem('tetris:accounts', JSON.stringify(storedAccounts));
+      }
+      
       const user: User = {
         username: loginForm.username,
         email: loginForm.username.includes("@") ? loginForm.username : `${loginForm.username}@example.com`,
         isGuest: false,
+        accountId: accountId,
       };
       setCurrentUser(user);
       setShowGameModes(true);
@@ -149,10 +188,18 @@ const HomeMenu: React.FC = () => {
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
+      
+      // Generate accountId mới cho tài khoản đăng ký
+      const storedAccounts = JSON.parse(localStorage.getItem('tetris:accounts') || '{}');
+      const accountId = 10000 + Math.floor(Math.random() * 90000);
+      storedAccounts[username] = accountId;
+      localStorage.setItem('tetris:accounts', JSON.stringify(storedAccounts));
+      
       const user: User = {
         username,
         email,
         isGuest: false,
+        accountId: accountId,
       };
       setCurrentUser(user);
       setShowGameModes(true);
@@ -164,9 +211,13 @@ const HomeMenu: React.FC = () => {
   // Play as guest
   const playAsGuest = () => {
     const guestId = "Guest_" + Math.random().toString(36).substr(2, 9);
+    // Guest cũng cần accountId (số âm để phân biệt với tk thật)
+    const accountId = -Math.floor(Math.random() * 90000) - 10000; // -10000 đến -99999
+    
     const user: User = {
       username: guestId,
       isGuest: true,
+      accountId: accountId,
     };
     setCurrentUser(user);
     setShowGameModes(true);
@@ -231,7 +282,7 @@ const HomeMenu: React.FC = () => {
   }, [currentUser, activeTab, loading]);
 
   // Game Mode Component
-  const GameModeCard: React.FC<GameModeProps> = ({ icon, title, description, locked, onClick }) => (
+  const GameModeCard: React.FC<GameModeProps> = ({ icon, title, description, locked, lockedReason, onClick }) => (
     <div
       style={{
         background: "rgba(255, 255, 255, 0.05)",
@@ -300,6 +351,18 @@ const HomeMenu: React.FC = () => {
       >
         {description}
       </div>
+      {locked && lockedReason && (
+        <div
+          style={{
+            marginTop: "12px",
+            fontSize: "0.85rem",
+            color: "#ff6b6b",
+            fontWeight: 500,
+          }}
+        >
+          {lockedReason}
+        </div>
+      )}
     </div>
   );
 
@@ -308,7 +371,7 @@ const HomeMenu: React.FC = () => {
       style={{
         width: "100%",
         minHeight: "100vh",
-        background: "#000", // nền đen
+        background: `url('/img/bg3.gif') center/cover, #000`, // nền đen
         color: "#ffffff",
         position: "relative",
         overflow: "hidden",
@@ -318,32 +381,210 @@ const HomeMenu: React.FC = () => {
       {/* Animated Background (ẩn để tránh cảm giác không full nền đen) */}
       {/* Intentionally removed for clean black background */}
 
-      {/* Top user bar */}
+      {/* Top user bar - Player Info & Settings */}
       {currentUser && (
         <div
           style={{
-            position: 'fixed', top: 0, left: 0, right: 0, height: 56,
-            background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+            position: 'fixed', top: 0, left: 0, right: 0, height: 70,
+            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0 16px', zIndex: 1000,
-            borderBottom: '1px solid rgba(255,255,255,0.12)'
+            padding: '0 24px', zIndex: 1000,
+            borderBottom: '2px solid rgba(78, 205, 196, 0.3)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
           }}
         >
-          <div style={{ color: '#fff', fontWeight: 700 }}>
-            Xin chào, {currentUser.username}{currentUser.isGuest ? ' (Khách)' : ''}
+          {/* Left side - Player Info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+            {/* Avatar */}
+            <div
+              style={{
+                width: 50, height: 50,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '1.5rem',
+                fontWeight: 'bold',
+                color: '#fff',
+                border: '2px solid #4ecdc4',
+                boxShadow: '0 0 15px rgba(78, 205, 196, 0.5)'
+              }}
+            >
+              {currentUser.username.charAt(0).toUpperCase()}
+            </div>
+
+            {/* Player Details */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {/* Username + Account ID */}
+              <div style={{ 
+                color: '#fff', 
+                fontWeight: 700, 
+                fontSize: '1.1rem',
+                textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+              }}>
+                {currentUser.username}
+                {currentUser.isGuest && (
+                  <span style={{ 
+                    marginLeft: '8px', 
+                    fontSize: '0.75rem', 
+                    color: '#ffc107',
+                    background: 'rgba(255, 193, 7, 0.2)',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(255, 193, 7, 0.5)'
+                  }}>
+                    Khách
+                  </span>
+                )}
+              </div>
+
+              {/* Account ID - Hiển thị cho tất cả */}
+              <div style={{ 
+                fontSize: '0.85rem', 
+                color: '#888',
+                fontWeight: 500
+              }}>
+                ID: #{currentUser.accountId}
+              </div>
+
+              {/* Level & Stars - Chỉ hiện khi KHÔNG phải khách */}
+              {!currentUser.isGuest && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  {/* Level */}
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px',
+                    background: 'rgba(78, 205, 196, 0.15)',
+                    padding: '3px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(78, 205, 196, 0.3)'
+                  }}>
+                    <span style={{ fontSize: '0.9rem' }}>🎮</span>
+                    <span style={{ 
+                      color: '#4ecdc4', 
+                      fontWeight: 600,
+                      fontSize: '0.9rem'
+                    }}>
+                      Level {playerStats.level}
+                    </span>
+                  </div>
+
+                  {/* Stars */}
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px',
+                    background: 'rgba(255, 193, 7, 0.15)',
+                    padding: '3px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(255, 193, 7, 0.3)'
+                  }}>
+                    <span style={{ fontSize: '0.9rem' }}>⭐</span>
+                    <span style={{ 
+                      color: '#ffc107', 
+                      fontWeight: 600,
+                      fontSize: '0.9rem'
+                    }}>
+                      {playerStats.stars}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <button
-            onClick={logout}
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              border: '1px solid rgba(255,255,255,0.3)',
-              color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.18)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
-          >
-            Đăng xuất
-          </button>
+
+          {/* Right side - Leaderboard, Settings & Logout */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Leaderboard Button */}
+            <button
+              onClick={() => setShowLeaderboard(true)}
+              style={{
+                background: 'rgba(255, 193, 7, 0.15)',
+                border: '1px solid rgba(255, 193, 7, 0.4)',
+                color: '#ffc107',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 193, 7, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 193, 7, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 193, 7, 0.15)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              🏆 Bảng xếp hạng
+            </button>
+
+            {/* Settings Button */}
+            <button
+              onClick={() => setShowSettings(true)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: '#fff',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(78, 205, 196, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              ⚙️ Cài đặt
+            </button>
+
+            {/* Logout Button */}
+            <button
+              onClick={logout}
+              style={{
+                background: 'rgba(244, 67, 54, 0.2)',
+                border: '1px solid rgba(244, 67, 54, 0.5)',
+                color: '#ff6b6b',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(244, 67, 54, 0.3)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(244, 67, 54, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              Đăng xuất
+            </button>
+          </div>
         </div>
       )}
     
@@ -361,7 +602,7 @@ const HomeMenu: React.FC = () => {
           flexDirection: "column",
           justifyContent: !showGameModes ? "center" : undefined,
           // tránh đè lên thanh người dùng
-          marginTop: currentUser ? 56 : 0,
+          marginTop: currentUser ? 70 : 0,
         }}
       >
                     {/* Logo Game */}
@@ -459,6 +700,39 @@ const HomeMenu: React.FC = () => {
             </div>
           </div>
           </div>
+        {/* Logo (ẩn khi ở màn đăng nhập để canh giữa tuyệt đối) */}
+        {showGameModes && (
+          <div
+            style={{
+              textAlign: "center",
+              marginBottom: "40px",
+              animation: "pulse 2s infinite",
+            }}
+          >
+            <img
+              src="/img/logo.png" // Replace with the actual path to your logo file
+              alt="TETR.IO Logo"
+              style={{
+                width: "800px",
+                height: "auto",
+                filter: "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)",
+                transition: "transform 0.3s ease, filter 0.3s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "scale(1.1)";
+                e.currentTarget.style.filter =
+                  "drop-shadow(0 0 15px #4ecdc4) drop-shadow(0 0 30px #ff6b6b)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "scale(1)";
+                e.currentTarget.style.filter =
+                  "drop-shadow(0 0 10px #4ecdc4) drop-shadow(0 0 20px #ff6b6b)";
+              }}
+            />
+          </div>
+        )}
+
+
 
         {/* User status moved to top bar */}
 
@@ -1053,52 +1327,606 @@ const HomeMenu: React.FC = () => {
                     icon="⚔️"
                     title="Đối kháng"
                     description="Chơi 1v1 với người chơi khác trực tuyến"
+                    locked={isGuest}
+                    lockedReason={guestLockReason}
                     onClick={() => navigate('/online/ranked')}
                   />
                   <GameModeCard
                     icon="👥"
                     title="Phòng tùy chỉnh"
                     description="Tạo hoặc tham gia phòng chơi với bạn bè"
-                    locked={currentUser?.isGuest}
+                    locked={isGuest}
+                    lockedReason={guestLockReason}
+                    onClick={() => {
+                      if (currentUser?.isGuest) return;
+                      navigate('/online');
+                    }}
                   />
                   <GameModeCard
                     icon="🏆"
                     title="Xếp hạng"
                     description="Thi đấu và leo rank trong hệ thống xếp hạng"
+                    locked={isGuest}
+                    lockedReason={guestLockReason}
                     onClick={() => navigate('/online/ranked')}
                   />
                 </div>
-
-                {/* Back to login button */}
-                <button
-                  onClick={logout}
-                  style={{
-                    marginTop: "30px",
-                    padding: "10px 20px",
-                    background: "rgba(255, 255, 255, 0.1)",
-                    border: "1px solid rgba(255, 255, 255, 0.3)",
-                    borderRadius: "8px",
-                    color: "#ffffff",
-                    cursor: "pointer",
-                    fontSize: "0.9rem",
-                    transition: "all 0.3s ease",
-                    display: "block",
-                    margin: "30px auto 0",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-                  }}
-                >
-                  ← Quay lại đăng nhập
-                </button>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            backdropFilter: 'blur(8px)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+          onClick={() => setShowSettings(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(30, 30, 50, 0.95))',
+              border: '2px solid rgba(78, 205, 196, 0.3)',
+              borderRadius: '20px',
+              padding: '40px',
+              maxWidth: '600px',
+              width: '100%',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(78, 205, 196, 0.2)',
+              animation: 'slideUp 0.3s ease-out'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginBottom: '30px',
+              paddingBottom: '20px',
+              borderBottom: '2px solid rgba(78, 205, 196, 0.2)'
+            }}>
+              <h2 style={{ 
+                fontSize: '1.8rem', 
+                fontWeight: 'bold',
+                color: '#4ecdc4',
+                textShadow: '0 0 10px rgba(78, 205, 196, 0.5)',
+                margin: 0
+              }}>
+                ⚙️ Cài Đặt
+              </h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                style={{
+                  background: 'rgba(244, 67, 54, 0.2)',
+                  border: '1px solid rgba(244, 67, 54, 0.5)',
+                  color: '#ff6b6b',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  fontSize: '1.2rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(244, 67, 54, 0.4)';
+                  e.currentTarget.style.transform = 'rotate(90deg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)';
+                  e.currentTarget.style.transform = 'rotate(0deg)';
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Settings Content */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
+              {/* Account Section */}
+              <div>
+                <h3 style={{ 
+                  fontSize: '1.2rem', 
+                  color: '#fff', 
+                  marginBottom: '15px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  👤 Tài Khoản
+                </h3>
+                <div style={{ 
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid rgba(255, 255, 255, 0.1)'
+                }}>
+                  <div style={{ marginBottom: '12px' }}>
+                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Tên người chơi:</span>
+                    <div style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
+                      {currentUser?.username}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Email:</span>
+                    <div style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
+                      {currentUser?.email || 'Chưa cập nhật'}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Loại tài khoản:</span>
+                    <div style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
+                      {currentUser?.isGuest ? '🔓 Khách' : '🔐 Đã đăng ký'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats Section */}
+              <div>
+                <h3 style={{ 
+                  fontSize: '1.2rem', 
+                  color: '#fff', 
+                  marginBottom: '15px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  📊 Thống Kê
+                </h3>
+                <div style={{ 
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '15px'
+                }}>
+                  <div style={{ textAlign: 'center', padding: '15px', background: 'rgba(78, 205, 196, 0.1)', borderRadius: '8px', border: '1px solid rgba(78, 205, 196, 0.3)' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🎮</div>
+                    <div style={{ color: '#4ecdc4', fontSize: '1.5rem', fontWeight: 'bold' }}>
+                      {playerStats.level}
+                    </div>
+                    <div style={{ color: '#888', fontSize: '0.85rem', marginTop: '4px' }}>Level</div>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: '15px', background: 'rgba(255, 193, 7, 0.1)', borderRadius: '8px', border: '1px solid rgba(255, 193, 7, 0.3)' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>⭐</div>
+                    <div style={{ color: '#ffc107', fontSize: '1.5rem', fontWeight: 'bold' }}>
+                      {playerStats.stars}
+                    </div>
+                    <div style={{ color: '#888', fontSize: '0.85rem', marginTop: '4px' }}>Stars</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Game Settings Section */}
+              <div>
+                <h3 style={{ 
+                  fontSize: '1.2rem', 
+                  color: '#fff', 
+                  marginBottom: '15px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  🎮 Cài Đặt Trò Chơi
+                </h3>
+                <div style={{ 
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '15px'
+                }}>
+                  {/* Volume Setting */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>🔊 Âm lượng</span>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      defaultValue="70"
+                      style={{ width: '200px' }}
+                    />
+                  </div>
+
+                  {/* Music Setting */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>🎵 Nhạc nền</span>
+                    <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
+                      <input type="checkbox" defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
+                      <span style={{
+                        position: 'absolute',
+                        cursor: 'pointer',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        background: '#4ecdc4',
+                        borderRadius: '24px',
+                        transition: '0.3s'
+                      }}></span>
+                    </label>
+                  </div>
+
+                  {/* Sound Effects Setting */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>🔔 Hiệu ứng âm thanh</span>
+                    <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
+                      <input type="checkbox" defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
+                      <span style={{
+                        position: 'absolute',
+                        cursor: 'pointer',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        background: '#4ecdc4',
+                        borderRadius: '24px',
+                        transition: '0.3s'
+                      }}></span>
+                    </label>
+                  </div>
+
+                  {/* Ghost Piece Setting */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>👻 Hiển thị khối ma</span>
+                    <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
+                      <input type="checkbox" defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
+                      <span style={{
+                        position: 'absolute',
+                        cursor: 'pointer',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        background: '#4ecdc4',
+                        borderRadius: '24px',
+                        transition: '0.3s'
+                      }}></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ 
+                display: 'flex', 
+                gap: '12px',
+                marginTop: '10px'
+              }}>
+                <button
+                  onClick={() => {
+                    if (window.confirm('Bạn có chắc muốn đặt lại tất cả cài đặt về mặc định?')) {
+                      alert('Đã đặt lại cài đặt về mặc định!');
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    color: '#fff',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.95rem',
+                    fontWeight: 600,
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  🔄 Đặt lại
+                </button>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    background: 'linear-gradient(45deg, #4ecdc4, #667eea)',
+                    border: 'none',
+                    color: '#fff',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '0.95rem',
+                    fontWeight: 600,
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(78, 205, 196, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  ✓ Lưu thay đổi
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leaderboard Modal */}
+      {showLeaderboard && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            animation: 'fadeIn 0.3s ease-out'
+          }}
+          onClick={() => setShowLeaderboard(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+              borderRadius: 16,
+              padding: '32px',
+              maxWidth: '700px',
+              width: '90%',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+              border: '1px solid rgba(78, 205, 196, 0.2)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginBottom: '24px',
+              paddingBottom: '16px',
+              borderBottom: '2px solid rgba(78, 205, 196, 0.3)'
+            }}>
+              <h2 style={{ 
+                margin: 0, 
+                color: '#4ecdc4',
+                fontSize: '1.8rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                🏆 Bảng xếp hạng
+              </h2>
+              <button
+                onClick={() => setShowLeaderboard(false)}
+                style={{
+                  background: 'rgba(244, 67, 54, 0.2)',
+                  border: '1px solid rgba(244, 67, 54, 0.5)',
+                  color: '#ff6b6b',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  fontSize: '1.2rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(244, 67, 54, 0.4)';
+                  e.currentTarget.style.transform = 'rotate(90deg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)';
+                  e.currentTarget.style.transform = 'rotate(0)';
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Sort Tabs */}
+            <div style={{ 
+              display: 'flex', 
+              gap: '12px',
+              marginBottom: '24px'
+            }}>
+              <button
+                onClick={() => setLeaderboardSort('level')}
+                style={{
+                  flex: 1,
+                  padding: '12px 20px',
+                  background: leaderboardSort === 'level' 
+                    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                    : 'rgba(255, 255, 255, 0.08)',
+                  border: leaderboardSort === 'level'
+                    ? '2px solid rgba(102, 126, 234, 0.5)'
+                    : '1px solid rgba(255, 255, 255, 0.2)',
+                  color: '#fff',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: '0.95rem',
+                  fontWeight: 600,
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  if (leaderboardSort !== 'level') {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (leaderboardSort !== 'level') {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  }
+                }}
+              >
+                📊 Xếp theo Level
+              </button>
+              <button
+                onClick={() => setLeaderboardSort('stars')}
+                style={{
+                  flex: 1,
+                  padding: '12px 20px',
+                  background: leaderboardSort === 'stars'
+                    ? 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
+                    : 'rgba(255, 255, 255, 0.08)',
+                  border: leaderboardSort === 'stars'
+                    ? '2px solid rgba(240, 147, 251, 0.5)'
+                    : '1px solid rgba(255, 255, 255, 0.2)',
+                  color: '#fff',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: '0.95rem',
+                  fontWeight: 600,
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  if (leaderboardSort !== 'stars') {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (leaderboardSort !== 'stars') {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  }
+                }}
+              >
+                ⭐ Xếp theo Stars
+              </button>
+            </div>
+
+            {/* Leaderboard Table */}
+            <div style={{
+              background: 'rgba(0, 0, 0, 0.3)',
+              borderRadius: 12,
+              overflow: 'hidden',
+              border: '1px solid rgba(255, 255, 255, 0.1)'
+            }}>
+              {/* Table Header */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '60px 1fr 100px 100px',
+                padding: '14px 20px',
+                background: 'rgba(78, 205, 196, 0.15)',
+                borderBottom: '1px solid rgba(78, 205, 196, 0.3)',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                color: '#4ecdc4',
+                textTransform: 'uppercase',
+                letterSpacing: '1px'
+              }}>
+                <div>Hạng</div>
+                <div>Người chơi</div>
+                <div>Level</div>
+                <div>Stars</div>
+              </div>
+
+              {/* Table Rows */}
+              {[...leaderboardData]
+                .sort((a, b) => {
+                  if (leaderboardSort === 'level') {
+                    return b.level - a.level || b.stars - a.stars;
+                  } else {
+                    return b.stars - a.stars || b.level - a.level;
+                  }
+                })
+                .map((player, index) => {
+                  const isCurrentUser = player.username === currentUser?.username;
+                  const rank = index + 1;
+                  const getMedalEmoji = (rank: number) => {
+                    if (rank === 1) return '🥇';
+                    if (rank === 2) return '🥈';
+                    if (rank === 3) return '🥉';
+                    return `#${rank}`;
+                  };
+
+                  return (
+                    <div
+                      key={player.username}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '60px 1fr 100px 100px',
+                        padding: '16px 20px',
+                        borderBottom: index < leaderboardData.length - 1 
+                          ? '1px solid rgba(255, 255, 255, 0.08)' 
+                          : 'none',
+                        background: isCurrentUser 
+                          ? 'rgba(78, 205, 196, 0.15)'
+                          : 'transparent',
+                        transition: 'all 0.3s ease',
+                        fontSize: '0.95rem'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isCurrentUser) {
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isCurrentUser) {
+                          e.currentTarget.style.background = 'transparent';
+                        }
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: 700,
+                        color: rank <= 3 ? '#ffc107' : '#888',
+                        fontSize: rank <= 3 ? '1.1rem' : '0.95rem'
+                      }}>
+                        {getMedalEmoji(rank)}
+                      </div>
+                      <div style={{ 
+                        fontWeight: isCurrentUser ? 700 : 500,
+                        color: isCurrentUser ? '#4ecdc4' : '#fff'
+                      }}>
+                        {player.username}
+                        {isCurrentUser && (
+                          <span style={{ 
+                            marginLeft: '8px', 
+                            color: '#4ecdc4',
+                            fontSize: '0.8rem'
+                          }}>
+                            (Bạn)
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ 
+                        fontWeight: 600,
+                        color: '#9b59b6'
+                      }}>
+                        {player.level}
+                      </div>
+                      <div style={{ 
+                        fontWeight: 600,
+                        color: '#ffc107'
+                      }}>
+                        {player.stars}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CSS Animation Styles */}
       <style>
