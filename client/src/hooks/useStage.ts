@@ -1,57 +1,112 @@
 import { useState, useEffect } from "react";
-import { createStage } from "../gamehelper";
+import { createStage, calculateGhostPosition } from "../gamehelper";
 import type { Player } from "./usePlayer";
 
 export type CellValue = string | number;
 export type Cell = [CellValue, string];
 export type Stage = Cell[][];
 
-export const useStage = (player: Player, resetPlayer: () => void): [Stage, React.Dispatch<React.SetStateAction<Stage>>, number] => {
-  const [stage, setStage] = useState<Stage>(createStage());
-  const [rowsCleared, setRowsCleared] = useState(0);
+type PlacementInfo = {
+    mergedStage: Stage;
+    cleared: number;
+};
 
-  useEffect(() => {
-    setRowsCleared(0);
+// Giá trị khởi tạo rỗng, sẽ không bao giờ được sử dụng lại sau lần đầu tiên
+const emptyPlacement: PlacementInfo = {
+    mergedStage: createStage(),
+    cleared: 0,
+};
 
-    const sweepRows = (newStage: Stage): Stage =>
-      newStage.reduce((ack: Stage, row) => {
-        if (row.findIndex((cell) => cell[0] === 0) === -1) {
-          setRowsCleared((prev) => prev + 1);
-          ack.unshift(new Array(newStage[0].length).fill([0, 'clear']) as Cell[]);
-          return ack;
-        }
-        ack.push(row);
-        return ack;
-      }, [] as Stage);
+export const useStage = (player: Player): [
+    Stage,
+    React.Dispatch<React.SetStateAction<Stage>>,
+    number,
+    number,
+    PlacementInfo
+] => {
+    const [stage, setStage] = useState<Stage>(createStage());
+    const [rowsCleared, setRowsCleared] = useState(0);
+    const [clearEventId, setClearEventId] = useState(0);
+    const [lastPlacement, setLastPlacement] = useState<PlacementInfo>(emptyPlacement);
 
-    const updateStage = (prevStage: Stage): Stage => {
-      // Đầu tiên, làm sạch màn chơi
-      const newStage = prevStage.map(
-        (row) => row.map((cell) => (cell[1] === 'clear' ? [0, 'clear'] : cell)) as Cell[]
-      );
+    useEffect(() => {
+        const sweepRows = (newStage: Stage): { stage: Stage; cleared: number } => {
+            let cleared = 0;
+            const result = newStage.reduce((ack: Stage, row) => {
+                // Điều kiện này đúng: tìm thấy hàng đầy
+                if (row.findIndex((cell) => cell[0] === 0) === -1) {
+                    cleared += 1;
+                    ack.unshift(new Array(newStage[0].length).fill([0, 'clear']) as Cell[]);
+                    return ack;
+                }
+                ack.push(row);
+                return ack;
+            }, [] as Stage);
+            return { stage: result, cleared };
+        };
 
-      // Sau đó, vẽ tetromino
-      player.tetromino.forEach((row, y) => {
-        row.forEach((value, x) => {
-          if (value !== 0) {
-            newStage[y + player.pos.y][x + player.pos.x] = [
-              value,
-              `${player.collided ? 'merged' : 'clear'}`,
-            ];
-          }
-        });
-      });
+        const updateStage = (prevStage: Stage): Stage => {
+            const newStage = prevStage.map(
+                (row) => row.map((cell) => (cell[1] === 'clear' ? [0, 'clear'] : cell)) as Cell[]
+            );
 
-      // Kiểm tra va chạm
-      if (player.collided) {
-        resetPlayer();
-        return sweepRows(newStage);
-      }
-      return newStage;
-    };
+            // Vẽ ghost piece
+            const ghostPos = calculateGhostPosition(player as any, newStage as any);
+            player.tetromino.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        const gy = y + ghostPos.y;
+                        const gx = x + ghostPos.x;
+                        if (newStage[gy] && newStage[gy][gx] && newStage[gy][gx][1] === 'clear') {
+                            const ghostValue = (`ghost:${(player as any).type}`) as unknown as CellValue;
+                            newStage[gy][gx] = [ghostValue, 'clear'];
+                        }
+                    }
+                });
+            });
 
-    setStage((prev) => updateStage(prev));
-  }, [player, resetPlayer]);
+            // Vẽ player piece
+            player.tetromino.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        const drawY = y + player.pos.y;
+                        const drawX = x + player.pos.x;
+                        if (newStage[drawY] && newStage[drawY][drawX] !== undefined) {
+                            newStage[drawY][drawX] = [
+                                value,
+                                `${player.collided ? 'merged' : 'clear'}`,
+                            ];
+                        }
+                    }
+                });
+            });
 
-  return [stage, setStage, rowsCleared];
+            if (player.collided) {
+                // Tạo snapshot của stage CÓ khối gạch vừa khóa, TRƯỚC khi xóa dòng
+                // Dùng cho việc kiểm tra T-Spin
+                const placedSnapshot = newStage.map((row) => row.map((cell) => [cell[0], cell[1]] as Cell)) as Stage;
+
+                const { stage: swept, cleared } = sweepRows(newStage);
+
+                if (cleared > 0) {
+                    setRowsCleared(cleared);
+                    setClearEventId((prev) => prev + 1);
+                } else {
+                    // Nếu va chạm mà không xóa dòng nào, cũng reset rowsCleared
+                    setRowsCleared(0);
+                }
+                
+                // ✅ CHỈ CẬP NHẬT lastPlacement KHI VA CHẠM
+                setLastPlacement({ mergedStage: placedSnapshot, cleared });
+                return swept; // Trả về stage đã được xóa dòng
+            }
+
+            // Khi khối gạch đang rơi, không cần làm gì với rowsCleared hay lastPlacement
+            return newStage;
+        };
+
+        setStage((prev) => updateStage(prev));
+    }, [player]);
+
+    return [stage, setStage, rowsCleared, clearEventId, lastPlacement];
 };

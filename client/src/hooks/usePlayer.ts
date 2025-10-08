@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { STAGE_WIDTH, checkCollision } from "../gamehelper";
 import { TETROMINOES } from "../components/tetrominos";
 import type { Stage, CellValue } from "./useStage";
@@ -27,10 +27,15 @@ export const usePlayer = (): [
   (stage: Stage, dir: number) => void,
   // các giá trị thêm cho UI tetr.io:
   TType | null,   // hold
+  boolean,        // canHold
   TType[],        // nextFour
-  () => void      // holdSwap
+  () => void,     // holdSwap
+  () => void,     // clearHold
+  // server sync helpers
+  (seed: TType[]) => void,
+  (more: TType[]) => void
 ] => {
-  const { nextN, popNext } = useQueue(5); // 5 khối hiển thị
+  const { nextN, popNext, peekNext, setSeed, pushMany } = useQueue(5); // 5 khối hiển thị
 
 
   const [player, setPlayer] = useState<Player>({
@@ -41,7 +46,8 @@ export const usePlayer = (): [
   });
 
   const [hold, setHold] = useState<TType | null>(null);
-  const [canHold, setCanHold] = useState(true);
+  // Chặn hold trước khi khối đầu tiên được spawn từ queue (fix race khi vừa Start đã Hold)
+  const [canHold, setCanHold] = useState(false);
 
   const updatePlayerPos = ({
     x, y, collided,
@@ -54,15 +60,47 @@ export const usePlayer = (): [
   };
 
   const spawnFromQueue = useCallback(() => {
-  const t = popNext();  // ✅ bốc random trong 5
-  setPlayer({
-    pos: { x: STAGE_WIDTH / 2 - 2, y: 0 },
-    tetromino: TETROMINOES[t].shape,
-    type: t,
-    collided: false,
-  });
-  setCanHold(true);
-}, [popNext]);
+    const t = popNext();  // lấy khối đầu tiên, push random vào cuối
+    const base = TETROMINOES[t].shape;
+    // Tính 4 thế xoay (0, 90, 180, 270)
+    const rotations = [0,1,2,3].map(r => {
+      let matOriginal = base;
+      const rot = (m: any[][]) => {
+        const rt = m.map((_, i2) => m.map(c => c[i2]));
+        return rt.map(row => row.reverse());
+      };
+      for (let i = 0; i < r; i++) matOriginal = rot(matOriginal as any) as any;
+      // Tính kích thước thực tế cho tiêu chí chọn (không dùng để chơi)
+      const mat = matOriginal as any[][];
+      let topIdx = 0;
+      while (topIdx < mat.length && mat[topIdx].every(v => v === 0)) topIdx++;
+      let bottomIdx = mat.length - 1;
+      while (bottomIdx >= 0 && mat[bottomIdx].every(v => v === 0)) bottomIdx--;
+      const height = Math.max(0, bottomIdx - topIdx + 1);
+      let leftIdx = 0;
+      let rightIdx = (mat[0]?.length || 0) - 1;
+      const isEmptyCol = (col: number) => mat.every(row => row[col] === 0);
+      while (leftIdx <= rightIdx && isEmptyCol(leftIdx)) leftIdx++;
+      while (rightIdx >= leftIdx && isEmptyCol(rightIdx)) rightIdx--;
+      const width = Math.max(0, rightIdx - leftIdx + 1);
+      return { r, matOriginal, height, width };
+    });
+    // Ưu tiên: height nhỏ nhất (nằm ngang nhất), tie-break width lớn nhất
+    rotations.sort((a,b) => (a.height - b.height) || (b.width - a.width));
+    const best = rotations[0];
+  const pieceWidth = best.width || (best.matOriginal[0]?.length || 0);
+    const startX = Math.floor((STAGE_WIDTH - pieceWidth) / 2);
+    // Spawn ngay dưới vùng buffer để có không gian xoay/rơi
+    const startY = 0; // chúng ta giữ 0 vì stage đã có buffer; vẽ/ẩn top đã xử lý trong Stage.tsx
+
+    setPlayer({
+      pos: { x: startX, y: startY },
+  tetromino: best.matOriginal as any,
+      type: t,
+      collided: false,
+    });
+    setCanHold(true);
+  }, [popNext]);
 
   const resetPlayer = useCallback(() => {
     spawnFromQueue();
@@ -88,21 +126,31 @@ export const usePlayer = (): [
   };
 
   const holdSwap = useCallback(() => {
-  if (!canHold) return;
-  setPlayer(p => {
-    if (hold === null) {
-      setHold(p.type);
-      const t = popNext(); // ✅ cũng bốc random trong 5
-      setCanHold(false);
-      return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
-    } else {
-      const t = hold;
-      setHold(p.type);
-      setCanHold(false);
-      return { pos:{x:STAGE_WIDTH/2-2,y:0}, tetromino:TETROMINOES[t].shape, type:t, collided:false };
-    }
-  });
-}, [canHold, hold, popNext]);
+    if (!canHold) return;
+    setPlayer(p => {
+      if (hold === null) {
+        // Lần hold đầu: đẩy A vào hold, lấy B (đúng phần tử đang hiển thị ở NEXT) làm current
+        setHold(p.type);
+        const t = peekNext(); // xem B để hiển thị đồng bộ với NEXT
+        // không pop ở đây; pop sẽ xảy ra khi spawn/reset sau khi current rơi xong
+        // Tuy nhiên, vì ta cần thay ngay current thành B, ta phải pop để loại B khỏi queue
+        popNext();
+        setCanHold(false);
+        return { pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, tetromino: TETROMINOES[t].shape, type: t, collided: false };
+      } else {
+        // Đã có hold: hoán đổi current với hold
+        const t = hold;
+        setHold(p.type);
+        setCanHold(false);
+        return { pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, tetromino: TETROMINOES[t].shape, type: t, collided: false };
+      }
+    });
+  }, [canHold, hold, peekNext, popNext]);
+
+  const clearHold = useCallback(() => {
+    setHold(null);
+    // Không bật canHold ở đây; spawnFromQueue sẽ bật khi đã có current hợp lệ từ queue
+  }, []);
 
  
   return [
@@ -111,7 +159,11 @@ export const usePlayer = (): [
     resetPlayer,
     playerRotate,
     hold,
+    canHold,
     nextN,
     holdSwap,
+    clearHold,
+    setSeed,
+    pushMany,
   ];
 };
