@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
-    "dev:root": "npm run dev", 
+    "dev:root": "npm run dev",
     "build": "tsc -p . && node dist/scripts/db-ping.js",
     "build:ci": "DB_SKIP_CHECK=1 tsc -p .",
     "db:ping": "ts-node src/scripts/db-ping.ts",
@@ -15,9 +15,13 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcrypt": "^6.0.0",
+    "body-parser": "^2.2.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "ioredis": "^5.8.1",
+    "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.1",
     "pg": "^8.16.3",
     "pg-hstore": "^2.3.4",
@@ -26,9 +30,13 @@
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/body-parser": "^1.19.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
-    "@types/node": "^24.6.2",
+    "@types/ioredis": "^4.28.10",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.7.0",
     "@types/pg": "^8.15.5",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
