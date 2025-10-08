@@ -346,7 +346,7 @@ const HomeMenu: React.FC = () => {
           </button>
         </div>
       )}
-    )}
+    
 
       <div
         style={{
@@ -459,7 +459,6 @@ const HomeMenu: React.FC = () => {
             </div>
           </div>
           </div>
-        )}
 
         {/* User status moved to top bar */}
 
