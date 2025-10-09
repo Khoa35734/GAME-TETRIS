@@ -74,53 +74,6 @@ const HomeMenu: React.FC = () => {
     confirmPassword: "",
   });
 
-  useEffect(() => {
-    animateStats();
-  }, []);
-
-  // Animate statistics with a single interval
-  const animateStats = () => {
-    const targets = {
-      totalPlayers: 3,
-      gamesPlayed: 6,
-      hoursPlayed: 9,
-    };
-
-    const increments = {
-      totalPlayers: targets.totalPlayers / 100,
-      gamesPlayed: targets.gamesPlayed / 100,
-      hoursPlayed: targets.hoursPlayed / 100,
-    };
-
-    let current = {
-      totalPlayers: 0,
-      gamesPlayed: 0,
-      hoursPlayed: 0,
-    };
-
-    const timer = setInterval(() => {
-      current = {
-        totalPlayers: Math.min(current.totalPlayers + increments.totalPlayers, targets.totalPlayers),
-        gamesPlayed: Math.min(current.gamesPlayed + increments.gamesPlayed, targets.gamesPlayed),
-        hoursPlayed: Math.min(current.hoursPlayed + increments.hoursPlayed, targets.hoursPlayed),
-      };
-
-      setStats({
-        totalPlayers: Math.floor(current.totalPlayers),
-        gamesPlayed: Math.floor(current.gamesPlayed),
-        hoursPlayed: Math.floor(current.hoursPlayed),
-      });
-
-      if (
-        current.totalPlayers >= targets.totalPlayers &&
-        current.gamesPlayed >= targets.gamesPlayed &&
-        current.hoursPlayed >= targets.hoursPlayed
-      ) {
-        clearInterval(timer);
-      }
-    }, 20);
-  };
-
   // Handle login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -587,7 +540,6 @@ const HomeMenu: React.FC = () => {
           </div>
         </div>
       )}
-    
 
       <div
         style={{
@@ -605,101 +557,6 @@ const HomeMenu: React.FC = () => {
           marginTop: currentUser ? 70 : 0,
         }}
       >
-                    {/* Logo Game */}
-        <div style={{ textAlign: "center", marginBottom: "20px" }}>
-          <img
-            src="/logogame.webp"
-            alt="Logo Game"
-            style={{
-              width: "150px",
-              height: "auto",
-              filter: "drop-shadow(0 0 10px #4ecdc4)",
-            }}
-          />
-        </div>
-        {/* Stats Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-around",
-            padding: "40px 0",
-            marginBottom: "40px",
-            animation: "fadeInDown 1s ease-out",
-          }}
-        >
-          <div style={{ textAlign: "center" }}>
-            <div
-              style={{
-                fontSize: "2.5rem",
-                fontWeight: "bold",
-                textShadow: "0 0 10px rgba(255, 255, 255, 0.3)",
-                marginBottom: "8px",
-                fontFamily: "'Courier New', monospace",
-              }}
-            >
-              {stats.totalPlayers.toLocaleString()}
-            </div>
-            <div
-              style={{
-                fontSize: "0.9rem",
-                color: "#888888",
-                textTransform: "uppercase",
-                letterSpacing: "2px",
-                fontWeight: 300,
-              }}
-            >
-              Total Players
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div
-              style={{
-                fontSize: "2.5rem",
-                fontWeight: "bold",
-                textShadow: "0 0 10px rgba(255, 255, 255, 0.3)",
-                marginBottom: "8px",
-                fontFamily: "'Courier New', monospace",
-              }}
-            >
-              {stats.gamesPlayed.toLocaleString()}
-            </div>
-            <div
-              style={{
-                fontSize: "0.9rem",
-                color: "#888888",
-                textTransform: "uppercase",
-                letterSpacing: "2px",
-                fontWeight: 300,
-              }}
-            >
-              Games Played
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div
-              style={{
-                fontSize: "2.5rem",
-                fontWeight: "bold",
-                textShadow: "0 0 10px rgba(255, 255, 255, 0.3)",
-                marginBottom: "8px",
-                fontFamily: "'Courier New', monospace",
-              }}
-            >
-              {stats.hoursPlayed.toLocaleString()}
-            </div>
-            <div
-              style={{
-                fontSize: "0.9rem",
-                color: "#888888",
-                textTransform: "uppercase",
-                letterSpacing: "2px",
-                fontWeight: 300,
-              }}
-            >
-              Hours Played
-            </div>
-          </div>
-          </div>
         {/* Logo (ẩn khi ở màn đăng nhập để canh giữa tuyệt đối) */}
         {showGameModes && (
           <div

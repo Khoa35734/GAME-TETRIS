@@ -16,7 +16,7 @@ interface PlayerInfo {
   inRoom?: string;
 }
 
-// Placeholder mock data until real server integration
+// Dữ liệu mẫu tạm thời cho đến khi tích hợp server thật
 const mockRooms: RoomInfo[] = [
   { id: 'ABCD', players: 2, status: 'playing', createdAt: Date.now() - 1000 * 60 * 2 },
   { id: 'EFGH', players: 1, status: 'waiting', createdAt: Date.now() - 1000 * 60 * 5 },
@@ -69,9 +69,9 @@ const AdminDashboard: React.FC = () => {
   const [filterOnlineOnly, setFilterOnlineOnly] = useState(false);
 
   const terminateRoom = (id: string) => {
-    // Placeholder: mark finished
+    // Tạm thời: đánh dấu là đã kết thúc
     setRooms(r => r.map(room => room.id === id ? { ...room, status: 'finished' } : room));
-    // In real case: emit admin command to server
+    // Trường hợp thực tế: gửi lệnh admin đến server
   };
 
   const kickPlayer = (id: string) => {
@@ -86,63 +86,66 @@ const AdminDashboard: React.FC = () => {
   return (
     <div style={{ padding: 24, color: '#fff', fontFamily: 'Inter, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 28 }}>Admin Dashboard</h1>
-        <Link to='/' style={{ color: '#61dafb', textDecoration: 'none', fontWeight: 600 }}>← Back Home</Link>
+        <h1 style={{ margin: 0, fontSize: 28 }}>Bảng Điều Khiển Quản Trị</h1>
+        <Link to='/' style={{ color: '#61dafb', textDecoration: 'none', fontWeight: 600 }}>← Về Trang Chủ</Link>
       </div>
 
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 28 }}>
         <div style={cardStyle}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>Realtime Stats</h3>
-          <div style={{ fontSize: 13, opacity: 0.9 }}>Updated locally (mock)</div>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Thống Kê Thời Gian Thực</h3>
+          <div style={{ fontSize: 13, opacity: 0.9 }}>Cập nhật cục bộ (mẫu)</div>
           <div style={{ display: 'grid', gap: 4 }}>
-            <div>Total Players: {players.length}</div>
-            <div>Online Players: {totalOnline}</div>
-            <div>Active Rooms: {playingRooms}</div>
-            <div>Waiting Rooms: {rooms.filter(r => r.status === 'waiting').length}</div>
+            <div>Tổng Người Chơi: {players.length}</div>
+            <div>Người Chơi Online: {totalOnline}</div>
+            <div>Phòng Đang Chơi: {playingRooms}</div>
+            <div>Phòng Đang Chờ: {rooms.filter(r => r.status === 'waiting').length}</div>
           </div>
         </div>
 
         <div style={cardStyle}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>Server Controls</h3>
-          <button style={btn} onClick={() => alert('Ping server (mock)')}>Ping Server</button>
-          <button style={btn} onClick={() => alert('Broadcast maintenance message (mock)')}>Broadcast Notice</button>
-          <button style={btnDanger} onClick={() => { setRooms([]); setPlayers([]); }}>Wipe All (Mock)</button>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Điều Khiển Máy Chủ</h3>
+          <button style={btn} onClick={() => alert('Ping server (mẫu)')}>Ping Máy Chủ</button>
+          <button style={btn} onClick={() => alert('Gửi thông báo bảo trì (mẫu)')}>Gửi Thông Báo</button>
+          <button style={btnDanger} onClick={() => { setRooms([]); setPlayers([]); }}>Xóa Tất Cả (Mẫu)</button>
         </div>
 
         <div style={cardStyle}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>Filters</h3>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Bộ Lọc</h3>
           <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type='checkbox' checked={filterOnlineOnly} onChange={e => setFilterOnlineOnly(e.target.checked)} />
-            Online only
+            Chỉ hiện online
           </label>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, alignItems: 'start' }}>
         <div style={{ ...cardStyle, minWidth: 'auto' }}>
-          <h3 style={{ margin: 0 }}>Rooms</h3>
+          <h3 style={{ margin: 0 }}>Phòng</h3>
           <table style={tableStyle}>
             <thead>
               <tr>
                 <th style={thtd}>ID</th>
-                <th style={thtd}>Players</th>
-                <th style={thtd}>Status</th>
-                <th style={thtd}>Age</th>
-                <th style={thtd}>Action</th>
+                <th style={thtd}>Người Chơi</th>
+                <th style={thtd}>Trạng Thái</th>
+                <th style={thtd}>Thời Gian</th>
+                <th style={thtd}>Hành Động</th>
               </tr>
             </thead>
             <tbody>
               {rooms.length === 0 && (
-                <tr><td style={thtd} colSpan={5}>(no rooms)</td></tr>
+                <tr><td style={thtd} colSpan={5}>(không có phòng)</td></tr>
               )}
               {rooms.map(r => (
                 <tr key={r.id}>
                   <td style={thtd}>{r.id}</td>
                   <td style={thtd}>{r.players}</td>
-                  <td style={thtd}>{badge(r.status, r.status === 'playing' ? 'linear-gradient(90deg,#34d399,#059669)' : r.status === 'waiting' ? 'linear-gradient(90deg,#fbbf24,#d97706)' : '#4b5563')}</td>
-                  <td style={thtd}>{Math.floor((Date.now()-r.createdAt)/60000)}m</td>
+                  <td style={thtd}>{badge(
+                    r.status === 'playing' ? 'Đang chơi' : r.status === 'waiting' ? 'Đang chờ' : 'Đã kết thúc', 
+                    r.status === 'playing' ? 'linear-gradient(90deg,#34d399,#059669)' : r.status === 'waiting' ? 'linear-gradient(90deg,#fbbf24,#d97706)' : '#4b5563'
+                  )}</td>
+                  <td style={thtd}>{Math.floor((Date.now()-r.createdAt)/60000)} phút</td>
                   <td style={thtd}>
-                    {r.status !== 'finished' && <button style={miniBtnDanger} onClick={() => terminateRoom(r.id)}>Terminate</button>}
+                    {r.status !== 'finished' && <button style={miniBtnDanger} onClick={() => terminateRoom(r.id)}>Kết Thúc</button>}
                   </td>
                 </tr>
               ))}
@@ -151,20 +154,20 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div style={{ ...cardStyle, minWidth: 'auto' }}>
-          <h3 style={{ margin: 0 }}>Players</h3>
+          <h3 style={{ margin: 0 }}>Người Chơi</h3>
           <table style={tableStyle}>
             <thead>
               <tr>
-                <th style={thtd}>Name</th>
-                <th style={thtd}>Rating</th>
-                <th style={thtd}>Status</th>
-                <th style={thtd}>Room</th>
-                <th style={thtd}>Action</th>
+                <th style={thtd}>Tên</th>
+                <th style={thtd}>Điểm</th>
+                <th style={thtd}>Trạng Thái</th>
+                <th style={thtd}>Phòng</th>
+                <th style={thtd}>Hành Động</th>
               </tr>
             </thead>
             <tbody>
               {filteredPlayers.length === 0 && (
-                <tr><td style={thtd} colSpan={5}>(no players)</td></tr>
+                <tr><td style={thtd} colSpan={5}>(không có người chơi)</td></tr>
               )}
               {filteredPlayers.map(p => (
                 <tr key={p.id}>
@@ -172,7 +175,7 @@ const AdminDashboard: React.FC = () => {
                   <td style={thtd}>{p.rating}</td>
                   <td style={thtd}>{p.online ? badge('Online','#2563eb') : badge('Offline','#374151')}</td>
                   <td style={thtd}>{p.inRoom ?? '-'}</td>
-                  <td style={thtd}>{p.inRoom && <button style={miniBtn} onClick={() => kickPlayer(p.id)}>Kick</button>}</td>
+                  <td style={thtd}>{p.inRoom && <button style={miniBtn} onClick={() => kickPlayer(p.id)}>Đá</button>}</td>
                 </tr>
               ))}
             </tbody>

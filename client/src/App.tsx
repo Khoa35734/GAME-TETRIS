@@ -8,6 +8,9 @@ import OnlineCreateRoom from "./components/OnlineCreateRoom";
 import OnlineJoinRoom from "./components/OnlineJoinRoom";
 import AdminDashboard from "./components/admin/AdminDashboard";
 import RoomLobby from "./components/RoomLobby";
+import BroadcastMessages from "./components/admin/BroadcastMessages";
+import FeedbackManagement from "./components/admin/FeedbackManagement";
+import ReportsManagement from "./components/admin/ReportsManagement";
 
 const backgroundModules = import.meta.glob("../img/*.{jpg,jpeg,png,gif,webp}", {
   eager: true,
@@ -64,6 +67,9 @@ const App: React.FC = () => {
         <Route path="/room/:roomId" element={<RoomLobby />} />
         <Route path="/settings" element={<div style={{ padding: 16 }}><h2>Cài đặt</h2><p>Tuỳ chọn sẽ sớm có mặt.</p></div>} />
   <Route path="/admin" element={<AdminDashboard />} />
+<Route path="/admin/broadcast" element={<BroadcastMessages />} />
+<Route path="/admin/feedback" element={<FeedbackManagement />} />
+<Route path="/admin/reports" element={<ReportsManagement />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
