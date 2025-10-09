@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: './.env' });
+console.log('Loaded PG_USER =', process.env.PG_USER);
+
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
