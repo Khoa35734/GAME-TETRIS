@@ -32,8 +32,8 @@ if (DATABASE_URL) {
   const host = process.env.PG_HOST || 'localhost';
   const port = Number(process.env.PG_PORT || 5432);
   const database = process.env.PG_DB || 'Tetris';
-  const username = process.env.PG_USER || 'devuser';
-  const password = process.env.PG_PASSWORD || '123456';
+  const username = process.env.PG_USER || 'postgres';
+  const password = process.env.PG_PASSWORD || 'postgres';
 
   sequelize = new Sequelize(database, username, password, {
     host,
