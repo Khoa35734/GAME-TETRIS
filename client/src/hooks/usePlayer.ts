@@ -30,9 +30,12 @@ export const usePlayer = (): [
   boolean,        // canHold
   TType[],        // nextFour
   () => void,     // holdSwap
-  () => void      // clearHold
+  () => void,     // clearHold
+  // server sync helpers
+  (seed: TType[]) => void,
+  (more: TType[]) => void
 ] => {
-  const { nextN, popNext, peekNext } = useQueue(5); // 5 khối hiển thị
+  const { nextN, popNext, setSeed, pushMany } = useQueue(5); // 5 khối hiển thị
 
 
   const [player, setPlayer] = useState<Player>({
@@ -126,23 +129,32 @@ export const usePlayer = (): [
     if (!canHold) return;
     setPlayer(p => {
       if (hold === null) {
-        // Lần hold đầu: đẩy A vào hold, lấy B (đúng phần tử đang hiển thị ở NEXT) làm current
+        // Lần hold đầu: đẩy khối hiện tại vào hold, spawn khối TIẾP THEO từ queue
         setHold(p.type);
-        const t = peekNext(); // xem B để hiển thị đồng bộ với NEXT
-        // không pop ở đây; pop sẽ xảy ra khi spawn/reset sau khi current rơi xong
-        // Tuy nhiên, vì ta cần thay ngay current thành B, ta phải pop để loại B khỏi queue
-        popNext();
+        // Lấy khối tiếp theo từ queue (sẽ pop và thêm random vào cuối)
+        const t = popNext();
+        const base = TETROMINOES[t].shape;
         setCanHold(false);
-        return { pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, tetromino: TETROMINOES[t].shape, type: t, collided: false };
+        return { 
+          pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, 
+          tetromino: base, 
+          type: t, 
+          collided: false 
+        };
       } else {
-        // Đã có hold: hoán đổi current với hold
+        // Đã có hold: hoán đổi khối hiện tại với hold (KHÔNG thay đổi queue)
         const t = hold;
         setHold(p.type);
         setCanHold(false);
-        return { pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, tetromino: TETROMINOES[t].shape, type: t, collided: false };
+        return { 
+          pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, 
+          tetromino: TETROMINOES[t].shape, 
+          type: t, 
+          collided: false 
+        };
       }
     });
-  }, [canHold, hold, peekNext, popNext]);
+  }, [canHold, hold, popNext]);
 
   const clearHold = useCallback(() => {
     setHold(null);
@@ -160,5 +172,7 @@ export const usePlayer = (): [
     nextN,
     holdSwap,
     clearHold,
+    setSeed,
+    pushMany,
   ];
 };

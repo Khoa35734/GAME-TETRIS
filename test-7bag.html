@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test 7-Bag Randomizer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            opacity: 0.8;
+            margin-bottom: 30px;
+        }
+        button {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 5px;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .piece-display {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .piece {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .piece.I { background: linear-gradient(135deg, #00d2ff, #3a7bd5); }
+        .piece.O { background: linear-gradient(135deg, #f7971e, #ffd200); }
+        .piece.T { background: linear-gradient(135deg, #a8edea, #fed6e3); }
+        .piece.S { background: linear-gradient(135deg, #5ee7df, #b490ca); }
+        .piece.Z { background: linear-gradient(135deg, #f43b47, #453a94); }
+        .piece.J { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+        .piece.L { background: linear-gradient(135deg, #fa709a, #fee140); }
+        .bag-separator {
+            width: 100%;
+            height: 2px;
+            background: rgba(255,255,255,0.3);
+            margin: 10px 0;
+            position: relative;
+        }
+        .bag-separator::after {
+            content: '← Túi mới';
+            position: absolute;
+            right: 0;
+            top: -10px;
+            font-size: 12px;
+            opacity: 0.7;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 30px 0;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-card .label {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+        }
+        .verification {
+            background: rgba(255,255,255,0.15);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .verification h3 {
+            margin-top: 0;
+        }
+        .check-mark {
+            color: #4ade80;
+            margin-right: 5px;
+        }
+        .x-mark {
+            color: #ef4444;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎲 Test 7-Bag Randomizer</h1>
+        <div class="subtitle">Kiểm tra cơ chế sinh khối Tetris</div>
+        
+        <div class="controls">
+            <button onclick="generate7()">Tạo 7 khối (1 túi)</button>
+            <button onclick="generate21()">Tạo 21 khối (3 túi)</button>
+            <button onclick="generate70()">Tạo 70 khối (10 túi)</button>
+            <button onclick="reset()">Reset</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="label">Tổng khối</div>
+                <div class="value" id="total">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Số túi</div>
+                <div class="value" id="bags">0</div>
+            </div>
+        </div>
+
+        <div id="pieces" class="piece-display"></div>
+
+        <div class="verification" id="verification" style="display: none;">
+            <h3>📊 Phân Tích</h3>
+            <div id="analysis"></div>
+        </div>
+    </div>
+
+    <script>
+        const BAG = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
+        let allPieces = [];
+        let bagCount = 0;
+
+        function shuffle(array) {
+            const result = [...array];
+            for (let i = result.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [result[i], result[j]] = [result[j], result[i]];
+            }
+            return result;
+        }
+
+        function generateBag() {
+            return shuffle([...BAG]);
+        }
+
+        function displayPieces() {
+            const container = document.getElementById('pieces');
+            container.innerHTML = '';
+            
+            for (let i = 0; i < allPieces.length; i++) {
+                if (i > 0 && i % 7 === 0) {
+                    const separator = document.createElement('div');
+                    separator.className = 'bag-separator';
+                    container.appendChild(separator);
+                }
+                
+                const piece = document.createElement('div');
+                piece.className = `piece ${allPieces[i]}`;
+                piece.textContent = allPieces[i];
+                piece.title = `Khối ${i + 1}`;
+                container.appendChild(piece);
+            }
+        }
+
+        function analyze() {
+            if (allPieces.length === 0) {
+                document.getElementById('verification').style.display = 'none';
+                return;
+            }
+
+            const counts = {};
+            BAG.forEach(piece => counts[piece] = 0);
+            allPieces.forEach(piece => counts[piece]++);
+
+            const expectedPerBag = bagCount;
+            const completeBags = Math.floor(allPieces.length / 7);
+            const remainder = allPieces.length % 7;
+
+            let html = '<div style="margin-bottom: 15px;">';
+            html += `<strong>Túi hoàn chỉnh:</strong> ${completeBags}<br>`;
+            html += `<strong>Khối dư:</strong> ${remainder}<br>`;
+            html += '</div>';
+
+            html += '<div style="margin-bottom: 15px;"><strong>Đếm từng loại:</strong><br>';
+            let allCorrect = true;
+            BAG.forEach(piece => {
+                const count = counts[piece];
+                const expected = completeBags;
+                const isCorrect = count >= expected && count <= expected + 1;
+                const icon = isCorrect ? '✓' : '✗';
+                const className = isCorrect ? 'check-mark' : 'x-mark';
+                html += `<span class="${className}">${icon}</span> <strong>${piece}:</strong> ${count} lần `;
+                html += `(mong đợi: ${expected}${remainder > 0 ? ' hoặc ' + (expected + 1) : ''})<br>`;
+                if (!isCorrect) allCorrect = false;
+            });
+            html += '</div>';
+
+            if (completeBags > 0) {
+                html += '<div>';
+                if (allCorrect) {
+                    html += '<span class="check-mark">✓</span> <strong>Hoàn hảo!</strong> Mỗi khối xuất hiện đúng số lần.';
+                } else {
+                    html += '<span class="x-mark">✗</span> <strong>Có vấn đề!</strong> Phân bố không đều.';
+                }
+                html += '</div>';
+            }
+
+            document.getElementById('analysis').innerHTML = html;
+            document.getElementById('verification').style.display = 'block';
+        }
+
+        function updateStats() {
+            document.getElementById('total').textContent = allPieces.length;
+            document.getElementById('bags').textContent = bagCount;
+        }
+
+        function generate7() {
+            const bag = generateBag();
+            allPieces.push(...bag);
+            bagCount++;
+            displayPieces();
+            updateStats();
+            analyze();
+        }
+
+        function generate21() {
+            for (let i = 0; i < 3; i++) {
+                const bag = generateBag();
+                allPieces.push(...bag);
+                bagCount++;
+            }
+            displayPieces();
+            updateStats();
+            analyze();
+        }
+
+        function generate70() {
+            for (let i = 0; i < 10; i++) {
+                const bag = generateBag();
+                allPieces.push(...bag);
+                bagCount++;
+            }
+            displayPieces();
+            updateStats();
+            analyze();
+        }
+
+        function reset() {
+            allPieces = [];
+            bagCount = 0;
+            displayPieces();
+            updateStats();
+            analyze();
+        }
+
+        // Tạo sẵn 1 túi để demo
+        generate7();
+    </script>
+</body>
+</html>

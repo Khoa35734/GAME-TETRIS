@@ -1,6 +1,7 @@
 // Import cac panel tu SidePanels
 import { HoldPanel, NextPanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from 'react-router-dom';
 import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from "../gamehelper";
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
@@ -19,11 +20,35 @@ import StartButton from "./StartButton";
 // --- CAI DAT DO NHAY PHIM ---
 const DAS_DELAY: number = 120;
 const MOVE_INTERVAL: number = 40;
-// Tốc độ rơi: fall_speed = initial_speed * (speed_factor^(level))
-const INITIAL_SPEED_MS = 1000; // tốc độ Level 1 (level state = 0)
-const SPEED_FACTOR = 0.85;     // < 1 → càng về sau càng nhanh
-const MIN_SPEED_MS = 60;       // tránh quá nhanh
-const getFallSpeed = (lvl: number) => Math.max(MIN_SPEED_MS, Math.round(INITIAL_SPEED_MS * Math.pow(SPEED_FACTOR, lvl)));
+
+// Tốc độ rơi: Bắt đầu 800ms ở level 1, giảm dần đến ~16ms ở level 22
+const MAX_LEVEL = 22; // Level tối đa, không tăng thêm
+
+const getFallSpeed = (lvl: number): number => {
+  // Cap level tại 22
+  const L = Math.min(lvl, MAX_LEVEL - 1); // lvl từ 0-21, map sang level 1-22
+  
+  // Level 0 (hiển thị level 1): 800ms
+  // Level 21 (hiển thị level 22): ~16ms
+  // Công thức giảm dần tuyến tính theo logarit
+  const START_SPEED = 800; // 0.8 giây ở level 1
+  const END_SPEED = 16.67;  // ~16.67ms ở level 22 (instant)
+  
+  if (L >= MAX_LEVEL - 1) {
+    return END_SPEED;
+  }
+  
+  // Giảm dần theo hàm mũ để có độ chuyển tiếp mượt
+  // Từ level 0→21: speed giảm từ 800ms → 16.67ms
+  const progress = L / (MAX_LEVEL - 1); // 0 → 1
+  const speed = START_SPEED * Math.pow(END_SPEED / START_SPEED, progress);
+  
+  return Math.max(END_SPEED, speed);
+};
+
+// Dual-timer lock logic
+const INACTIVITY_LOCK_MS = 750; // Không thao tác trong 0.75s kể từ lần thao tác cuối khi đang chạm đất → lock
+const HARD_CAP_MS = 3000;        // Sau 3s kể từ lúc chạm đất đầu tiên: mọi thao tác khi vẫn chạm → lock ngay
 
 // --- THAM SO VI TRI PANEL (chinh tai day) ---
 const PANEL_WIDTH = 120;     // do rong khung preview
@@ -44,6 +69,7 @@ const NEXT_SHIFT_X = 50;
 const NEXT_SHIFT_Y = 0;
 
 const Tetris: React.FC = () => {
+  const navigate = useNavigate();
   // Hold state
   const [hasHeld, setHasHeld] = useState(false);
   const [dropTime, setDropTime] = useState<number | null>(null);
@@ -53,6 +79,14 @@ const Tetris: React.FC = () => {
 
   // dong bo lock
   const [locking, setLocking] = useState(false);
+  // trạng thái chạm đất + timers
+  const [isGrounded, setIsGrounded] = useState(false);
+  const inactivityTimeoutRef = useRef<number | null>(null);
+  const capTimeoutRef = useRef<number | null>(null);
+  const capExpiredRef = useRef<boolean>(false);
+  const groundedSinceRef = useRef<number | null>(null);
+  const lastGroundActionRef = useRef<number | null>(null);
+  const prevPlayerRef = useRef<{ x: number; y: number; rotKey: string } | null>(null);
 
   // DAS/ARR
   const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
@@ -67,6 +101,11 @@ const Tetris: React.FC = () => {
   // Whiteout sweep for game over
   // progress not exposed to UI; animation drives stage directly
   const whiteoutRaf = useRef<number | null>(null);
+
+  // AFK Warning System (5 giây không nhấn phím) - DISABLED FOR TESTING
+  const [showAFKWarning, setShowAFKWarning] = useState(false);
+  const afkTimeoutRef = useRef<number | null>(null);
+  const lastKeyPressRef = useRef<number>(Date.now());
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -102,7 +141,7 @@ const Tetris: React.FC = () => {
 
   const startGame = (): void => {
     setStage(createStage());
-  setDropTime(getFallSpeed(0));
+    setDropTime(getFallSpeed(0));
     setGameOver(false);
     setStartGameOverSequence(false);
   // reset whiteout
@@ -111,13 +150,117 @@ const Tetris: React.FC = () => {
   // score removed
     setRows(0);
     setLevel(0);
-  setWin(false);
-  setElapsedMs(0);
-  setTimerOn(true);
+    setWin(false);
+    setElapsedMs(0);
+    setTimerOn(true);
     clearHold(); // reset vùng hold về rỗng khi chơi lại
     setHasHeld(false);
+    // clear lock timers + grounded
+    if (inactivityTimeoutRef.current) { clearTimeout(inactivityTimeoutRef.current); inactivityTimeoutRef.current = null; }
+    if (capTimeoutRef.current) { clearTimeout(capTimeoutRef.current); capTimeoutRef.current = null; }
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
     resetPlayer();
     wrapperRef.current?.focus();
+  };
+
+  // Helpers cho lock delay
+  const clearInactivity = () => {
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+      inactivityTimeoutRef.current = null;
+    }
+  };
+  const clearCap = () => {
+    if (capTimeoutRef.current) {
+      clearTimeout(capTimeoutRef.current);
+      capTimeoutRef.current = null;
+    }
+  };
+
+  const doLock = () => {
+    // Khóa khối sau delay: kiểm tra game over và T-Spin, rồi cập nhật collided
+    if (isGameOverFromBuffer(stage)) {
+      setGameOver(true);
+      setDropTime(null);
+      setTimerOn(false);
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
+      return;
+    }
+    const tspin = (player.type === 'T') && isTSpin(player as any, stage as any);
+    if (tspin) console.log('T-Spin!');
+    setLocking(true);
+    clearInactivity();
+    clearCap();
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
+    updatePlayerPos({ x: 0, y: 0, collided: true });
+  };
+
+  const startGroundTimers = () => {
+    setIsGrounded(true);
+    const now = Date.now();
+    const firstTouch = groundedSinceRef.current == null;
+    groundedSinceRef.current = groundedSinceRef.current ?? now; // set once
+    lastGroundActionRef.current = now;
+    // reset inactivity each time ground is (re)entered
+    clearInactivity();
+    inactivityTimeoutRef.current = window.setTimeout(() => {
+      doLock(); // không thao tác 2s → lock
+    }, INACTIVITY_LOCK_MS);
+    // start hard cap only once at first touch
+    if (firstTouch && !capTimeoutRef.current) {
+      capExpiredRef.current = false;
+      capTimeoutRef.current = window.setTimeout(() => {
+        capExpiredRef.current = true; // sau 3s từ lúc chạm đất đầu tiên
+      }, HARD_CAP_MS);
+    }
+  };
+
+  const onGroundAction = () => {
+    // gọi khi có di chuyển/rotate mà vẫn đang chạm đất
+    if (capExpiredRef.current) {
+      doLock();
+      return;
+    }
+    lastGroundActionRef.current = Date.now();
+    // reset inactivity timer
+    clearInactivity();
+    inactivityTimeoutRef.current = window.setTimeout(() => doLock(), INACTIVITY_LOCK_MS);
+  };
+
+  // AFK Timer Management - DISABLED FOR TESTING
+  const clearAFKTimer = () => {
+    if (afkTimeoutRef.current) {
+      clearTimeout(afkTimeoutRef.current);
+      afkTimeoutRef.current = null;
+    }
+  };
+
+  const resetAFKTimer = () => {
+    clearAFKTimer();
+    lastKeyPressRef.current = Date.now();
+    
+    // DISABLED: Không start AFK timer để test garbage mechanics
+    /*
+    // Chỉ start AFK timer khi game đang chơi (không countdown, không game over, không warning)
+    if (countdown === null && !gameOver && !startGameOverSequence && !showAFKWarning) {
+      afkTimeoutRef.current = window.setTimeout(() => {
+        // 5 giây không nhấn phím → hiện warning và pause game
+        setShowAFKWarning(true);
+        setDropTime(null); // Pause game
+      }, 5000);
+    }
+    */
   };
 
   const drop = (): void => {
@@ -130,23 +273,9 @@ const Tetris: React.FC = () => {
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
-      // Điều kiện game over mới: có merge trong vùng buffer
-      if (isGameOverFromBuffer(stage)) {
-        setGameOver(true);
-        setDropTime(null);
-        setTimerOn(false); // End game → ngừng bấm giờ
-        return;
-      }
-      // tam dung gravity, doi stage merge roi reset
+      // Chạm đất: tạm dừng gravity và (re)start timers
       setDropTime(null);
-      // T-Spin detection: khi khối sắp được khoá
-      const tspin = (player.type === 'T') && isTSpin(player as any, stage as any);
-      if (tspin) {
-        // Bạn có thể thay console.log bằng cập nhật điểm/hiệu ứng
-        console.log('T-Spin!');
-      }
-      setLocking(true);
-      updatePlayerPos({ x: 0, y: 0, collided: true });
+      startGroundTimers();
     }
   };
 
@@ -161,13 +290,33 @@ const Tetris: React.FC = () => {
       setTimerOn(false); // End game → ngừng bấm giờ
       return;
     }
+    // Hard drop: khóa ngay, bỏ qua delay
     setDropTime(null);
     setLocking(true);
+    clearInactivity();
+    clearCap();
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
     if (dropDistance > 0) updatePlayerPos({ x: 0, y: dropDistance, collided: true });
     else updatePlayerPos({ x: 0, y: 0, collided: true });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    // Reset AFK timer khi có bất kỳ phím nào được nhấn - DISABLED
+    /*
+    if (showAFKWarning) {
+      // Đang hiện warning → nhấn phím bất kỳ để resume
+      setShowAFKWarning(false);
+      setDropTime(getFallSpeed(level)); // Resume game
+      resetAFKTimer();
+      return;
+    }
+    */
+    
+    // resetAFKTimer(); // DISABLED - Reset AFK mỗi khi nhấn phím
+
     if (gameOver || startGameOverSequence || countdown !== null) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
@@ -184,18 +333,15 @@ const Tetris: React.FC = () => {
       if (!checkCollision(player, stage, { x: 0, y: 1 })) {
         updatePlayerPos({ x: 0, y: 1, collided: false });
       } else {
-        if (player.pos.y <= 0) {
-          setGameOver(true);
-          setDropTime(null);
-          setTimerOn(false); // End game → ngừng bấm giờ
-          return;
-        }
-        setDropTime(null);
-        setLocking(true);
-        updatePlayerPos({ x: 0, y: 0, collided: true });
+        // Soft drop nhưng đã chạm đất → áp dụng timers, không khóa ngay
+        startGroundTimers();
       }
     } else if (keyCode === 38) {
-      if (!locking) playerRotate(stage, 1);
+      if (!locking) {
+        playerRotate(stage, 1);
+        // nếu vẫn chạm đất sau xoay → coi như 1 thao tác trên đất
+        if (checkCollision(player, stage, { x: 0, y: 1 })) onGroundAction();
+      }
   } else if (keyCode === 32) {
       hardDrop();
   } else if (keyCode === 16) { // Shift -> Hold
@@ -210,7 +356,7 @@ const Tetris: React.FC = () => {
     if (gameOver || startGameOverSequence || countdown !== null) return;
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) setMoveIntent(null);
-  else if (keyCode === 40) setDropTime(getFallSpeed(level));
+    else if (keyCode === 40) setDropTime(isGrounded ? null : getFallSpeed(level));
   };
 
   // ROI
@@ -249,6 +395,12 @@ const Tetris: React.FC = () => {
       setMoveIntent(null);
       setLocking(false);
   setDropTime(getFallSpeed(level));
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
     }
   }, [stage, locking, player.collided, gameOver, level, resetPlayer]);
 
@@ -266,6 +418,12 @@ const Tetris: React.FC = () => {
       updatePlayerPos({ x: 0, y: 0, collided: true });
       setGameOver(true);
       setTimerOn(false);
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
     }
   }, [startGameOverSequence, gameOver, updatePlayerPos]);
 
@@ -331,6 +489,65 @@ const Tetris: React.FC = () => {
     }
   }, [rows, win]);
 
+  // Theo dõi thay đổi player/stage để (re)start/cancel lock delay dựa trên trạng thái chạm đất
+  useEffect(() => {
+    // detect player changes
+    const currKey = JSON.stringify(player.tetromino);
+    const prev = prevPlayerRef.current;
+    prevPlayerRef.current = { x: player.pos.x, y: player.pos.y, rotKey: currKey };
+
+    if (gameOver || startGameOverSequence || countdown !== null) {
+      clearInactivity();
+      clearCap();
+      capExpiredRef.current = false;
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      setIsGrounded(false);
+      return;
+    }
+    if (player.collided) return; // đã khóa rồi, đợi reset
+    const touching = checkCollision(player, stage, { x: 0, y: 1 });
+    if (touching) {
+      // bắt đầu timers nếu mới chạm
+      if (!isGrounded) startGroundTimers();
+      else {
+        // nếu đã chạm: kiểm tra xem có thao tác (di chuyển/rotate) hay không
+        if (
+          prev && (prev.x !== player.pos.x || prev.y !== player.pos.y || prev.rotKey !== currKey)
+        ) {
+          onGroundAction();
+        }
+      }
+    } else {
+      // Nhấc khỏi đất: hủy timers và tiếp tục gravity
+      if (isGrounded) {
+        clearInactivity();
+        clearCap();
+        capExpiredRef.current = false;
+        groundedSinceRef.current = null;
+        lastGroundActionRef.current = null;
+        setIsGrounded(false);
+        setDropTime(getFallSpeed(level));
+      }
+    }
+  }, [player, stage, gameOver, startGameOverSequence, countdown, level, isGrounded]);
+
+  // Dọn dẹp khi unmount
+  useEffect(() => () => { clearInactivity(); clearCap(); clearAFKTimer(); }, []);
+
+  // AFK Timer: Bắt đầu khi game start, reset khi có input - DISABLED FOR TESTING
+  useEffect(() => {
+    /*
+    if (countdown === null && !gameOver && !startGameOverSequence && !showAFKWarning) {
+      resetAFKTimer();
+    } else {
+      clearAFKTimer();
+    }
+    */
+    // Cleanup on unmount or state change
+    return () => clearAFKTimer();
+  }, [countdown, gameOver, startGameOverSequence, showAFKWarning]);
+
   return (
     <StyledTetrisWrapper
       ref={wrapperRef}
@@ -338,7 +555,29 @@ const Tetris: React.FC = () => {
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
+      style={{
+        background: `url('/img/bg2.gif') center/cover, #000`,
+        backgroundAttachment: 'fixed',
+      }}
     >
+      {/* Nút Thoát về menu */}
+      <button
+        onClick={() => navigate('/')}
+        style={{
+          position: 'fixed',
+          top: 12,
+          left: 12,
+          zIndex: 999,
+          background: 'rgba(255,255,255,0.1)',
+          border: '1px solid rgba(255,255,255,0.25)',
+          color: '#fff',
+          padding: '8px 12px',
+          borderRadius: 8,
+          cursor: 'pointer'
+        }}
+      >
+        ← Thoát
+      </button>
       <div
         style={{
           display: "flex",
@@ -435,6 +674,60 @@ const Tetris: React.FC = () => {
           }}
         >
           {countdown}
+        </div>
+      )}
+
+      {/* AFK Warning Overlay */}
+      {showAFKWarning && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            zIndex: 1000,
+            animation: 'fadeIn 0.3s ease-out'
+          }}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(30, 10, 10, 0.95) 100%)',
+              border: '3px solid #ff4444',
+              borderRadius: 16,
+              padding: '40px 60px',
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(255, 68, 68, 0.5), inset 0 0 40px rgba(255, 68, 68, 0.1)',
+              animation: 'pulse 2s ease-in-out infinite'
+            }}
+          >
+            <div
+              style={{
+                fontSize: '3rem',
+                fontWeight: 800,
+                color: '#ff4444',
+                textShadow: '0 0 20px rgba(255, 68, 68, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6)',
+                marginBottom: '24px',
+                letterSpacing: '4px'
+              }}
+            >
+              ⚠️ WARNING ⚠️
+            </div>
+            <div
+              style={{
+                fontSize: '1.3rem',
+                color: '#fff',
+                fontWeight: 600,
+                lineHeight: 1.6,
+                textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)'
+              }}
+            >
+              Bạn đang AFK!<br />
+              Nhấn phím bất kỳ để tiếp tục trận đấu
+            </div>
+          </div>
         </div>
       )}
     </StyledTetrisWrapper>

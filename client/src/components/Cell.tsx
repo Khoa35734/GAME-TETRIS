@@ -16,6 +16,9 @@ const Cell: React.FC<CellProps> = ({ type, isBuffer }) => {
     tetrominoType = realType in TETROMINOES ? realType : 0;
     const color = TETROMINOES[tetrominoType].color;
     return <StyledCell type={'ghost'} color={color} />;
+  } else if (type === 'garbage') {
+    // Hàng rác - màu xám
+    tetrominoType = 'garbage';
   } else if (typeof type === 'string' && type in TETROMINOES) {
     tetrominoType = type as keyof typeof TETROMINOES;
   } else if (type === 'ghost') {

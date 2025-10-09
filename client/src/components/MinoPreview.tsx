@@ -1,4 +1,3 @@
-import React from "react";
 import { TETROMINOES } from "./tetrominos";
 
 type Props = { type: keyof typeof TETROMINOES | null; size?: number };
