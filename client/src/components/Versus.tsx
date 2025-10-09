@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import socket, { SERVER_URL } from '../socket.ts';
 import Stage from './Stage';
 import { HoldPanel, NextPanel } from './SidePanels';
@@ -11,9 +11,42 @@ import { useStage } from '../hooks/useStage';
 import { useGameStatus } from '../hooks/useGameStatus';
 import { useInterval } from '../hooks/useInterval';
 
-// --- DAS/ARR Movement Settings ---
-const DAS_DELAY: number = 120; // Delayed Auto Shift: thời gian giữ phím trước khi tự động lặp (ms)
-const MOVE_INTERVAL: number = 40; // Auto Repeat Rate: khoảng cách giữa các lần di chuyển tự động (ms)
+// ========================================
+// 🎮 SRS ROTATION & INPUT SYSTEM IMPORTS
+// ========================================
+import { tryRotate } from '../srsRotation';
+// Future: Full TETR.IO mechanics (uncomment when needed)
+/*
+import {
+  createDASState,
+  updateDAS,
+  createIRSIHSState,
+  getSpawnIntent,
+  createLockDelayState,
+  updateLockDelay,
+  tickLockDelay,
+  createAREState,
+  startARE,
+  updateARE,
+  type DASState,
+  type IRSIHSState,
+  type LockDelayState,
+  type AREState,
+} from '../inputSystem';
+*/
+
+// --- DAS/ARR Movement Settings (TETR.IO style) ---
+const DAS_DELAY: number = 120; // Delayed Auto Shift (ms) - có thể điều chỉnh trong settings
+const ARR: number = 0; // Auto Repeat Rate (ms) - 0 = instant, 40 = normal
+const MOVE_INTERVAL: number = ARR || 16; // Fallback cho ARR
+
+// --- SRS/TETR.IO Settings ---
+// Future: Uncomment when implementing full TETR.IO mechanics
+// const LOCK_DELAY: number = 500; // Lock delay khi chạm đất (ms)
+// const MAX_LOCK_RESETS: number = 15; // Max số lần reset lock delay (infinite spin limit)
+// const ARE_DELAY: number = 0; // Entry delay (0 = instant spawn like TETR.IO)
+const ENABLE_180_ROTATION: boolean = true; // Bật xoay 180°
+// const ENABLE_FLOOR_KICK: boolean = true; // Bật floor kick (đá sàn) - always enabled in tryRotate()
 
 // --- Gravity/Speed Settings ---
 // Tốc độ rơi: Bắt đầu 800ms ở level 1, giảm dần đến ~16ms ở level 22
@@ -105,14 +138,15 @@ const calculateGarbageLines = (
 
 const Versus: React.FC = () => {
   const navigate = useNavigate();
+  const { roomId: urlRoomId } = useParams<{ roomId?: string }>();
   const [meId, setMeId] = useState<string | null>(null);
   const [opponentId, setOpponentId] = useState<string | null>(null);
-  const [roomId, setRoomId] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(urlRoomId || null);
   const [waiting, setWaiting] = useState(true);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
   
   // Your (Right side) board state
-  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, canHold, nextFour, holdSwap, clearHold, setQueueSeed, pushQueue] = usePlayer();
+  const [player, updatePlayerPos, resetPlayer, /* playerRotate (replaced by playerRotateSRS) */, hold, canHold, nextFour, holdSwap, clearHold, setQueueSeed, pushQueue, setPlayer] = usePlayer();
   const [stage, setStage, rowsCleared, , lastPlacement] = useStage(player);
   const [, , rows, setRows, level, setLevel] = useGameStatus();
   const [dropTime, setDropTime] = useState<number | null>(null);
@@ -124,6 +158,11 @@ const Versus: React.FC = () => {
   const [timerOn, setTimerOn] = useState(false);
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+  
+  // ========================================
+  // 🎮 SRS ROTATION STATE
+  // ========================================
+  const [rotationState, setRotationState] = useState<0 | 1 | 2 | 3>(0);
   
   // NEW: Garbage queue and combo/b2b tracking
   const [incomingGarbage, setIncomingGarbage] = useState(0); // Garbage queued from opponent
@@ -329,6 +368,7 @@ const Versus: React.FC = () => {
     
     // Ensure first piece spawns
     resetPlayer();
+    setRotationState(0); // 🎮 Reset rotation state on spawn
     
     pieceCountRef.current = 0;
     if (roomId) {
@@ -377,6 +417,28 @@ const Versus: React.FC = () => {
     };
 
     const run = async () => {
+      // If we have roomId from URL (came from lobby), skip matchmaking
+      if (urlRoomId) {
+        console.log('[Versus] Joined from lobby, roomId:', urlRoomId);
+        setRoomId(urlRoomId);
+        // Don't setWaiting(false) yet - wait for game:start event like ranked match
+        
+        // Get user info for meId
+        try {
+          const userStr = localStorage.getItem('tetris:user');
+          if (userStr) {
+            const user = JSON.parse(userStr);
+            setMeId(user.accountId?.toString() || socket.id || 'unknown');
+          } else {
+            setMeId(socket.id || 'unknown');
+          }
+        } catch (err) {
+          setMeId(socket.id || 'unknown');
+        }
+        return;
+      }
+      
+      // Otherwise, start ranked matchmaking
       try {
         // Lấy accountId từ localStorage thay vì IP
         const userStr = localStorage.getItem('tetris:user');
@@ -420,6 +482,7 @@ const Versus: React.FC = () => {
       // Shield: Only start countdown if we are actually waiting for one.
       if (waiting) {
         if (payload?.roomId) setRoomId(payload.roomId);
+        if (payload?.opponent) setOpponentId(payload.opponent);
         if (payload?.next && Array.isArray(payload.next)) {
             setQueueSeed(payload.next);
             setOppNextFour(payload.next.slice(0, 4));
@@ -442,6 +505,9 @@ const Versus: React.FC = () => {
     const onGameOver = (data: any) => {
       const winner = data?.winner ?? null;
       const reason = data?.reason;
+      
+      console.log('🏁 GAME OVER EVENT:', { winner, reason, myId: socket.id });
+      
       setTimerOn(false);
       setDropTime(null);
       
@@ -459,12 +525,15 @@ const Versus: React.FC = () => {
       setDisconnectCountdown(null);
       
       if (winner === socket.id) {
+        console.log('✅ YOU WIN! Reason:', reason);
         setOppGameOver(true);
         setMatchResult({ outcome: 'win', reason });
       } else if (winner) {
+        console.log('❌ YOU LOSE! Reason:', reason);
         setGameOver(true);
         setMatchResult({ outcome: 'lose', reason });
       } else {
+        console.log('🤝 DRAW! Reason:', reason);
         setGameOver(true);
         setOppGameOver(true);
         setMatchResult({ outcome: 'draw', reason });
@@ -661,8 +730,40 @@ const Versus: React.FC = () => {
     setLocking(true);
   };
 
+  // ========================================
+  // 🎮 SRS ROTATION WITH WALL KICK
+  // ========================================
+  const playerRotateSRS = useCallback((direction: 1 | -1 | 2) => {
+    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
+    if (player.type === 'O') return; // O doesn't rotate
+
+    // Try rotation with SRS wall kick + floor kick
+    const result = tryRotate(
+      { ...player, type: player.type, rotationState },
+      stage,
+      direction,
+      rotationState
+    );
+
+    if (result.success) {
+      // Update player dengan matrix và vị trí mới
+      setPlayer(prev => ({
+        ...prev,
+        tetromino: result.newMatrix,
+        pos: { x: result.newX, y: result.newY },
+      }));
+      
+      // Update rotation state
+      setRotationState(result.newRotationState);
+      
+      console.log(`🔄 SRS Rotate ${direction === 1 ? 'CW' : direction === -1 ? 'CCW' : '180°'} - Kick #${result.kickIndex || 0}`);
+    } else {
+      console.log(`❌ Rotation blocked (no valid kick position)`);
+    }
+  }, [player, stage, rotationState, gameOver, countdown, matchResult, isApplyingGarbage, setPlayer, setRotationState]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (gameOver || countdown !== null || matchResult !== null) return;
+    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) e.preventDefault();
     
     // Reset AFK timer on any key press
@@ -681,8 +782,18 @@ const Versus: React.FC = () => {
       if (!e.repeat) {
         setDropTime(MOVE_INTERVAL);
       }
-    } else if (keyCode === 38) { // Up (Rotate)
-      playerRotate(stage, 1);
+    } else if (keyCode === 38 || keyCode === 88) { // Up arrow or X (Rotate CW)
+      playerRotateSRS(1);
+      if (isGrounded) {
+        onGroundAction();
+      }
+    } else if (keyCode === 90 || keyCode === 17) { // Z or Ctrl (Rotate CCW)
+      playerRotateSRS(-1);
+      if (isGrounded) {
+        onGroundAction();
+      }
+    } else if (ENABLE_180_ROTATION && keyCode === 65) { // A (Rotate 180°)
+      playerRotateSRS(2);
       if (isGrounded) {
         onGroundAction();
       }
@@ -692,6 +803,7 @@ const Versus: React.FC = () => {
       if (!hasHeld && canHold) {
         holdSwap();
         setHasHeld(true);
+        setRotationState(0); // 🎮 Reset rotation state on hold
       }
     }
   };
@@ -709,7 +821,7 @@ const Versus: React.FC = () => {
   };
 
   useInterval(() => { // Gravity
-    if (gameOver || locking || countdown !== null || matchResult !== null) return;
+    if (gameOver || locking || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
@@ -719,7 +831,7 @@ const Versus: React.FC = () => {
 
   // DAS Charging
   useInterval(() => {
-    if (!moveIntent || moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null) return;
+    if (!moveIntent || moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     const elapsed = Date.now() - moveIntent.startTime;
     if (elapsed >= DAS_DELAY) {
       setMoveIntent(prev => prev ? { ...prev, dasCharged: true } : null);
@@ -728,7 +840,7 @@ const Versus: React.FC = () => {
 
   // ARR Movement
   useInterval(() => {
-    if (!moveIntent || !moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null) return;
+    if (!moveIntent || !moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     const moved = movePlayer(moveIntent.dir);
     if (moved && isGrounded) {
       onGroundAction();
@@ -868,6 +980,7 @@ const Versus: React.FC = () => {
 
     resetPlayer();
     setHasHeld(false);
+    setRotationState(0); // 🎮 Reset rotation state for new piece
     setDropTime(getFallSpeed(level));
     pieceCountRef.current += 1;
     if (roomId && pieceCountRef.current % 7 === 0) {

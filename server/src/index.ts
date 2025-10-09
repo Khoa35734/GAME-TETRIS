@@ -242,10 +242,25 @@ io.on('connection', (socket) => {
   socket.on('room:leave', (roomId: string) => {
     const r = rooms.get(roomId);
     if (!r) return;
+    
+    const wasHost = r.host === socket.id;
     r.players.delete(socket.id);
     socket.leave(roomId);
-    if (r.players.size === 0) { rooms.delete(roomId); deleteRoom(roomId); }
-    else { saveRoom(r); io.to(roomId).emit('room:update', roomSnapshot(roomId)); }
+    
+    if (r.players.size === 0) {
+      // Empty room - delete it
+      rooms.delete(roomId);
+      deleteRoom(roomId);
+    } else {
+      // Transfer host if current host left
+      if (wasHost) {
+        const newHost = [...r.players.keys()][0];
+        r.host = newHost;
+        console.log(`[Room ${roomId}] Host left. New host: ${newHost}`);
+      }
+      saveRoom(r);
+      io.to(roomId).emit('room:update', roomSnapshot(roomId));
+    }
   });
 
   socket.on('room:ready', (roomId: string, ready: boolean) => {
@@ -258,6 +273,50 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
   });
 
+  socket.on('room:startGame', (roomId: string, cb?: (result: any) => void) => {
+    const r = rooms.get(roomId);
+    if (!r) {
+      cb?.({ ok: false, error: 'Phòng không tồn tại' });
+      return;
+    }
+    if (r.host !== socket.id) {
+      cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể bắt đầu' });
+      return;
+    }
+    if (r.players.size < 2) {
+      cb?.({ ok: false, error: 'Cần ít nhất 2 người chơi' });
+      return;
+    }
+    
+    // Check all non-host players are ready
+    const allReady = [...r.players.values()].every(p => p.id === r.host || p.ready);
+    if (!allReady) {
+      cb?.({ ok: false, error: 'Chưa đủ người sẵn sàng' });
+      return;
+    }
+    
+    r.started = true;
+    const first = nextPieces(r.gen, 14);
+    saveRoom(r);
+    cb?.({ ok: true });
+    
+    // Emit game:start LẦN 1: Để RoomLobby navigate ngay lập tức
+    io.to(roomId).emit('game:start', { roomId });
+    
+    // Emit game:start LẦN 2: Sau delay để Versus đã mount và nhận data đầy đủ
+    setTimeout(() => {
+      for (const [playerId] of r.players) {
+        const opponentId = [...r.players.keys()].find(id => id !== playerId);
+        io.to(playerId).emit('game:start', { 
+          next: first, 
+          roomId,
+          opponent: opponentId 
+        });
+      }
+      console.log(`[Room ${roomId}] Game started, sent game:start with full data to all players`);
+    }, 1000); // 1 giây delay để clients mount Versus component
+  });
+
   socket.on('game:start', (roomId: string) => {
     const r = rooms.get(roomId);
     if (!r || r.host !== socket.id) return;
@@ -265,7 +324,16 @@ io.on('connection', (socket) => {
     r.started = true;
     const first = nextPieces(r.gen, 14); // 14 = 7 preview + current for both sides typically
     saveRoom(r);
-    io.to(roomId).emit('game:start', { next: first });
+    
+    // Send game:start to each player with their opponent's ID (consistent with room:startGame)
+    for (const [playerId] of r.players) {
+      const opponentId = [...r.players.keys()].find(id => id !== playerId);
+      io.to(playerId).emit('game:start', { 
+        next: first, 
+        roomId,
+        opponent: opponentId 
+      });
+    }
   });
 
   socket.on('game:requestNext', (roomId: string, n: number = 7) => {
@@ -506,8 +574,8 @@ io.on('connection', (socket) => {
   // Broadcast room update
   io.to(roomId).emit('room:update', roomSnapshot(roomId));
     const first = nextPieces(room.gen, 14);
-    io.to(socket.id).emit('game:start', { next: first, roomId });
-    if (oppSocketId) io.to(oppSocketId).emit('game:start', { next: first, roomId });
+    io.to(socket.id).emit('game:start', { next: first, roomId, opponent: opponent.playerId });
+    if (oppSocketId) io.to(oppSocketId).emit('game:start', { next: first, roomId, opponent: playerId });
     cb?.({ match: { roomId, opponent: opponent.playerId, elo: opponent.elo } });
   });
 

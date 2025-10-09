@@ -62,6 +62,7 @@ const App: React.FC = () => {
   <Route path="/online/create" element={<OnlineCreateRoom />} />
   <Route path="/online/join" element={<OnlineJoinRoom />} />
         <Route path="/room/:roomId" element={<RoomLobby />} />
+        <Route path="/versus/:roomId" element={<Versus />} />
         <Route path="/settings" element={<div style={{ padding: 16 }}><h2>Cài đặt</h2><p>Tuỳ chọn sẽ sớm có mặt.</p></div>} />
   <Route path="/admin" element={<AdminDashboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
