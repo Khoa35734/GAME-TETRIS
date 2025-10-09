@@ -8,6 +8,8 @@
     "client": "npm run dev --prefix client"
   },
   "devDependencies": {
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

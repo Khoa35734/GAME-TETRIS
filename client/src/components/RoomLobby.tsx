@@ -8,6 +8,7 @@ type Player = {
   name: string | null;
   ready: boolean;
   alive: boolean;
+  ping?: number | null;
 };
 
 type ChatMessage = {
@@ -31,6 +32,8 @@ const RoomLobby: React.FC = () => {
   const [isReady, setIsReady] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [identityReady, setIdentityReady] = useState(false);
+  const [myPing, setMyPing] = useState<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!roomId) {
@@ -82,6 +85,30 @@ const RoomLobby: React.FC = () => {
     resolveIdentity();
   }, []);
 
+  // Ping tracking
+  useEffect(() => {
+    // Measure ping every 2 seconds
+    pingIntervalRef.current = window.setInterval(() => {
+      const timestamp = Date.now();
+      socket.emit('ping', timestamp);
+    }, 2000);
+
+    const onPong = (timestamp?: number) => {
+      if (timestamp) {
+        const ping = Date.now() - timestamp;
+        setMyPing(ping);
+        // Send ping to server so it can broadcast to others
+        socket.emit('client:ping', ping);
+      }
+    };
+    socket.on('pong', onPong);
+
+    return () => {
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      socket.off('pong', onPong);
+    };
+  }, []);
+
   useEffect(() => {
     if (!roomId) {
       setError('ID phòng không hợp lệ');
@@ -105,8 +132,8 @@ const RoomLobby: React.FC = () => {
       setChatMessages((prev) => [...prev, data]);
     };
 
-    const onGameStart = () => {
-      console.log('[RoomLobby] Game starting, navigating to versus...');
+    const onGameStarting = () => {
+      console.log('[RoomLobby] 🎮 Game starting signal received, navigating to versus...');
       navigate(`/versus/${roomId}`);
     };
 
@@ -127,7 +154,7 @@ const RoomLobby: React.FC = () => {
 
     socket.on('room:update', onRoomUpdate);
     socket.on('room:chat', onRoomChat);
-    socket.on('game:start', onGameStart);
+    socket.on('game:starting', onGameStarting); // Listen for game:starting instead of game:start
 
     if (!hasJoinedRef.current) {
       const nameToUse = displayName || 'Guest';
@@ -177,7 +204,7 @@ const RoomLobby: React.FC = () => {
     return () => {
       socket.off('room:update', onRoomUpdate);
       socket.off('room:chat', onRoomChat);
-      socket.off('game:start', onGameStart);
+      socket.off('game:starting', onGameStarting); // Clean up game:starting listener
       if (hasJoinedRef.current && roomId) {
         socket.emit('room:leave', roomId);
         hasJoinedRef.current = false;
@@ -278,6 +305,16 @@ const RoomLobby: React.FC = () => {
                     {p.ready && <span style={{ color: '#4ecdc4' }}>✓ Sẵn sàng</span>}
                     {!p.ready && <span style={{ color: '#888' }}>⏳ Chưa sẵn sàng</span>}
                   </div>
+                  {typeof p.ping === 'number' && (
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+                      📶 Ping: {p.ping}ms
+                    </div>
+                  )}
+                  {isMe && typeof myPing === 'number' && (
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+                      📶 Ping: {myPing}ms
+                    </div>
+                  )}
                 </div>
               );
             })}

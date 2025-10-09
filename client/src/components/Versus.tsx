@@ -136,6 +136,12 @@ const calculateGarbageLines = (
   return garbage;
 };
 
+const isUdpCandidate = (candidate?: RTCIceCandidate | RTCIceCandidateInit | null): boolean => {
+  if (!candidate) return false;
+  const candString = typeof candidate.candidate === 'string' ? candidate.candidate : '';
+  return candString.toLowerCase().includes(' udp ');
+};
+
 const Versus: React.FC = () => {
   const navigate = useNavigate();
   const { roomId: urlRoomId } = useParams<{ roomId?: string }>();
@@ -144,6 +150,16 @@ const Versus: React.FC = () => {
   const [roomId, setRoomId] = useState<string | null>(urlRoomId || null);
   const [waiting, setWaiting] = useState(true);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
+  
+  // ========================================
+  // ⚡ WEBRTC UDP STATE & REFS
+  // ========================================
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  const [isRtcReady, setIsRtcReady] = useState(false);
+  const udpStatsRef = useRef({ sent: 0, received: 0, failed: 0 });
+  const lastSnapshotRef = useRef<number>(0);
+  const closingRef = useRef(false);
   
   // Your (Right side) board state
   const [player, updatePlayerPos, resetPlayer, /* playerRotate (replaced by playerRotateSRS) */, hold, canHold, nextFour, holdSwap, clearHold, setQueueSeed, pushQueue, setPlayer] = usePlayer();
@@ -158,6 +174,13 @@ const Versus: React.FC = () => {
   const [timerOn, setTimerOn] = useState(false);
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+  
+  // ========================================
+  // 📊 PING TRACKING
+  // ========================================
+  const [myPing, setMyPing] = useState<number | null>(null);
+  const [oppPing, setOppPing] = useState<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
   
   // ========================================
   // 🎮 SRS ROTATION STATE
@@ -191,6 +214,11 @@ const Versus: React.FC = () => {
   const [disconnectCountdown, setDisconnectCountdown] = useState<number | null>(null);
   const disconnectTimerRef = useRef<number | null>(null);
   
+  // Auto-exit after match ends (1 minute timeout)
+  const [autoExitCountdown, setAutoExitCountdown] = useState<number | null>(null);
+  const autoExitTimerRef = useRef<number | null>(null);
+  const AUTO_EXIT_TIMEOUT_MS = 60000; // 60 seconds (1 minute)
+  
   const wrapperRef = useRef<HTMLDivElement>(null);
   const matchTimer = useRef<number | null>(null);
   useEffect(() => { wrapperRef.current?.focus(); }, []);
@@ -206,6 +234,65 @@ const Versus: React.FC = () => {
   const pendingGarbageRef = useRef(0);
   const pendingLockRef = useRef(false);
   useEffect(() => { pendingGarbageRef.current = pendingGarbageLeft; }, [pendingGarbageLeft]);
+
+  // [THÊM MỚI] useEffect để báo cho server là client đã sẵn sàng
+  useEffect(() => {
+    // Chỉ chạy khi vào phòng từ lobby (có roomId từ URL)
+    if (urlRoomId) {
+        console.log(`[Client] Component mounted for room ${urlRoomId}. Emitting game:im_ready.`);
+        socket.emit('game:im_ready', urlRoomId);
+    }
+  }, [urlRoomId]); // Chỉ chạy 1 lần khi urlRoomId tồn tại
+
+  const cleanupWebRTC = useCallback((reason: string = 'manual-cleanup') => {
+    if (closingRef.current) {
+      console.log(`[WebRTC] Cleanup already in progress, skipping (${reason})`);
+      return;
+    }
+    closingRef.current = true;
+    console.log(`[WebRTC] Cleaning up (${reason})`);
+
+    setIsRtcReady(false);
+
+    if (dcRef.current) {
+      try {
+        dcRef.current.onopen = null;
+        dcRef.current.onclose = null;
+        dcRef.current.onerror = null;
+        dcRef.current.onmessage = null;
+        if (dcRef.current.readyState !== 'closed' && dcRef.current.readyState !== 'closing') {
+          dcRef.current.close();
+        }
+      } catch (err) {
+        console.warn('[WebRTC] Data channel cleanup error:', err);
+      }
+      dcRef.current = null;
+    }
+
+    if (pcRef.current) {
+      try {
+        pcRef.current.onicecandidate = null;
+        pcRef.current.onconnectionstatechange = null;
+        pcRef.current.ondatachannel = null;
+        pcRef.current.onicegatheringstatechange = null;
+        pcRef.current.onsignalingstatechange = null;
+        if (pcRef.current.signalingState !== 'closed') {
+          pcRef.current.close();
+        }
+      } catch (err) {
+        console.warn('[WebRTC] Peer connection cleanup error:', err);
+      }
+      pcRef.current = null;
+    }
+
+    udpStatsRef.current = { sent: 0, received: 0, failed: udpStatsRef.current.failed };
+    
+    // Small delay before allowing new connections
+    setTimeout(() => {
+      closingRef.current = false;
+      console.log('[WebRTC] Cleanup complete, ready for new connection');
+    }, 100);
+  }, [setIsRtcReady]);
 
   const applyGarbageRows = useCallback((count: number): Promise<StageType | null> => {
     if (count <= 0) return Promise.resolve(null);
@@ -251,6 +338,402 @@ const Versus: React.FC = () => {
       applyNextRow();
     });
   }, [setStage]);
+
+  // ========================================
+  // ⚡ WEBRTC UDP HELPER FUNCTIONS
+  // ========================================
+  
+  /**
+   * Send data via UDP if ready, otherwise fallback to TCP
+   */
+  const sendViaUDP = useCallback((type: string, data: any) => {
+    if (isRtcReady && dcRef.current?.readyState === 'open') {
+      try {
+        const msg = JSON.stringify({ type, ...data, ts: Date.now() });
+        dcRef.current.send(msg);
+        udpStatsRef.current.sent++;
+        return true; // Success via UDP
+      } catch (err) {
+        console.warn('[UDP] Send failed, fallback to TCP:', err);
+        udpStatsRef.current.failed++;
+        return false; // Will fallback to TCP
+      }
+    }
+    return false; // UDP not ready, use TCP
+  }, [isRtcReady]);
+
+  /**
+   * Send garbage attack via UDP with TCP fallback
+   */
+  const sendGarbage = useCallback((lines: number) => {
+    const sent = sendViaUDP('garbage', { lines });
+    if (!sent && roomId) {
+      // TCP fallback
+      socket.emit('game:attack', roomId, { lines });
+    }
+  }, [sendViaUDP, roomId]);
+
+  /**
+   * Send board snapshot via UDP (periodic sync)
+   */
+  const sendSnapshot = useCallback(() => {
+    const now = Date.now();
+    if (now - lastSnapshotRef.current < 500) return; // Max 2 snapshots/sec
+    
+    lastSnapshotRef.current = now;
+    const sent = sendViaUDP('snapshot', {
+      matrix: cloneStageForNetwork(stage),
+      hold,
+      nextFour: nextFour.slice(0, 4),
+      combo,
+      b2b,
+      pendingGarbage: pendingGarbageLeft,
+    });
+    
+    if (!sent && roomId) {
+      // TCP fallback - use existing game:state
+      socket.emit('game:state', roomId, {
+        matrix: cloneStageForNetwork(stage),
+        hold,
+        nextFour: nextFour.slice(0, 4),
+        combo,
+        b2b,
+        pendingGarbage: pendingGarbageLeft,
+      });
+    }
+  }, [sendViaUDP, stage, hold, nextFour, combo, b2b, pendingGarbageLeft, roomId]);
+
+  /**
+   * Handle incoming UDP messages
+   */
+  const handleUDPMessage = useCallback((data: string) => {
+    try {
+      const msg = JSON.parse(data);
+      udpStatsRef.current.received++;
+      
+      switch (msg.type) {
+        case 'input':
+          // Opponent input received (for future predictive rendering)
+          console.log('[UDP] Opponent input:', msg.action);
+          break;
+          
+        case 'garbage':
+          // Fast garbage notification
+          console.log('[UDP] Garbage received:', msg.lines);
+          setIncomingGarbage(prev => prev + msg.lines);
+          break;
+          
+        case 'snapshot':
+          // Full board state sync via UDP
+          console.log('⚡ [UDP] Snapshot received:', {
+            hasMatrix: !!msg.matrix,
+            hasHold: msg.hold !== undefined,
+            hasNextFour: !!msg.nextFour,
+            pendingGarbage: msg.pendingGarbage
+          });
+          if (msg.matrix) {
+            setOppStage(msg.matrix);
+            console.log('⚡ [UDP] Updated opponent board from snapshot');
+          }
+          if (msg.hold !== undefined) setOppHold(msg.hold);
+          if (msg.nextFour) setOppNextFour(msg.nextFour);
+          if (msg.combo !== undefined || msg.b2b !== undefined) {
+            // Update opponent combo/b2b display if you have it
+          }
+          if (msg.pendingGarbage !== undefined) {
+            setOpponentIncomingGarbage(msg.pendingGarbage);
+          }
+          break;
+          
+        default:
+          console.warn('[UDP] Unknown message type:', msg.type);
+      }
+    } catch (err) {
+      console.error('[UDP] Parse error:', err);
+    }
+  }, []);
+
+  // ========================================
+  // ⚡ WEBRTC CONNECTION SETUP
+  // ========================================
+
+  const createPeerConnection = useCallback(() => {
+    if (pcRef.current) {
+      return pcRef.current;
+    }
+
+    console.log('[WebRTC] Creating new RTCPeerConnection');
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+      iceCandidatePoolSize: 8,
+      bundlePolicy: 'balanced',
+    });
+
+    pcRef.current = pc;
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate && roomId) {
+        if (!isUdpCandidate(e.candidate)) {
+          console.log('[WebRTC] Skipping non-UDP candidate');
+          return;
+        }
+        socket.emit('webrtc:ice', { roomId, candidate: e.candidate });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[WebRTC] Connection state:', pc.connectionState);
+      
+      // Only cleanup on permanent failure, not temporary disconnection
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        console.warn('[WebRTC] Connection permanently failed/closed. Cleaning up.');
+        cleanupWebRTC(`state-${pc.connectionState}`);
+      } else if (pc.connectionState === 'disconnected') {
+        console.warn('[WebRTC] Connection disconnected (may reconnect)...');
+        // Don't cleanup immediately, give it time to reconnect
+      } else if (pc.connectionState === 'connected') {
+        console.log('✅ [WebRTC] Peer connection CONNECTED');
+      }
+    };
+
+    return pc;
+  }, [cleanupWebRTC, roomId]);
+  
+  const initWebRTC = useCallback(async (isHost: boolean) => {
+    try {
+      if (pcRef.current) {
+        console.log('[WebRTC] PeerConnection already exists, skipping re-init');
+        return;
+      }
+      
+      if (closingRef.current) {
+        console.log('[WebRTC] Cleanup in progress, waiting...');
+        // Wait for cleanup to complete
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      console.log('[WebRTC] Initializing as', isHost ? 'HOST' : 'PEER');
+
+      const pc = createPeerConnection();
+
+      if (isHost) {
+        // Host creates data channel
+        const dc = pc.createDataChannel('tetris', {
+          ordered: false, // Unordered for speed
+          maxRetransmits: 0, // No retransmits for real-time data
+        });
+        dcRef.current = dc;
+
+        dc.onopen = () => {
+          console.log('✅ [WebRTC] UDP channel OPEN (host)');
+          setIsRtcReady(true);
+        };
+
+        dc.onclose = () => {
+          console.warn('⚠️ [WebRTC] UDP channel CLOSED (host)');
+          setIsRtcReady(false);
+          // Don't cleanup immediately, may be temporary
+        };
+
+        dc.onerror = (err) => {
+          console.error('[WebRTC] Data channel error (host):', err);
+        };
+
+        dc.onmessage = (e) => handleUDPMessage(e.data);
+
+        // Create offer
+        console.log('[WebRTC] Creating offer...');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log('[WebRTC] Sending offer to room:', roomId);
+        socket.emit('webrtc:offer', { roomId, offer });
+        
+      } else {
+        // Peer waits for data channel
+        pc.ondatachannel = (e) => {
+          console.log('[WebRTC] Data channel received (peer)');
+          const dc = e.channel;
+          dcRef.current = dc;
+
+          dc.onopen = () => {
+            console.log('✅ [WebRTC] UDP channel OPEN (peer)');
+            setIsRtcReady(true);
+          };
+
+          dc.onclose = () => {
+            console.warn('⚠️ [WebRTC] UDP channel CLOSED (peer)');
+            setIsRtcReady(false);
+            // Don't cleanup immediately, may be temporary
+          };
+
+          dc.onerror = (err) => {
+            console.error('[WebRTC] Data channel error (peer):', err);
+          };
+
+          dc.onmessage = (e) => handleUDPMessage(e.data);
+        };
+        
+        console.log('[WebRTC] Waiting for offer from host...');
+      }
+      
+    } catch (err) {
+      console.error('[WebRTC] Init failed:', err);
+      setIsRtcReady(false);
+      cleanupWebRTC('init-error');
+    }
+  }, [createPeerConnection, handleUDPMessage, cleanupWebRTC, roomId]);
+
+  // ========================================
+  // 🎯 WEBRTC SIGNALING EVENT HANDLERS
+  // ========================================
+  
+  useEffect(() => {
+    const handleOffer = async ({ offer }: any) => {
+      try {
+        console.log('[WebRTC] 📥 Received offer, creating answer...');
+        const pc = createPeerConnection();
+
+        pc.ondatachannel = (e) => {
+          console.log('[WebRTC] 📨 Data channel received (answerer)');
+          dcRef.current = e.channel;
+          
+          dcRef.current.onopen = () => {
+            console.log('✅ [WebRTC] UDP channel OPEN (answerer)');
+            setIsRtcReady(true);
+          };
+          
+          dcRef.current.onclose = () => {
+            console.warn('⚠️ [WebRTC] UDP channel CLOSED (answerer)');
+            setIsRtcReady(false);
+          };
+          
+          dcRef.current.onerror = (err) => {
+            console.error('[WebRTC] Data channel error (answerer):', err);
+          };
+          
+          dcRef.current.onmessage = (event) => handleUDPMessage(event.data);
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        console.log('[WebRTC] Remote description set');
+        
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log('[WebRTC] 📤 Sending answer to room:', roomId);
+        socket.emit('webrtc:answer', { roomId, answer });
+        
+      } catch (err) {
+        console.error('[WebRTC] ❌ Offer handling failed:', err);
+        cleanupWebRTC('offer-error');
+      }
+    };
+
+    const handleAnswer = async ({ answer }: any) => {
+      try {
+        console.log('[WebRTC] 📥 Received answer');
+        if (pcRef.current) {
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+          console.log('[WebRTC] ✅ Answer processed, connection should establish soon');
+        } else {
+          console.warn('[WebRTC] ⚠️ No peer connection to apply answer');
+        }
+      } catch (err) {
+        console.error('[WebRTC] ❌ Answer handling failed:', err);
+        cleanupWebRTC('answer-error');
+      }
+    };
+
+    const handleICE = async ({ candidate }: any) => {
+      try {
+        if (pcRef.current && candidate) {
+          if (!isUdpCandidate(candidate)) {
+            console.log('[WebRTC] Ignoring non-UDP remote candidate');
+            return;
+          }
+          await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log('[WebRTC] ✅ Added ICE candidate');
+        }
+      } catch (err) {
+        console.error('[WebRTC] ⚠️ ICE candidate failed (non-fatal):', err);
+        // Don't cleanup on ICE errors - they're often non-fatal
+      }
+    };
+
+    socket.on('webrtc:offer', handleOffer);
+    socket.on('webrtc:answer', handleAnswer);
+    socket.on('webrtc:ice', handleICE);
+
+    return () => {
+      socket.off('webrtc:offer', handleOffer);
+      socket.off('webrtc:answer', handleAnswer);
+      socket.off('webrtc:ice', handleICE);
+    };
+  }, [roomId, handleUDPMessage, createPeerConnection, cleanupWebRTC]);
+
+  // ========================================
+  // 🎮 TRIGGER WEBRTC ON GAME START
+  // ========================================
+  
+  useEffect(() => {
+    const handleGameStartForWebRTC = ({ opponent }: any) => {
+      if (!opponent) {
+        console.warn('[WebRTC] No opponent in game:start, skipping WebRTC init');
+        return;
+      }
+      
+      // This logic is now reliable because `opponent` is always a socket.id
+      const isHost = (socket.id || '') < opponent;
+      console.log('[WebRTC] 🎮 Game started!');
+      console.log('[WebRTC] My socket.id:', socket.id);
+      console.log('[WebRTC] Opponent socket.id:', opponent);
+      console.log('[WebRTC] I am', isHost ? '🏠 HOST (will create offer)' : '📡 PEER (will receive offer)');
+
+      // Only cleanup if there's an existing connection
+      if (pcRef.current || dcRef.current) {
+        console.log('[WebRTC] Cleaning up previous connection before starting new one');
+        cleanupWebRTC('pre-game-start');
+        
+        // Wait for cleanup to complete, then init
+        setTimeout(() => {
+          console.log('[WebRTC] Starting new connection...');
+          initWebRTC(isHost);
+        }, 300);
+      } else {
+        // No existing connection, start immediately with small delay for both sides to be ready
+        setTimeout(() => {
+          console.log('[WebRTC] Starting fresh connection...');
+          initWebRTC(isHost);
+        }, 500);
+      }
+    };
+
+    socket.on('game:start', handleGameStartForWebRTC);
+
+    return () => {
+      socket.off('game:start', handleGameStartForWebRTC);
+    };
+  }, [initWebRTC, cleanupWebRTC]);
+
+  // ========================================
+  // 📡 PERIODIC SNAPSHOT SENDER (UDP)
+  // ========================================
+  
+  useEffect(() => {
+    if (!roomId || gameOver || waiting) return;
+    
+    const interval = setInterval(() => {
+      sendSnapshot();
+    }, 500); // Send snapshot every 500ms via UDP
+
+    return () => clearInterval(interval);
+  }, [roomId, gameOver, waiting, sendSnapshot]);
+
+  // ========================================
+  // 🎯 END OF WEBRTC SETUP
+  // ========================================
 
   // --- Lock Delay & Movement Helpers ---
   const clearInactivity = useCallback(() => {
@@ -302,14 +785,14 @@ const Versus: React.FC = () => {
     clearInactivity();
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
-    }, INACTIVITY_LOCK_MS);
+    }, INACTIVITY_LOCK_MS) as unknown as number;
 
     if (!groundedSinceRef.current) {
       groundedSinceRef.current = Date.now();
       capTimeoutRef.current = setTimeout(() => {
         capExpiredRef.current = true;
         doLock();
-      }, HARD_CAP_MS);
+      }, HARD_CAP_MS) as unknown as number;
     }
   }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
@@ -328,7 +811,7 @@ const Versus: React.FC = () => {
     }
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
-    }, INACTIVITY_LOCK_MS);
+    }, INACTIVITY_LOCK_MS) as unknown as number;
   }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
   useEffect(() => {
@@ -454,7 +937,7 @@ const Versus: React.FC = () => {
       if (urlRoomId) {
         console.log('[Versus] Joined from lobby, roomId:', urlRoomId);
         setRoomId(urlRoomId);
-        // Don't setWaiting(false) yet - wait for game:start event like ranked match
+        // `waiting` remains true until 'game:start' is received
         
         // Get user info for meId
         try {
@@ -510,6 +993,7 @@ const Versus: React.FC = () => {
     };
     socket.on('ranked:found', onFound);
 
+    // This listener now fires reliably for both ranked and custom games
     const onGameStart = (payload?: any) => {
       stopMatchmaking();
       // Shield: Only start countdown if we are actually waiting for one.
@@ -543,6 +1027,7 @@ const Versus: React.FC = () => {
       
       setTimerOn(false);
       setDropTime(null);
+      cleanupWebRTC('game-over');
       
       // Clear AFK timer
       if (afkTimeoutRef.current) {
@@ -571,6 +1056,29 @@ const Versus: React.FC = () => {
         setOppGameOver(true);
         setMatchResult({ outcome: 'draw', reason });
       }
+      
+      // 🕐 Start 1-minute auto-exit countdown
+      console.log('⏰ Starting 1-minute auto-exit countdown');
+      setAutoExitCountdown(60);
+      let remaining = 60;
+      
+      autoExitTimerRef.current = window.setInterval(() => {
+        remaining--;
+        setAutoExitCountdown(remaining);
+        
+        if (remaining <= 0) {
+          // Time's up - force exit
+          console.log('⏰ Auto-exit timeout - forcing exit');
+          clearInterval(autoExitTimerRef.current!);
+          autoExitTimerRef.current = null;
+          setAutoExitCountdown(null);
+          
+          // Leave ranked queue and navigate
+          if (meId) socket.emit('ranked:leave', meId);
+          cleanupWebRTC('auto-exit');
+          navigate('/');
+        }
+      }, 1000);
     };
     socket.on('game:over', onGameOver);
 
@@ -625,6 +1133,15 @@ const Versus: React.FC = () => {
     socket.on('game:garbage', onGarbage);
     
     const onGameState = (data: any) => {
+      console.log('🔵 [game:state] Event received:', {
+        hasMatrix: data && Array.isArray(data.matrix),
+        hasHold: data && data.hold !== undefined,
+        hasNext: data && Array.isArray(data.next),
+        from: data?.from,
+        roomId,
+        waiting
+      });
+      
       if (data && Array.isArray(data.matrix)) {
         const incoming = (data.matrix as StageType).map(row =>
           Array.isArray(row) ? row.map(cell => {
@@ -647,6 +1164,9 @@ const Versus: React.FC = () => {
       }
       if (data && Array.isArray(data.next)) {
         setOppNextFour(data.next.slice(0, 4));
+      }
+      if (data && Array.isArray(data.nextFour)) {
+        setOppNextFour(data.nextFour.slice(0, 4));
       }
     };
     socket.on('game:state', onGameState);
@@ -733,7 +1253,8 @@ const Versus: React.FC = () => {
     setGameOver, 
     setDropTime, 
     setTimerOn,
-    setIncomingGarbage
+    setIncomingGarbage,
+    cleanupWebRTC
   ]);
 
   // Unmount cleanup
@@ -741,22 +1262,68 @@ const Versus: React.FC = () => {
     return () => {
       if (meId) socket.emit('ranked:leave', meId);
       if (afkTimeoutRef.current) clearTimeout(afkTimeoutRef.current);
+      if (autoExitTimerRef.current) clearInterval(autoExitTimerRef.current);
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      cleanupWebRTC('component-unmount');
+    };
+  }, [meId, cleanupWebRTC]);
+  
+  // ========================================
+  // 📊 PING TRACKING
+  // ========================================
+  useEffect(() => {
+    // Measure ping every 2 seconds
+    pingIntervalRef.current = window.setInterval(() => {
+      const timestamp = Date.now();
+      socket.emit('ping', timestamp);
+    }, 2000);
+
+    const onPong = (timestamp?: number) => {
+      if (timestamp) {
+        const ping = Date.now() - timestamp;
+        setMyPing(ping);
+        // Send ping to server so it can broadcast to others
+        socket.emit('client:ping', ping);
+      }
+    };
+    socket.on('pong', onPong);
+
+    return () => {
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      socket.off('pong', onPong);
+    };
+  }, []);
+  
+  // Update opponent ping from room updates
+  useEffect(() => {
+    const onRoomUpdate = (snapshot: any) => {
+      if (snapshot && snapshot.players) {
+        const opp = snapshot.players.find((p: any) => p.id !== meId && p.id !== socket.id);
+        if (opp && typeof opp.ping === 'number') {
+          setOppPing(opp.ping);
+        }
+      }
+    };
+    socket.on('room:update', onRoomUpdate);
+
+    return () => {
+      socket.off('room:update', onRoomUpdate);
     };
   }, [meId]);
   
   const pieceCountRef = useRef(0);
 
   const movePlayer = useCallback((dir: number) => {
-    if (gameOver || countdown !== null || matchResult !== null) return false;
+    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return false;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
       return true;
     }
     return false;
-  }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos]);
+  }, [gameOver, countdown, matchResult, isApplyingGarbage, player, stage, updatePlayerPos]);
 
   const hardDrop = () => {
-    if (gameOver || countdown !== null || matchResult !== null) return;
+    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
     updatePlayerPos({ x: 0, y: dropDistance, collided: true });
@@ -806,9 +1373,13 @@ const Versus: React.FC = () => {
     if (keyCode === 37 || keyCode === 39) { // Left / Right
       const dir = keyCode === 37 ? -1 : 1;
       if (e.repeat) return;
+      
+      // Start DAS intent
       setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
-      movePlayer(dir);
-      if (isGrounded) {
+      
+      // Immediate first move - only update ground action if actually moved AND grounded
+      const moved = movePlayer(dir);
+      if (moved && isGrounded) {
         onGroundAction();
       }
     } else if (keyCode === 40) { // Down
@@ -971,8 +1542,10 @@ const Versus: React.FC = () => {
         console.log('💣 Calculated garbage:', garbageLines, '(lines:', lines, 'newCombo:', newCombo, 'newB2b:', newB2b, ')');
 
         if (garbageLines > 0) {
-            console.log('📤 Emitting game:attack with', garbageLines, 'lines');
-            socket.emit('game:attack', roomId, { lines: garbageLines });
+            console.log('📤 Sending garbage via UDP/TCP:', garbageLines, 'lines');
+            
+            // ⚡ Send via UDP with TCP fallback
+            sendGarbage(garbageLines);
             
             // Update opponent's incoming garbage (for visual display)
             setOpponentIncomingGarbage(prev => {
@@ -1004,10 +1577,14 @@ const Versus: React.FC = () => {
 
     // 4. TIẾP TỤC LOGIC GAME CÒN LẠI
     if (isGameOverFromBuffer(stage)) {
+        console.log('💀 Board overflow detected! Sending topout...');
         setGameOver(true);
         setDropTime(null);
         setTimerOn(false);
-        if (roomId) socket.emit('game:topout', roomId);
+        if (roomId) {
+          console.log('📤 Sending game:topout (board overflow) to room:', roomId);
+          socket.emit('game:topout', roomId);
+        }
         return;
     }
 
@@ -1026,8 +1603,18 @@ const Versus: React.FC = () => {
   const lastSyncTime = useRef<number>(0);
   const lastSyncedStage = useRef<StageType | null>(null);
   
+  // ========================================
+  // 📡 LEGACY STATE SYNC (TCP Fallback)
+  // Note: Periodic UDP snapshot handles this better
+  // ========================================
   useEffect(() => {
     if (!roomId || waiting || gameOver || countdown !== null) return;
+    
+    // Skip if UDP is working (snapshot handles it)
+    if (isRtcReady) {
+      console.log('⚡ Skipping TCP sync - UDP active');
+      return;
+    }
     
     const stageChanged = JSON.stringify(lastSyncedStage.current) !== JSON.stringify(stage);
     if (!stageChanged) return;
@@ -1042,11 +1629,14 @@ const Versus: React.FC = () => {
       hold,
       next: nextFour
     };
+    
+    // TCP fallback sync (only when UDP not available)
+    console.log('📤 [game:state] Sending board via TCP:', { roomId, hasMatrix: !!gameState.matrix });
     socket.emit('game:state', roomId, gameState);
     
     const garbageCount = stage.filter(row => row.some(cell => cell[0] === 'garbage')).length;
-    console.log('📤 Normal sync - Stage has', garbageCount, 'garbage rows');
-  }, [stage, hold, nextFour, roomId, waiting, gameOver, countdown]);
+    console.log('📤 TCP fallback sync - Stage has', garbageCount, 'garbage rows');
+  }, [stage, hold, nextFour, roomId, waiting, gameOver, countdown, isRtcReady]);
 
   // Timer for elapsed time
   useEffect(() => {
@@ -1079,16 +1669,50 @@ const Versus: React.FC = () => {
     >
       <button
         onClick={() => {
+          console.log('🚪 Exit button clicked:', { roomId, matchResult });
           if (roomId && matchResult === null) {
+            console.log('📤 Sending game:topout (manual exit)');
             socket.emit('game:topout', roomId);
           }
           if (meId) socket.emit('ranked:leave', meId);
+          if (autoExitTimerRef.current) {
+            clearInterval(autoExitTimerRef.current);
+            autoExitTimerRef.current = null;
+          }
+          cleanupWebRTC('manual-exit');
           navigate('/');
         }}
         style={{ position: 'fixed', top: 12, left: 12, zIndex: 999, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}
       >
         ← Thoát
       </button>
+      
+      {/* ⚡ UDP CONNECTION STATUS INDICATOR */}
+      {!waiting && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 12,
+            right: 12,
+            zIndex: 999,
+            background: isRtcReady ? 'rgba(46, 213, 115, 0.15)' : 'rgba(255, 184, 0, 0.15)',
+            border: `1px solid ${isRtcReady ? 'rgba(46, 213, 115, 0.4)' : 'rgba(255, 184, 0, 0.4)'}`,
+            color: isRtcReady ? '#2ed573' : '#ffb800',
+            padding: '6px 12px',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+          title={`Sent: ${udpStatsRef.current.sent} | Received: ${udpStatsRef.current.received} | Failed: ${udpStatsRef.current.failed}`}
+        >
+          <span style={{ fontSize: 14 }}>{isRtcReady ? '⚡' : '📶'}</span>
+          {isRtcReady ? 'UDP Active' : 'TCP Mode'}
+        </div>
+      )}
+      
       {matchResult && (
         <div
           style={{
@@ -1103,14 +1727,29 @@ const Versus: React.FC = () => {
             textAlign: 'center'
           }}
         >
-          <div style={{ fontSize: 56, fontWeight: 800, textShadow: '0 8px 30px rgba(0,0,0,0.5)', lineHeight: 1.2 }}>
-            {matchResult.outcome === 'win' ? 'Bạn thắng!' : matchResult.outcome === 'lose' ? 'Bạn thua!' : 'Hòa trận!'}
-          </div>
-          {matchResult.reason && (
-            <div style={{ marginTop: 12, fontSize: 18, opacity: 0.75 }}>
-              Lý do: {matchResult.reason}
+          <div>
+            <div style={{ fontSize: 56, fontWeight: 800, textShadow: '0 8px 30px rgba(0,0,0,0.5)', lineHeight: 1.2 }}>
+              {matchResult.outcome === 'win' ? 'Bạn thắng!' : matchResult.outcome === 'lose' ? 'Bạn thua!' : 'Hòa trận!'}
             </div>
-          )}
+            {matchResult.reason && (
+              <div style={{ marginTop: 12, fontSize: 18, opacity: 0.75 }}>
+                Lý do: {matchResult.reason}
+              </div>
+            )}
+            {autoExitCountdown !== null && (
+              <div style={{ 
+                marginTop: 24, 
+                fontSize: 16, 
+                opacity: 0.9,
+                background: 'rgba(255, 107, 107, 0.2)',
+                padding: '12px 24px',
+                borderRadius: 8,
+                border: '1px solid rgba(255, 107, 107, 0.4)'
+              }}>
+                ⏰ Tự động thoát sau: <span style={{ fontWeight: 700, fontSize: 20, color: autoExitCountdown <= 10 ? '#ff6b6b' : '#fff' }}>{autoExitCountdown}</span> giây
+              </div>
+            )}
+          </div>
         </div>
       )}
       {waiting && !roomId ? (
@@ -1198,6 +1837,11 @@ const Versus: React.FC = () => {
                 <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
                 <div>Combo: {combo}</div>
                 <div>B2B: {b2b}</div>
+                {typeof myPing === 'number' && (
+                  <div style={{ color: myPing < 50 ? '#4ecdc4' : myPing < 100 ? '#ffb800' : '#ff6b6b' }}>
+                    📶 Ping: {myPing}ms
+                  </div>
+                )}
                 {isApplyingGarbage && (
                   <div style={{ 
                     color: '#ff6b6b', 
@@ -1248,6 +1892,11 @@ const Versus: React.FC = () => {
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>OPP STATUS</div>
                 <div>GameOver: {oppGameOver ? 'YES' : 'NO'}</div>
                 <div>Hold: {oppHold ? oppHold.shape || 'None' : 'None'}</div>
+                {typeof oppPing === 'number' && (
+                  <div style={{ color: oppPing < 50 ? '#4ecdc4' : oppPing < 100 ? '#ffb800' : '#ff6b6b' }}>
+                    📶 Ping: {oppPing}ms
+                  </div>
+                )}
                 <div style={{ fontSize: '10px', color: '#888', marginTop: 4 }}>
                   Debug: Bar={opponentIncomingGarbage}
                 </div>
@@ -1269,6 +1918,11 @@ const Versus: React.FC = () => {
               <button
                 onClick={() => {
                   if (meId) socket.emit('ranked:leave', meId);
+                  if (autoExitTimerRef.current) {
+                    clearInterval(autoExitTimerRef.current);
+                    autoExitTimerRef.current = null;
+                  }
+                  cleanupWebRTC('manual-exit');
                   navigate('/');
                 }}
                 style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}

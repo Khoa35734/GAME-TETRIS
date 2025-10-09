@@ -35,7 +35,7 @@ const HomeMenu: React.FC = () => {
   const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
 
   // Player stats (mặc định)
-  const [playerStats, setPlayerStats] = useState(() => {
+  const [playerStats] = useState(() => {
     try {
       const saved = localStorage.getItem('tetris:playerStats');
       return saved ? JSON.parse(saved) : { level: 1, stars: 0 };
@@ -1280,8 +1280,8 @@ const HomeMenu: React.FC = () => {
                     letterSpacing: "1px",
                     textAlign: "center",
                     fontFamily: "'Press Start 2P', cursive",
-                    color: "#4ecdc4",
-                    textShadow: "0 0 10px #4ecdc4, 0 0 20px #ff6b6b",
+                    color: "#eb2614ff",
+                    textShadow: "0 0 10px #c91e0fff, 0 0 20px #ff6b6b",
                     animation: "pulse 2s infinite",
                   }}
                 >

@@ -4,7 +4,7 @@
   "description": "",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "dev": "concurrently \"redis-server\" \"npx ts-node ./src/index.ts\"",
     "dev:root": "npm run dev",
     "build": "tsc -p . && node dist/scripts/db-ping.js",
     "build:ci": "DB_SKIP_CHECK=1 tsc -p .",
@@ -40,6 +40,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.7.0",
     "@types/pg": "^8.15.5",
+    "concurrently": "^9.2.1",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
