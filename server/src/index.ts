@@ -203,11 +203,29 @@ io.on('connection', (socket) => {
 
     const displayName = typeof options?.name === 'string' ? options.name : undefined;
 
-    r.players.set(socket.id, { id: socket.id, ready: false, alive: true, combo: 0, b2b: 0, name: displayName, pendingGarbage: 0, lastAttackTime: 0 });
+    // Check if player was already in room (reconnecting)
+    const existingPlayer = r.players.get(socket.id);
+    const isReconnect = existingPlayer && !existingPlayer.alive;
+
+    r.players.set(socket.id, { 
+      id: socket.id, 
+      ready: existingPlayer?.ready ?? false, 
+      alive: true, 
+      combo: existingPlayer?.combo ?? 0, 
+      b2b: existingPlayer?.b2b ?? 0, 
+      name: displayName ?? existingPlayer?.name, 
+      pendingGarbage: existingPlayer?.pendingGarbage ?? 0, 
+      lastAttackTime: existingPlayer?.lastAttackTime ?? 0 
+    });
     socket.join(roomId);
     cb?.({ ok: true, roomId });
     saveRoom(r);
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
+    
+    // Notify others if this is a reconnect
+    if (isReconnect && r.started) {
+      socket.to(roomId).emit('player:reconnect', { playerId: socket.id });
+    }
   });
 
   socket.on('room:sync', (roomId: string, cb?: (result: any) => void) => {
@@ -380,7 +398,7 @@ io.on('connection', (socket) => {
     saveRoom(r);
   });
 
-  socket.on('game:topout', (roomId: string) => {
+  socket.on('game:topout', (roomId: string, reason?: string) => {
     const r = rooms.get(roomId);
     if (!r) return;
     const p = r.players.get(socket.id);
@@ -390,7 +408,25 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
     const alive = [...r.players.values()].filter(p => p.alive);
     if (alive.length <= 1) {
-      io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null });
+      // Determine different reasons for each side
+      if (reason === 'afk') {
+        // Send different messages to each player
+        // Loser (AFK player) gets: "Bạn đã AFK nên bị xử thua"
+        io.to(socket.id).emit('game:over', { 
+          winner: alive[0]?.id ?? null, 
+          reason: 'Bạn đã AFK nên bị xử thua' 
+        });
+        // Winner gets: "Đối thủ đã AFK"
+        if (alive[0]) {
+          io.to(alive[0].id).emit('game:over', { 
+            winner: alive[0].id, 
+            reason: 'Đối thủ đã AFK' 
+          });
+        }
+      } else {
+        // Normal game over - same message for both
+        io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null });
+      }
       r.started = false;
       // reset ready state
       r.players.forEach(pl => { 
@@ -482,19 +518,38 @@ io.on('connection', (socket) => {
     for (const [roomId, r] of rooms) {
       const p = r.players.get(socket.id);
       if (!p) continue;
+      
+      // Notify other players in room about disconnect
+      socket.to(roomId).emit('player:disconnect', { playerId: socket.id });
+      
       // Mark temporarily disconnected
       p.alive = false;
       saveRoom(r);
       io.to(roomId).emit('room:update', roomSnapshot(roomId));
-      // After 10s, if still not back and game started, declare the other as winner
+      
+      // After 5s, if still not back and game started, declare the other as winner
       setTimeout(() => {
         const rr = rooms.get(roomId);
         if (!rr || !rr.started) return;
         const pp = rr.players.get(socket.id);
         if (pp && pp.alive === false) {
-          // pp loses
+          // pp loses - send different messages to each player
           const alive = [...rr.players.values()].filter(x => x.id !== socket.id);
-          io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null, reason: 'disconnect' });
+          
+          // Loser (disconnected player) - if they're still connected somehow
+          io.to(socket.id).emit('game:over', { 
+            winner: alive[0]?.id ?? null, 
+            reason: 'Bạn đã ngắt kết nối nên bị xử thua' 
+          });
+          
+          // Winner gets different message
+          if (alive[0]) {
+            io.to(alive[0].id).emit('game:over', { 
+              winner: alive[0].id, 
+              reason: 'Đối thủ đã ngắt kết nối' 
+            });
+          }
+          
           rr.started = false;
           rr.players.forEach(pl => { 
             pl.ready = false; 
@@ -506,7 +561,7 @@ io.on('connection', (socket) => {
           });
           saveRoom(rr);
         }
-      }, 10000);
+      }, 5000); // Changed from 10s to 5s
     }
     
     // Remove accountId → socket.id mapping

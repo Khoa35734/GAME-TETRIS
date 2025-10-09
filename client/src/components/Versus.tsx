@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import socket, { SERVER_URL } from '../socket.ts';
 import Stage from './Stage';
 import { HoldPanel, NextPanel } from './SidePanels';
+import GarbageQueueBar from './GarbageQueueBar';
 import { checkCollision, createStage, getTSpinType, isGameOverFromBuffer } from '../gamehelper';
 import type { Stage as StageType, Cell as StageCell, TSpinType } from '../gamehelper';
 import { usePlayer } from '../hooks/usePlayer';
@@ -126,6 +127,8 @@ const Versus: React.FC = () => {
   
   // NEW: Garbage queue and combo/b2b tracking
   const [incomingGarbage, setIncomingGarbage] = useState(0); // Garbage queued from opponent
+  const [opponentIncomingGarbage, setOpponentIncomingGarbage] = useState(0); // Track opponent's incoming garbage
+  const [isApplyingGarbage, setIsApplyingGarbage] = useState(false); // Track garbage animation state
   const [combo, setCombo] = useState(0);
   const [b2b, setB2b] = useState(0);
   
@@ -140,8 +143,14 @@ const Versus: React.FC = () => {
   const groundedSinceRef = useRef<number | null>(null);
   const lastGroundActionRef = useRef<number | null>(null);
   
-  // AFK Detection - DISABLED FOR TESTING
+  // AFK Detection (30 seconds) - TEMPORARILY DISABLED FOR TESTING
   const afkTimeoutRef = useRef<number | null>(null);
+  const AFK_TIMEOUT_MS = 300000; // 300 seconds (5 minutes) - effectively disabled for testing
+  const AFK_ENABLED = false; // Set to true to re-enable AFK detection
+  
+  // Disconnect/Reconnect tracking
+  const [disconnectCountdown, setDisconnectCountdown] = useState<number | null>(null);
+  const disconnectTimerRef = useRef<number | null>(null);
   
   const wrapperRef = useRef<HTMLDivElement>(null);
   const matchTimer = useRef<number | null>(null);
@@ -159,27 +168,49 @@ const Versus: React.FC = () => {
   const pendingLockRef = useRef(false);
   useEffect(() => { pendingGarbageRef.current = pendingGarbageLeft; }, [pendingGarbageLeft]);
 
-  const applyGarbageRows = useCallback((count: number): StageType | null => {
-    if (count <= 0) return null;
-    console.log(`[applyGarbageRows] Applying ${count} garbage rows...`);
-    let updated: StageType | null = null;
-    setStage(prev => {
-      if (!prev.length) {
-        updated = prev;
-        return prev;
-      }
-      const width = prev[0].length;
-      const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell)) as StageType;
-      for (let i = 0; i < count; i++) {
-        const hole = Math.floor(Math.random() * width);
-        cloned.shift(); // Remove top row
-        cloned.push(createGarbageRow(width, hole)); // Add garbage row at bottom
-      }
-      updated = cloned;
-      console.log(`[applyGarbageRows] Applied! Result has ${cloned.filter(row => row.some(cell => cell[0] === 'garbage')).length} garbage rows`);
-      return cloned;
+  const applyGarbageRows = useCallback((count: number): Promise<StageType | null> => {
+    if (count <= 0) return Promise.resolve(null);
+    console.log(`[applyGarbageRows] Applying ${count} garbage rows with animation...`);
+    
+    // Set animation flag
+    setIsApplyingGarbage(true);
+    
+    return new Promise((resolve) => {
+      let currentRow = 0;
+      let finalStage: StageType | null = null;
+      
+      const applyNextRow = () => {
+        if (currentRow >= count) {
+          console.log(`[applyGarbageRows] Animation complete! Total ${count} rows applied`);
+          setIsApplyingGarbage(false); // Clear animation flag
+          resolve(finalStage);
+          return;
+        }
+        
+        setStage(prev => {
+          if (!prev.length) {
+            finalStage = prev;
+            return prev;
+          }
+          const width = prev[0].length;
+          const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell)) as StageType;
+          
+          // Add one garbage row
+          const hole = Math.floor(Math.random() * width);
+          cloned.shift(); // Remove top row
+          cloned.push(createGarbageRow(width, hole)); // Add garbage row at bottom
+          
+          finalStage = cloned;
+          console.log(`[applyGarbageRows] Row ${currentRow + 1}/${count} applied`);
+          return cloned;
+        });
+        
+        currentRow++;
+        setTimeout(applyNextRow, 100); // 100ms delay between each row
+      };
+      
+      applyNextRow();
     });
-    return updated;
   }, [setStage]);
 
   // --- Lock Delay & Movement Helpers ---
@@ -239,6 +270,23 @@ const Versus: React.FC = () => {
     }, INACTIVITY_LOCK_MS);
   }, [doLock, clearInactivity]);
 
+  // Reset AFK timer on any user action
+  const resetAFKTimer = useCallback(() => {
+    if (!AFK_ENABLED) return; // Skip if AFK is disabled
+    if (afkTimeoutRef.current) {
+      clearTimeout(afkTimeoutRef.current);
+    }
+    if (!gameOver && !matchResult && countdown === null) {
+      afkTimeoutRef.current = window.setTimeout(() => {
+        // User is AFK - send topout with 'afk' reason
+        console.log('⏰ AFK timeout - sending topout');
+        if (roomId) {
+          socket.emit('game:topout', roomId, 'afk');
+        }
+      }, AFK_TIMEOUT_MS);
+    }
+  }, [gameOver, matchResult, countdown, roomId]);
+
   // --- Core Game Logic ---
   const startGame = useCallback(() => {
     setStage(createStage());
@@ -258,6 +306,7 @@ const Versus: React.FC = () => {
     
     // Reset NEW garbage system
     setIncomingGarbage(0);
+    setOpponentIncomingGarbage(0);
     setCombo(0);
     setB2b(0);
     
@@ -284,6 +333,15 @@ const Versus: React.FC = () => {
     pieceCountRef.current = 0;
     if (roomId) {
       setTimeout(() => socket.emit('game:requestNext', roomId, 7), 300);
+    }
+    
+    // Start AFK timer (only if enabled)
+    if (AFK_ENABLED) {
+      if (afkTimeoutRef.current) clearTimeout(afkTimeoutRef.current);
+      afkTimeoutRef.current = window.setTimeout(() => {
+        console.log('⏰ AFK timeout - sending topout');
+        if (roomId) socket.emit('game:topout', roomId, 'afk');
+      }, AFK_TIMEOUT_MS);
     }
   }, [roomId, clearHold, setLevel, setRows, setStage, resetPlayer, setMatchResult]);
 
@@ -386,6 +444,20 @@ const Versus: React.FC = () => {
       const reason = data?.reason;
       setTimerOn(false);
       setDropTime(null);
+      
+      // Clear AFK timer
+      if (afkTimeoutRef.current) {
+        clearTimeout(afkTimeoutRef.current);
+        afkTimeoutRef.current = null;
+      }
+      
+      // Clear disconnect countdown
+      if (disconnectTimerRef.current) {
+        clearInterval(disconnectTimerRef.current);
+        disconnectTimerRef.current = null;
+      }
+      setDisconnectCountdown(null);
+      
       if (winner === socket.id) {
         setOppGameOver(true);
         setMatchResult({ outcome: 'win', reason });
@@ -402,7 +474,7 @@ const Versus: React.FC = () => {
 
     // NEW: Incoming garbage notification (queued, not applied yet)
     const onIncomingGarbage = (data: { lines: number }) => {
-      console.log('� Incoming garbage queued:', data.lines);
+      console.log('🔵 YOUR garbage bar updated:', data.lines);
       setIncomingGarbage(data.lines);
     };
     socket.on('game:incomingGarbage', onIncomingGarbage);
@@ -415,10 +487,11 @@ const Versus: React.FC = () => {
     socket.on('game:garbageCancelled', onGarbageCancelled);
 
     // NEW: Apply garbage (after delay from server)
-    const onApplyGarbage = (data: { lines: number }) => {
+    const onApplyGarbage = async (data: { lines: number }) => {
       console.log('💥 Applying garbage:', data.lines);
       if (data.lines > 0 && !gameOver) {
-        const updated = applyGarbageRows(data.lines);
+        // Apply garbage with animation (100ms per row)
+        const updated = await applyGarbageRows(data.lines);
 
         // ✅ Xóa hàng rác chờ sau khi đã nhận
         setIncomingGarbage(0);
@@ -435,10 +508,10 @@ const Versus: React.FC = () => {
     socket.on('game:applyGarbage', onApplyGarbage);
 
     // OLD: Keep for backward compatibility
-    const onGarbage = (g: number) => {
+    const onGarbage = async (g: number) => {
       console.log('🗑️ [LEGACY] Received garbage:', g);
       if (g > 0 && !gameOver) {
-        const updated = applyGarbageRows(g);
+        const updated = await applyGarbageRows(g);
         if (updated && isGameOverFromBuffer(updated)) {
           setGameOver(true);
           setDropTime(null);
@@ -479,14 +552,49 @@ const Versus: React.FC = () => {
     // Player disconnect handler (opponent disconnected)
     const onPlayerDisconnect = (data: any) => {
       if (data?.playerId === opponentId) {
-        // Opponent disconnected → auto win
-        setTimerOn(false);
-        setDropTime(null);
-        setOppGameOver(true);
-        setMatchResult({ outcome: 'win', reason: 'Đối thủ đã ngắt kết nối' });
+        console.log('🔌 Opponent disconnected, starting 5s countdown');
+        // Start 5 second countdown
+        setDisconnectCountdown(5);
+        let remaining = 5;
+        
+        disconnectTimerRef.current = window.setInterval(() => {
+          remaining--;
+          setDisconnectCountdown(remaining);
+          
+          if (remaining <= 0) {
+            // Time's up - opponent didn't reconnect
+            clearInterval(disconnectTimerRef.current!);
+            disconnectTimerRef.current = null;
+            setDisconnectCountdown(null);
+            setTimerOn(false);
+            setDropTime(null);
+            setOppGameOver(true);
+            setMatchResult({ outcome: 'win', reason: 'Đối thủ đã ngắt kết nối' });
+            
+            // Clear AFK timer
+            if (afkTimeoutRef.current) {
+              clearTimeout(afkTimeoutRef.current);
+              afkTimeoutRef.current = null;
+            }
+          }
+        }, 1000);
       }
     };
     socket.on('player:disconnect', onPlayerDisconnect);
+
+    // Player reconnect handler (opponent reconnected)
+    const onPlayerReconnect = (data: any) => {
+      if (data?.playerId === opponentId) {
+        console.log('✅ Opponent reconnected, canceling countdown');
+        // Cancel countdown
+        if (disconnectTimerRef.current) {
+          clearInterval(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+        setDisconnectCountdown(null);
+      }
+    };
+    socket.on('player:reconnect', onPlayerReconnect);
 
     // [THÊM MỚI] Lắng nghe sự kiện xác nhận đã gửi rác từ server
     const onAttackSent = (data: { amount: number }) => {
@@ -509,6 +617,7 @@ const Versus: React.FC = () => {
       socket.off('game:garbage', onGarbage);
       socket.off('game:state', onGameState);
       socket.off('player:disconnect', onPlayerDisconnect);
+      socket.off('player:reconnect', onPlayerReconnect);
       socket.off('game:attack_sent', onAttackSent);
     };
   }, [
@@ -555,6 +664,9 @@ const Versus: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (gameOver || countdown !== null || matchResult !== null) return;
     if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) e.preventDefault();
+    
+    // Reset AFK timer on any key press
+    resetAFKTimer();
   
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) { // Left / Right
@@ -716,6 +828,23 @@ const Versus: React.FC = () => {
         if (garbageLines > 0) {
             console.log('📤 Emitting game:attack with', garbageLines, 'lines');
             socket.emit('game:attack', roomId, { lines: garbageLines });
+            
+            // Update opponent's incoming garbage (for visual display)
+            setOpponentIncomingGarbage(prev => {
+                const newValue = prev + garbageLines;
+                console.log('🔴 Opponent garbage bar updated:', prev, '→', newValue);
+                return newValue;
+            });
+            
+            // Reset opponent garbage after server delay (~500ms)
+            setTimeout(() => {
+                setOpponentIncomingGarbage(prev => {
+                    const newValue = Math.max(0, prev - garbageLines);
+                    console.log('🔴 Opponent garbage bar reset:', prev, '→', newValue);
+                    return newValue;
+                });
+            }, 500);
+            
             // Lưu ý: State garbageToSend chỉ để hiển thị. Logic gửi đã xong.
             // setGarbageToSend(prev => prev + garbageLines); // Dòng này có thể không cần thiết nếu server xác nhận lại
         } else {
@@ -868,30 +997,28 @@ const Versus: React.FC = () => {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 36, alignItems: 'start', position: 'relative' }}>
           
-          {/* 🧪 TEST BUTTON - Test new attack system */}
-          <button 
-            onClick={() => {
-              console.log('🧪 TEST: Sending 2-line attack');
-              socket.emit('game:attack', roomId, { lines: 2 });
-            }}
-            style={{
+          {/* Disconnect countdown notification */}
+          {disconnectCountdown !== null && disconnectCountdown > 0 && (
+            <div style={{
               position: 'fixed',
-              top: 10,
-              right: 10,
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
               zIndex: 9999,
-              padding: '8px 16px',
-              background: '#ff6b6b',
+              background: 'rgba(255, 107, 107, 0.95)',
               color: 'white',
-              border: '2px solid #ff5252',
-              borderRadius: '5px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              fontSize: '12px',
-              boxShadow: '0 2px 8px rgba(255, 107, 107, 0.5)'
-            }}
-          >
-            🧪 TEST ATTACK (2 lines)
-          </button>
+              padding: '24px 32px',
+              borderRadius: '12px',
+              border: '3px solid #ff5252',
+              boxShadow: '0 8px 32px rgba(255, 107, 107, 0.5)',
+              textAlign: 'center',
+              fontSize: '18px',
+              fontWeight: 'bold'
+            }}>
+              <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠️ Đối phương đã thoát trận hoặc mất kết nối</div>
+              <div>Trận đấu sẽ kết thúc trong <span style={{ fontSize: '32px', color: '#fff200' }}>{disconnectCountdown}</span> giây</div>
+            </div>
+          )}
 
           {/* Left side: YOU (ĐÃ ĐỔI - Board của bạn bên TRÁI với viền xanh lá) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
@@ -899,15 +1026,23 @@ const Versus: React.FC = () => {
               {meId ? `🎮 Bạn: ${meId}` : '🎮 Bạn'}
             </div>
             <HoldPanel hold={hold as any} />
-            <div style={{ 
-              border: '4px solid #4ecdc4', 
-              borderRadius: '8px',
-              boxShadow: '0 0 20px rgba(78, 205, 196, 0.5), inset 0 0 10px rgba(78, 205, 196, 0.1)',
-              padding: '4px',
-              background: 'rgba(78, 205, 196, 0.05)'
-            }}>
-              <Stage stage={stage} />
+            
+            {/* Stage with Garbage Queue Bar beside it */}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+              <div style={{ 
+                border: '4px solid #4ecdc4', 
+                borderRadius: '8px',
+                boxShadow: '0 0 20px rgba(78, 205, 196, 0.5), inset 0 0 10px rgba(78, 205, 196, 0.1)',
+                padding: '4px',
+                background: 'rgba(78, 205, 196, 0.05)'
+              }}>
+                <Stage stage={stage} />
+              </div>
+              
+              {/* Garbage Queue Bar - using the new component */}
+              <GarbageQueueBar count={incomingGarbage} />
             </div>
+            
             <div style={{ display: 'grid', gap: 12 }}>
               <NextPanel queue={nextFour as any} />
               <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
@@ -917,10 +1052,23 @@ const Versus: React.FC = () => {
                 <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
                 <div>Combo: {combo}</div>
                 <div>B2B: {b2b}</div>
+                {isApplyingGarbage && (
+                  <div style={{ 
+                    color: '#ff6b6b', 
+                    fontWeight: 'bold',
+                    animation: 'pulse 0.5s ease-in-out infinite',
+                    textShadow: '0 0 8px rgba(255, 107, 107, 0.8)'
+                  }}>
+                    ⚡ Applying...
+                  </div>
+                )}
                 <div style={{ color: incomingGarbage > 0 ? '#ff6b6b' : '#888' }}>
                   ⚠️ Incoming: {incomingGarbage}
                 </div>
                 <div style={{ color: '#4ecdc4' }}>💣 Sent: {garbageToSend}</div>
+                <div style={{ fontSize: '10px', color: '#888', marginTop: 4 }}>
+                  Debug: Bar={incomingGarbage}
+                </div>
               </div>
             </div>
           </div>
@@ -931,21 +1079,32 @@ const Versus: React.FC = () => {
               {opponentId ? `⚔️ Đối thủ: ${opponentId}` : '⚔️ Đối thủ'}
             </div>
             <HoldPanel hold={oppHold} />
-            <div style={{ 
-              border: '4px solid #ff6b6b', 
-              borderRadius: '8px',
-              boxShadow: '0 0 20px rgba(255, 107, 107, 0.5), inset 0 0 10px rgba(255, 107, 107, 0.1)',
-              padding: '4px',
-              background: 'rgba(255, 107, 107, 0.05)'
-            }}>
-              <Stage stage={(netOppStage as any) ?? oppStage} />
+            
+            {/* Stage with Garbage Queue Bar beside it */}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+              <div style={{ 
+                border: '4px solid #ff6b6b', 
+                borderRadius: '8px',
+                boxShadow: '0 0 20px rgba(255, 107, 107, 0.5), inset 0 0 10px rgba(255, 107, 107, 0.1)',
+                padding: '4px',
+                background: 'rgba(255, 107, 107, 0.05)'
+              }}>
+                <Stage stage={(netOppStage as any) ?? oppStage} />
+              </div>
+              
+              {/* Opponent's Garbage Queue Bar */}
+              <GarbageQueueBar count={opponentIncomingGarbage} />
             </div>
+            
             <div style={{ display: 'grid', gap: 12 }}>
               {countdown === null && <NextPanel queue={oppNextFour as any} />}
               <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>OPP STATUS</div>
                 <div>GameOver: {oppGameOver ? 'YES' : 'NO'}</div>
                 <div>Hold: {oppHold ? oppHold.shape || 'None' : 'None'}</div>
+                <div style={{ fontSize: '10px', color: '#888', marginTop: 4 }}>
+                  Debug: Bar={opponentIncomingGarbage}
+                </div>
               </div>
             </div>
           </div>
