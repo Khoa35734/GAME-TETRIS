@@ -8,11 +8,16 @@ import cors from 'cors';
 import { Server } from 'socket.io';
 import { initRedis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch } from './redisStore';
 import { initPostgres } from './postgres';
+import authRouter from './routes/auth';
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces for LAN access
 
 const app = express();
+
+// Add JSON body parser middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 function normalizeIp(ip: string | undefined | null): string {
   if (!ip) return '';
@@ -22,6 +27,7 @@ function normalizeIp(ip: string | undefined | null): string {
   return v;
 }
 app.use(cors());
+app.use('/api/auth', authRouter); // Mount auth routes
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/whoami', (req, res) => {
   // Express req.ip returns remote address (e.g., ::ffff:192.168.1.10)

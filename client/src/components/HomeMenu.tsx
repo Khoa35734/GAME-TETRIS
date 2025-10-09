@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { authService, type AuthResponse } from "../services/authService";
 
 interface User {
   username: string;
@@ -61,9 +62,8 @@ const HomeMenu: React.FC = () => {
     { username: 'GridWarrior', level: 12, stars: 500, rank: 10 },
   ]);
 
-  // Form states
   const [loginForm, setLoginForm] = useState({
-    username: "",
+    email: "",
     password: "",
   });
 
@@ -74,91 +74,109 @@ const HomeMenu: React.FC = () => {
     confirmPassword: "",
   });
 
+  const [error, setError] = useState<string>("");
+
+  // Refs for form inputs (for Tab navigation)
+  const loginEmailRef = useRef<HTMLInputElement>(null);
+  const loginPasswordRef = useRef<HTMLInputElement>(null);
+  const registerUsernameRef = useRef<HTMLInputElement>(null);
+  const registerEmailRef = useRef<HTMLInputElement>(null);
+  const registerPasswordRef = useRef<HTMLInputElement>(null);
+  const registerConfirmPasswordRef = useRef<HTMLInputElement>(null);
+
   // Handle login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
 
-    if (!loginForm.username || !loginForm.password) {
-      alert("Vui lòng điền đầy đủ thông tin!");
+    if (!loginForm.email || !loginForm.password) {
+      setError("Vui lòng điền đầy đủ thông tin!");
       return;
     }
 
     setLoading(true);
     setLoadingMessage("Đang đăng nhập...");
 
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const result: AuthResponse = await authService.login(loginForm.email, loginForm.password);
       
-      // Generate accountId từ username (hash simple) hoặc check localStorage
-      const storedAccounts = JSON.parse(localStorage.getItem('tetris:accounts') || '{}');
-      let accountId = storedAccounts[loginForm.username];
-      
-      if (!accountId) {
-        // Tạo accountId mới nếu chưa có (số từ 10000 - 99999)
-        accountId = 10000 + Math.floor(Math.random() * 90000);
-        storedAccounts[loginForm.username] = accountId;
-        localStorage.setItem('tetris:accounts', JSON.stringify(storedAccounts));
+      if (result.success && result.user) {
+        const user: User = {
+          username: result.user.username,
+          email: result.user.email,
+          isGuest: false,
+          accountId: result.user.accountId,
+        };
+        setCurrentUser(user);
+        setShowGameModes(true);
+        setLoginForm({ email: "", password: "" });
+      } else {
+        setError(result.message || "Đăng nhập thất bại!");
       }
-      
-      const user: User = {
-        username: loginForm.username,
-        email: loginForm.username.includes("@") ? loginForm.username : `${loginForm.username}@example.com`,
-        isGuest: false,
-        accountId: accountId,
-      };
-      setCurrentUser(user);
-      setShowGameModes(true);
+    } catch (err) {
+      setError("Lỗi kết nối! Vui lòng kiểm tra server đang chạy.");
+      console.error("Login error:", err);
+    } finally {
+      setLoading(false);
       setLoadingMessage("");
-      try { localStorage.setItem('tetris:user', JSON.stringify(user)); } catch {}
-    }, 1500);
+    }
   };
 
   // Handle register
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
 
     const { username, email, password, confirmPassword } = registerForm;
 
     if (!username || !email || !password || !confirmPassword) {
-      alert("Vui lòng điền đầy đủ thông tin!");
+      setError("Vui lòng điền đầy đủ thông tin!");
       return;
     }
 
     if (password !== confirmPassword) {
-      alert("Mật khẩu xác nhận không khớp!");
+      setError("Mật khẩu xác nhận không khớp!");
       return;
     }
 
     if (password.length < 6) {
-      alert("Mật khẩu phải có ít nhất 6 ký tự!");
+      setError("Mật khẩu phải có ít nhất 6 ký tự!");
+      return;
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Email không hợp lệ!");
       return;
     }
 
     setLoading(true);
     setLoadingMessage("Đang tạo tài khoản...");
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const result: AuthResponse = await authService.register(username, email, password);
+      
+      if (result.success && result.user) {
+        const user: User = {
+          username: result.user.username,
+          email: result.user.email,
+          isGuest: false,
+          accountId: result.user.accountId,
+        };
+        setCurrentUser(user);
+        setShowGameModes(true);
+        setRegisterForm({ username: "", email: "", password: "", confirmPassword: "" });
+      } else {
+        setError(result.message || "Đăng ký thất bại!");
+      }
+    } catch (err) {
+      setError("Lỗi kết nối! Vui lòng kiểm tra server đang chạy.");
+      console.error("Register error:", err);
+    } finally {
       setLoading(false);
-      
-      // Generate accountId mới cho tài khoản đăng ký
-      const storedAccounts = JSON.parse(localStorage.getItem('tetris:accounts') || '{}');
-      const accountId = 10000 + Math.floor(Math.random() * 90000);
-      storedAccounts[username] = accountId;
-      localStorage.setItem('tetris:accounts', JSON.stringify(storedAccounts));
-      
-      const user: User = {
-        username,
-        email,
-        isGuest: false,
-        accountId: accountId,
-      };
-      setCurrentUser(user);
-      setShowGameModes(true);
       setLoadingMessage("");
-      try { localStorage.setItem('tetris:user', JSON.stringify(user)); } catch {}
-    }, 2000);
+    }
   };
 
   // Play as guest
@@ -181,7 +199,7 @@ const HomeMenu: React.FC = () => {
   const logout = () => {
     setCurrentUser(null);
     setShowGameModes(false);
-    setLoginForm({ username: "", password: "" });
+    setLoginForm({ email: "", password: "" });
     setRegisterForm({ username: "", email: "", password: "", confirmPassword: "" });
     setActiveTab("login");
     try { localStorage.removeItem('tetris:user'); } catch {}
@@ -629,8 +647,8 @@ const HomeMenu: React.FC = () => {
                     letterSpacing: "1px",
                     textAlign: "center",
                     fontFamily: "'Press Start 2P', cursive",
-                    color: "#4ecdc4",
-                    textShadow: "0 0 10px #4ecdc4, 0 0 20px #ff6b6b",
+                    color: "#e1462bff",
+                    textShadow: "0 0 10px #712315ff, 0 0 20px #ff6b6b",
                     animation: "pulse 2s infinite",
                   }}
                 >
@@ -673,7 +691,10 @@ const HomeMenu: React.FC = () => {
                       fontWeight: 500,
                       boxShadow: activeTab === "login" ? "0 2px 8px rgba(0, 0, 0, 0.2)" : "none",
                     }}
-                    onClick={() => setActiveTab("login")}
+                    onClick={() => {
+                      setActiveTab("login");
+                      setError("");
+                    }}
                   >
                     Đăng nhập
                   </button>
@@ -692,7 +713,10 @@ const HomeMenu: React.FC = () => {
                       fontWeight: 500,
                       boxShadow: activeTab === "register" ? "0 2px 8px rgba(0, 0, 0, 0.2)" : "none",
                     }}
-                    onClick={() => setActiveTab("register")}
+                    onClick={() => {
+                      setActiveTab("register");
+                      setError("");
+                    }}
                   >
                     Đăng ký
                   </button>
@@ -701,6 +725,27 @@ const HomeMenu: React.FC = () => {
                 {/* Login Form */}
                 {activeTab === "login" && (
                   <form id="loginForm" onSubmit={handleLogin}>
+                    {/* Error Display */}
+                    {error && (
+                      <div
+                        style={{
+                          background: "rgba(244, 67, 54, 0.15)",
+                          border: "1px solid rgba(244, 67, 54, 0.4)",
+                          borderRadius: "8px",
+                          padding: "12px 16px",
+                          marginBottom: "20px",
+                          color: "#ff6b6b",
+                          fontSize: "0.9rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px"
+                        }}
+                      >
+                        <span>⚠️</span>
+                        <span>{error}</span>
+                      </div>
+                    )}
+
                     <div style={{ marginBottom: "20px" }}>
                       <label
                         style={{
@@ -711,12 +756,19 @@ const HomeMenu: React.FC = () => {
                           fontWeight: 500,
                         }}
                       >
-                        Tên đăng nhập hoặc Email
+                        Email
                       </label>
                       <input
-                        type="text"
-                        value={loginForm.username}
-                        onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                        ref={loginEmailRef}
+                        type="email"
+                        value={loginForm.email}
+                        onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            loginPasswordRef.current?.focus();
+                          }
+                        }}
                         style={{
                           width: "100%",
                           padding: "15px",
@@ -727,7 +779,7 @@ const HomeMenu: React.FC = () => {
                           fontSize: "1rem",
                           transition: "all 0.3s ease",
                         }}
-                        placeholder="Nhập tên đăng nhập hoặc email"
+                        placeholder="Nhập email của bạn"
                         onFocus={(e) => {
                           e.target.style.borderColor = "#4ecdc4";
                           e.target.style.boxShadow = "0 0 0 2px rgba(78, 205, 196, 0.2)";
@@ -738,7 +790,9 @@ const HomeMenu: React.FC = () => {
                           e.target.style.boxShadow = "none";
                           e.target.style.background = "rgba(255, 255, 255, 0.05)";
                         }}
+                        disabled={loading}
                         required
+                        autoFocus
                       />
                     </div>
                     <div style={{ marginBottom: "20px" }}>
@@ -754,6 +808,7 @@ const HomeMenu: React.FC = () => {
                         Mật khẩu
                       </label>
                       <input
+                        ref={loginPasswordRef}
                         type="password"
                         value={loginForm.password}
                         onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
@@ -778,6 +833,7 @@ const HomeMenu: React.FC = () => {
                           e.target.style.boxShadow = "none";
                           e.target.style.background = "rgba(255, 255, 255, 0.05)";
                         }}
+                        disabled={loading}
                         required
                       />
                     </div>
@@ -794,12 +850,13 @@ const HomeMenu: React.FC = () => {
                         transition: "all 0.3s ease",
                         textTransform: "uppercase",
                         letterSpacing: "1px",
-                        background: "linear-gradient(45deg, #ff6b6b, #4ecdc4)",
+                        background: loading ? "rgba(100, 100, 100, 0.5)" : "linear-gradient(45deg, #ff6b6b, #4ecdc4)",
                         color: "white",
                         marginBottom: "15px",
                         width: "100%",
                         position: "relative",
                         overflow: "hidden",
+                        opacity: loading ? 0.6 : 1,
                       }}
                       onMouseEnter={(e) => {
                         if (!loading) {
@@ -814,7 +871,7 @@ const HomeMenu: React.FC = () => {
                         }
                       }}
                     >
-                      {loading ? loadingMessage : "Đăng nhập"}
+                      {loading ? "⏳ " + loadingMessage : "🚀 Đăng nhập"}
                     </button>
                   </form>
                 )}
@@ -822,6 +879,27 @@ const HomeMenu: React.FC = () => {
                 {/* Register Form */}
                 {activeTab === "register" && (
                   <form onSubmit={handleRegister}>
+                    {/* Error Display */}
+                    {error && (
+                      <div
+                        style={{
+                          background: "rgba(244, 67, 54, 0.15)",
+                          border: "1px solid rgba(244, 67, 54, 0.4)",
+                          borderRadius: "8px",
+                          padding: "12px 16px",
+                          marginBottom: "20px",
+                          color: "#ff6b6b",
+                          fontSize: "0.9rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px"
+                        }}
+                      >
+                        <span>⚠️</span>
+                        <span>{error}</span>
+                      </div>
+                    )}
+
                     <div style={{ marginBottom: "20px" }}>
                       <label
                         style={{
@@ -835,11 +913,18 @@ const HomeMenu: React.FC = () => {
                         Tên đăng nhập
                       </label>
                       <input
+                        ref={registerUsernameRef}
                         type="text"
                         value={registerForm.username}
                         onChange={(e) =>
                           setRegisterForm({ ...registerForm, username: e.target.value })
                         }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            registerEmailRef.current?.focus();
+                          }
+                        }}
                         style={{
                           width: "100%",
                           padding: "15px",
@@ -861,7 +946,9 @@ const HomeMenu: React.FC = () => {
                           e.target.style.boxShadow = "none";
                           e.target.style.background = "rgba(255, 255, 255, 0.05)";
                         }}
+                        disabled={loading}
                         required
+                        autoFocus
                       />
                     </div>
                     <div style={{ marginBottom: "20px" }}>
@@ -877,9 +964,16 @@ const HomeMenu: React.FC = () => {
                         Email
                       </label>
                       <input
+                        ref={registerEmailRef}
                         type="email"
                         value={registerForm.email}
                         onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            registerPasswordRef.current?.focus();
+                          }
+                        }}
                         style={{
                           width: "100%",
                           padding: "15px",
@@ -901,6 +995,7 @@ const HomeMenu: React.FC = () => {
                           e.target.style.boxShadow = "none";
                           e.target.style.background = "rgba(255, 255, 255, 0.05)";
                         }}
+                        disabled={loading}
                         required
                       />
                     </div>
@@ -917,11 +1012,18 @@ const HomeMenu: React.FC = () => {
                         Mật khẩu
                       </label>
                       <input
+                        ref={registerPasswordRef}
                         type="password"
                         value={registerForm.password}
                         onChange={(e) =>
                           setRegisterForm({ ...registerForm, password: e.target.value })
                         }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            registerConfirmPasswordRef.current?.focus();
+                          }
+                        }}
                         style={{
                           width: "100%",
                           padding: "15px",
@@ -932,7 +1034,7 @@ const HomeMenu: React.FC = () => {
                           fontSize: "1rem",
                           transition: "all 0.3s ease",
                         }}
-                        placeholder="Tạo mật khẩu mạnh"
+                        placeholder="Tạo mật khẩu mạnh (tối thiểu 6 ký tự)"
                         onFocus={(e) => {
                           e.target.style.borderColor = "#4ecdc4";
                           e.target.style.boxShadow = "0 0 0 2px rgba(78, 205, 196, 0.2)";
@@ -943,6 +1045,7 @@ const HomeMenu: React.FC = () => {
                           e.target.style.boxShadow = "none";
                           e.target.style.background = "rgba(255, 255, 255, 0.05)";
                         }}
+                        disabled={loading}
                         required
                       />
                     </div>
@@ -959,6 +1062,7 @@ const HomeMenu: React.FC = () => {
                         Xác nhận mật khẩu
                       </label>
                       <input
+                        ref={registerConfirmPasswordRef}
                         type="password"
                         value={registerForm.confirmPassword}
                         onChange={(e) =>
@@ -985,6 +1089,7 @@ const HomeMenu: React.FC = () => {
                           e.target.style.boxShadow = "none";
                           e.target.style.background = "rgba(255, 255, 255, 0.05)";
                         }}
+                        disabled={loading}
                         required
                       />
                     </div>
@@ -1001,12 +1106,13 @@ const HomeMenu: React.FC = () => {
                         transition: "all 0.3s ease",
                         textTransform: "uppercase",
                         letterSpacing: "1px",
-                        background: "linear-gradient(45deg, #ff6b6b, #4ecdc4)",
+                        background: loading ? "rgba(100, 100, 100, 0.5)" : "linear-gradient(45deg, #ff6b6b, #4ecdc4)",
                         color: "white",
                         marginBottom: "15px",
                         width: "100%",
                         position: "relative",
                         overflow: "hidden",
+                        opacity: loading ? 0.6 : 1,
                       }}
                       onMouseEnter={(e) => {
                         if (!loading) {
@@ -1021,10 +1127,23 @@ const HomeMenu: React.FC = () => {
                         }
                       }}
                     >
-                      {loading ? loadingMessage : "Đăng ký"}
+                      {loading ? "⏳ " + loadingMessage : "✨ Đăng ký ngay"}
                     </button>
                   </form>
                 )}
+
+                {/* Divider */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  margin: '24px 0',
+                  color: '#888'
+                }}>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>HOẶC</span>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.1)' }} />
+                </div>
 
                 {/* Guest Play Button */}
                 <button
@@ -1044,6 +1163,7 @@ const HomeMenu: React.FC = () => {
                     color: "#ffffff",
                     width: "100%",
                     marginBottom: "20px",
+                    opacity: loading ? 0.5 : 1,
                   }}
                   onMouseEnter={(e) => {
                     if (!loading) {

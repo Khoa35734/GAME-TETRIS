@@ -268,6 +268,16 @@ const Versus: React.FC = () => {
   }, []);
 
   const doLock = useCallback(() => {
+    if (isApplyingGarbage) {
+      clearInactivity();
+      clearCap();
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      capExpiredRef.current = false;
+      setIsGrounded(false);
+      return;
+    }
+
     clearInactivity();
     clearCap();
     groundedSinceRef.current = null;
@@ -275,9 +285,15 @@ const Versus: React.FC = () => {
     capExpiredRef.current = false;
     setIsGrounded(false);
     setLocking(true);
-  }, [clearInactivity, clearCap]);
+  }, [clearInactivity, clearCap, isApplyingGarbage]);
 
   const startGroundTimers = useCallback(() => {
+    if (isApplyingGarbage) {
+      clearInactivity();
+      clearCap();
+      return;
+    }
+
     if (capExpiredRef.current) {
       doLock();
       return;
@@ -295,9 +311,15 @@ const Versus: React.FC = () => {
         doLock();
       }, HARD_CAP_MS);
     }
-  }, [doLock, clearInactivity]);
+  }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
   const onGroundAction = useCallback(() => {
+    if (isApplyingGarbage) {
+      clearInactivity();
+      clearCap();
+      return;
+    }
+
     lastGroundActionRef.current = Date.now();
     clearInactivity();
     if (capExpiredRef.current) {
@@ -307,7 +329,18 @@ const Versus: React.FC = () => {
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
     }, INACTIVITY_LOCK_MS);
-  }, [doLock, clearInactivity]);
+  }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
+
+  useEffect(() => {
+    if (isApplyingGarbage) {
+      clearInactivity();
+      clearCap();
+      groundedSinceRef.current = null;
+      lastGroundActionRef.current = null;
+      capExpiredRef.current = false;
+      setIsGrounded(false);
+    }
+  }, [isApplyingGarbage, clearInactivity, clearCap]);
 
   // Reset AFK timer on any user action
   const resetAFKTimer = useCallback(() => {
@@ -866,7 +899,7 @@ const Versus: React.FC = () => {
 
   // Lock Delay Tracking
   useEffect(() => {
-    if (gameOver || countdown !== null || matchResult !== null || locking) {
+    if (gameOver || countdown !== null || matchResult !== null || locking || isApplyingGarbage) {
       setIsGrounded(false);
       clearInactivity();
       clearCap();
@@ -888,7 +921,7 @@ const Versus: React.FC = () => {
       lastGroundActionRef.current = null;
       capExpiredRef.current = false;
     }
-  }, [player, stage, gameOver, countdown, matchResult, locking, startGroundTimers, clearInactivity, clearCap]);
+  }, [player, stage, gameOver, countdown, matchResult, locking, isApplyingGarbage, startGroundTimers, clearInactivity, clearCap]);
 
     useEffect(() => {
       if (!player.collided) return;
