@@ -253,17 +253,11 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Also check legacy rooms Map (during transition)
-      if (rooms.has(roomId)) {
-        cb?.({ ok: false, error: 'exists' });
-        return;
-      }
-
       const maxPlayers = Math.max(2, Math.min(Number(options?.maxPlayers) || 2, 6));
       const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
       const displayName = typeof options?.name === 'string' ? options.name : undefined;
 
-      // Create match in Redis via MatchManager
+      // Create match in Redis via MatchManager (ONLY Redis, no legacy Map)
       const match = await matchManager.createMatch({
         matchId: roomId,
         hostPlayerId: socket.id,
@@ -274,39 +268,13 @@ io.on('connection', (socket) => {
         hostAccountId: displayName,
       });
 
-      // Also create in legacy Map for backward compatibility (DUAL MODE)
-      const room: Room = {
-        id: roomId,
-        host: socket.id,
-        gen: bagGenerator(seed),
-        players: new Map([[socket.id, { 
-          id: socket.id, 
-          ready: false, 
-          alive: true, 
-          combo: 0, 
-          b2b: 0, 
-          name: displayName, 
-          pendingGarbage: 0, 
-          lastAttackTime: 0 
-        }]]),
-        started: false,
-        seed,
-        maxPlayers,
-      };
-      rooms.set(roomId, room);
-
       // Join socket.io room for broadcasting
       await socket.join(roomId);
 
-      console.log(`[room:create] ✅ ${socket.id} created match ${roomId} (max ${maxPlayers} players)`);
+      console.log(`[room:create] ✅ ${socket.id} created match ${roomId} (max ${maxPlayers} players) in Redis`);
 
       // Send success response
       cb?.({ ok: true, roomId });
-
-      // Save to Redis (legacy function)
-      saveRoom(room).catch(err => 
-        console.error('[room:create] Redis saveRoom error:', err)
-      );
 
       // Broadcast to room using new snapshot format
       const snapshot = matchToRoomSnapshot(match);
@@ -330,36 +298,23 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Get match from Redis first
+      // Get match from Redis (ONLY Redis, no legacy fallback)
       const match = await matchManager.getMatch(roomId);
       
-      // Fallback to legacy room
-      const r = rooms.get(roomId);
-      
-      if (!match && !r) {
+      if (!match) {
         cb?.({ ok: false, error: 'not-found' });
         return;
       }
 
-      // Check using match if available, otherwise legacy room
-      if (match) {
-        if (match.status === 'in_progress') {
-          cb?.({ ok: false, error: 'started' });
-          return;
-        }
-        if (match.players.length >= match.maxPlayers) {
-          const existingPlayer = match.players.find(p => p.socketId === socket.id);
-          if (!existingPlayer) {
-            cb?.({ ok: false, error: 'full' });
-            return;
-          }
-        }
-      } else if (r) {
-        if (r.started) {
-          cb?.({ ok: false, error: 'started' });
-          return;
-        }
-        if (r.players.size >= r.maxPlayers && !r.players.has(socket.id)) {
+      // Check match status
+      if (match.status === 'in_progress') {
+        cb?.({ ok: false, error: 'started' });
+        return;
+      }
+      
+      if (match.players.length >= match.maxPlayers) {
+        const existingPlayer = match.players.find(p => p.socketId === socket.id);
+        if (!existingPlayer) {
           cb?.({ ok: false, error: 'full' });
           return;
         }
@@ -367,49 +322,26 @@ io.on('connection', (socket) => {
 
       const displayName = typeof options?.name === 'string' ? options.name : undefined;
 
-      // Add player to MatchManager if match exists
-      if (match) {
-        const existingPlayer = match.players.find(p => p.socketId === socket.id);
-        
-        if (!existingPlayer) {
-          // New player joining
-          await matchManager.addPlayer(roomId, {
-            playerId: socket.id,
-            socketId: socket.id,
-            accountId: displayName,
-          });
-        }
-        // If player exists, no action needed - they're already in the match
-      }
-
-      // Also update legacy room (DUAL MODE)
-      if (r) {
-        const existingPlayer = r.players.get(socket.id);
-        const isReconnect = existingPlayer && !existingPlayer.alive;
-
-        r.players.set(socket.id, { 
-          id: socket.id, 
-          ready: existingPlayer?.ready ?? false, 
-          alive: true, 
-          combo: existingPlayer?.combo ?? 0, 
-          b2b: existingPlayer?.b2b ?? 0, 
-          name: displayName ?? existingPlayer?.name, 
-          pendingGarbage: existingPlayer?.pendingGarbage ?? 0, 
-          lastAttackTime: existingPlayer?.lastAttackTime ?? 0 
+      // Check if player already in match (reconnect case)
+      const existingPlayer = match.players.find(p => p.socketId === socket.id);
+      
+      if (!existingPlayer) {
+        // New player joining
+        await matchManager.addPlayer(roomId, {
+          playerId: socket.id,
+          socketId: socket.id,
+          accountId: displayName,
         });
-        
-        saveRoom(r).catch(err => console.error('[room:join] saveRoom error:', err));
-        
-        // Notify others if this is a reconnect
-        if (isReconnect && r.started) {
-          socket.to(roomId).emit('player:reconnect', { playerId: socket.id });
-        }
+        console.log(`[room:join] ✅ ${socket.id} joined match ${roomId}`);
+      } else {
+        // Reconnecting player
+        console.log(`[room:join] ✅ ${socket.id} reconnected to match ${roomId}`);
+        // Notify others about reconnect
+        socket.to(roomId).emit('player:reconnect', { playerId: socket.id });
       }
 
       // Join socket.io room
       await socket.join(roomId);
-
-      console.log(`[room:join] ✅ ${socket.id} joined match ${roomId}`);
 
       // Send success response
       cb?.({ ok: true, roomId });
@@ -419,9 +351,6 @@ io.on('connection', (socket) => {
       if (updatedMatch) {
         const snapshot = matchToRoomSnapshot(updatedMatch);
         io.to(roomId).emit('room:update', snapshot);
-      } else if (r) {
-        // Fallback to legacy snapshot
-        io.to(roomId).emit('room:update', roomSnapshot(roomId));
       }
 
     } catch (err) {
@@ -430,72 +359,80 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('room:sync', (roomId: string, cb?: (result: any) => void) => {
+  socket.on('room:sync', async (roomId: string, cb?: (result: any) => void) => {
     if (typeof roomId !== 'string' || !roomId.trim()) {
       cb?.({ ok: false, error: 'invalid-room' });
       return;
     }
-    const snapshot = roomSnapshot(roomId.trim());
-    if (!snapshot) {
-      cb?.({ ok: false, error: 'not-found' });
-      return;
+    
+    try {
+      const match = await matchManager.getMatch(roomId.trim());
+      if (!match) {
+        cb?.({ ok: false, error: 'not-found' });
+        return;
+      }
+      
+      const snapshot = matchToRoomSnapshot(match);
+      io.to(socket.id).emit('room:update', snapshot);
+      cb?.({ ok: true, data: snapshot });
+    } catch (err) {
+      console.error('[room:sync] Error:', err);
+      cb?.({ ok: false, error: 'server-error' });
     }
-    io.to(socket.id).emit('room:update', snapshot);
-    cb?.({ ok: true, data: snapshot });
   });
 
-  socket.on('room:leave', (roomId: string) => {
-    const r = rooms.get(roomId);
-    if (!r) return;
-    
-    const wasHost = r.host === socket.id;
-    r.players.delete(socket.id);
-    socket.leave(roomId);
-    
-    if (r.players.size === 0) {
-      // Empty room - delete it
-      rooms.delete(roomId);
-      deleteRoom(roomId);
-    } else {
-      // Transfer host if current host left
-      if (wasHost) {
-        const newHost = [...r.players.keys()][0];
-        r.host = newHost;
-        console.log(`[Room ${roomId}] Host left. New host: ${newHost}`);
+  socket.on('room:leave', async (roomId: string) => {
+    try {
+      const match = await matchManager.getMatch(roomId);
+      if (!match) {
+        console.warn(`[room:leave] Match not found: ${roomId}`);
+        return;
       }
-      saveRoom(r);
-      io.to(roomId).emit('room:update', roomSnapshot(roomId));
+
+      const player = findPlayerInMatch(match, socket.id);
+      if (!player) {
+        console.warn(`[room:leave] Player ${socket.id} not found in match ${roomId}`);
+        return;
+      }
+      
+      // Remove player from match (MatchManager automatically handles host transfer)
+      await matchManager.removePlayer(roomId, player.playerId);
+      socket.leave(roomId);
+      console.log(`[room:leave] ✅ Player ${socket.id.slice(0, 8)} left match ${roomId.slice(0, 8)}`);
+
+      // Check if match is now empty
+      const updatedMatch = await matchManager.getMatch(roomId);
+      if (!updatedMatch || updatedMatch.players.length === 0) {
+        // Delete empty match
+        await matchManager.deleteMatch(roomId);
+        console.log(`[room:leave] 🗑️ Empty match ${roomId.slice(0, 8)} deleted`);
+      } else {
+        // Broadcast updated room state (host may have changed)
+        const snapshot = matchToRoomSnapshot(updatedMatch);
+        io.to(roomId).emit('room:update', snapshot);
+      }
+
+    } catch (err) {
+      console.error('[room:leave] Error:', err);
     }
   });
 
   socket.on('room:ready', async (roomId: string, ready: boolean) => {
     try {
       const match = await matchManager.getMatch(roomId);
-      const r = rooms.get(roomId);
       
-      if (!match && !r) {
-        console.error('[room:ready] Match/Room not found:', roomId);
+      if (!match) {
+        console.error('[room:ready] Match not found:', roomId);
         return;
       }
 
-      // Update in MatchManager if exists
-      if (match) {
-        const player = findPlayerInMatch(match, socket.id);
-        if (player) {
-          await matchManager.setPlayerReady(roomId, player.playerId, ready);
-          console.log(`[room:ready] ✅ Player ${socket.id.slice(0, 8)} (playerId: ${player.playerId.slice(0, 8)}) ready=${ready} in match ${roomId.slice(0, 8)}`);
-        } else {
-          console.warn(`[room:ready] ⚠️ Player ${socket.id.slice(0, 8)} not found in match ${roomId.slice(0, 8)}`);
-        }
-      }
-
-      // Update legacy room (DUAL MODE)
-      if (r) {
-        const p = r.players.get(socket.id);
-        if (p) {
-          p.ready = ready;
-          saveRoom(r).catch(err => console.error('[room:ready] saveRoom error:', err));
-        }
+      // Update in MatchManager
+      const player = findPlayerInMatch(match, socket.id);
+      if (player) {
+        await matchManager.setPlayerReady(roomId, player.playerId, ready);
+        console.log(`[room:ready] ✅ Player ${socket.id.slice(0, 8)} ready=${ready} in match ${roomId.slice(0, 8)}`);
+      } else {
+        console.warn(`[room:ready] ⚠️ Player ${socket.id.slice(0, 8)} not found in match ${roomId.slice(0, 8)}`);
       }
 
       // Broadcast updated room state
@@ -503,8 +440,6 @@ io.on('connection', (socket) => {
       if (updatedMatch) {
         const snapshot = matchToRoomSnapshot(updatedMatch);
         io.to(roomId).emit('room:update', snapshot);
-      } else if (r) {
-        io.to(roomId).emit('room:update', roomSnapshot(roomId));
       }
 
     } catch (err) {
@@ -516,75 +451,52 @@ io.on('connection', (socket) => {
   socket.on('room:startGame', async (roomId: string, cb?: (result: any) => void) => {
     try {
       const match = await matchManager.getMatch(roomId);
-      const r = rooms.get(roomId);
       
-      if (!match && !r) {
+      if (!match) {
         cb?.({ ok: false, error: 'Phòng không tồn tại' });
         return;
       }
 
-      // Check host permission using match if available
-      if (match) {
-        const player = findPlayerInMatch(match, socket.id);
-        if (!player || player.playerId !== match.hostPlayerId) {
-          console.error('[room:startGame] Only host can start game');
-          cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể bắt đầu' });
-          return;
-        }
-
-        // Check player count
-        if (match.players.length < 2) {
-          cb?.({ ok: false, error: 'Cần ít nhất 2 người chơi' });
-          return;
-        }
-
-        // Check if all non-host players are ready (host doesn't need to be ready)
-        const nonHostPlayers = match.players.filter(p => p.playerId !== match.hostPlayerId);
-        const allNonHostReady = nonHostPlayers.every(p => p.ready);
-        
-        console.log(`[room:startGame] 🔍 Ready check:`, {
-          matchId: roomId.slice(0, 8),
-          hostPlayerId: match.hostPlayerId.slice(0, 8),
-          totalPlayers: match.players.length,
-          nonHostPlayersCount: nonHostPlayers.length,
-          allNonHostReady,
-          players: match.players.map(p => ({ 
-            playerId: p.playerId.slice(0, 8),
-            socketId: p.socketId?.slice(0, 8) || 'N/A',
-            isHost: p.playerId === match.hostPlayerId, 
-            ready: p.ready 
-          }))
-        });
-        
-        if (!allNonHostReady) {
-          cb?.({ ok: false, error: 'Chưa đủ người sẵn sàng' });
-          return;
-        }
-
-        // Start match in Redis
-        await matchManager.startMatch(roomId);
-        console.log(`[room:startGame] ✅ Match ${roomId} started by ${socket.id}`);
-
-      } else if (r) {
-        // Legacy room checks
-        if (r.host !== socket.id) {
-          cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể bắt đầu' });
-          return;
-        }
-        if (r.players.size < 2) {
-          cb?.({ ok: false, error: 'Cần ít nhất 2 người chơi' });
-          return;
-        }
-        
-        const allReady = [...r.players.values()].every(p => p.id === r.host || p.ready);
-        if (!allReady) {
-          cb?.({ ok: false, error: 'Chưa đủ người sẵn sàng' });
-          return;
-        }
-        
-        r.started = true;
-        saveRoom(r).catch(err => console.error('[room:startGame] saveRoom error:', err));
+      // Check host permission
+      const player = findPlayerInMatch(match, socket.id);
+      if (!player || player.playerId !== match.hostPlayerId) {
+        console.error('[room:startGame] Only host can start game');
+        cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể bắt đầu' });
+        return;
       }
+
+      // Check player count
+      if (match.players.length < 2) {
+        cb?.({ ok: false, error: 'Cần ít nhất 2 người chơi' });
+        return;
+      }
+
+      // Check if all non-host players are ready (host doesn't need to be ready)
+      const nonHostPlayers = match.players.filter(p => p.playerId !== match.hostPlayerId);
+      const allNonHostReady = nonHostPlayers.every(p => p.ready);
+      
+      console.log(`[room:startGame] 🔍 Ready check:`, {
+        matchId: roomId.slice(0, 8),
+        hostPlayerId: match.hostPlayerId.slice(0, 8),
+        totalPlayers: match.players.length,
+        nonHostPlayersCount: nonHostPlayers.length,
+        allNonHostReady,
+        players: match.players.map(p => ({ 
+          playerId: p.playerId.slice(0, 8),
+          socketId: p.socketId?.slice(0, 8) || 'N/A',
+          isHost: p.playerId === match.hostPlayerId, 
+          ready: p.ready 
+        }))
+      });
+      
+      if (!allNonHostReady) {
+        cb?.({ ok: false, error: 'Chưa đủ người sẵn sàng' });
+        return;
+      }
+
+      // Start match in Redis
+      await matchManager.startMatch(roomId);
+      console.log(`[room:startGame] ✅ Match ${roomId} started by ${socket.id}`);
       
       // Initialize ready set for this room
       playersReadyForGame.set(roomId, new Set());
@@ -593,7 +505,7 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('game:starting', { roomId });
       console.log(`[Room ${roomId}] Game is starting. Waiting for clients to be ready...`);
 
-      cb?.({ ok: true, seed: match?.seed || r?.seed });
+      cb?.({ ok: true, seed: match.seed });
 
     } catch (err) {
       console.error('[room:startGame] Error:', err);
@@ -605,11 +517,10 @@ io.on('connection', (socket) => {
   socket.on('game:im_ready', async (roomId: string) => {
     try {
       const match = await matchManager.getMatch(roomId);
-      const r = rooms.get(roomId);
       const readySet = playersReadyForGame.get(roomId);
       
-      if (!match && !r) {
-        console.warn(`[game:im_ready] Received ready signal for non-existent room: ${roomId}`);
+      if (!match) {
+        console.warn(`[game:im_ready] Received ready signal for non-existent match: ${roomId}`);
         return;
       }
       
@@ -620,47 +531,35 @@ io.on('connection', (socket) => {
 
       readySet.add(socket.id);
       
-      // Determine expected player count from match or legacy room
-      const expectedPlayers = match ? match.players.length : (r ? r.players.size : 0);
+      const expectedPlayers = match.players.length;
       
       console.log(`[Room ${roomId}] Player ${socket.id} is ready. (${readySet.size}/${expectedPlayers})`);
 
-      // 3. Khi TẤT CẢ client trong phòng đã báo sẵn sàng
+      // When ALL clients in the room have reported ready
       if (readySet.size === expectedPlayers) {
         console.log(`[Room ${roomId}] ✅ All players are ready. Sending full game data.`);
         
-        // Generate pieces from the correct generator
-        let first: any;
-        let playerIds: string[] = [];
-        let gen: Generator<TType, any, any> | undefined;
+        // Create generator from match seed and STORE IT for future requests
+        const gen = bagGenerator(match.seed);
+        const first = nextPieces(gen, 14);
+        const playerIds = match.players.map(p => p.socketId);
         
-        if (match) {
-          // Create generator from match seed and STORE IT for future requests
-          gen = bagGenerator(match.seed);
-          first = nextPieces(gen, 14);
-          playerIds = match.players.map(p => p.socketId);
-          
-          // Store generator for this match so game:requestNext can use it
-          matchGenerators.set(roomId, gen);
-          console.log(`[Room ${roomId}] 💾 Stored generator for Redis match`);
-        } else if (r) {
-          // Use legacy room generator (already stored in room)
-          first = nextPieces(r.gen, 14);
-          playerIds = [...r.players.keys()];
-        }
+        // Store generator for this match so game:requestNext can use it
+        matchGenerators.set(roomId, gen);
+        console.log(`[Room ${roomId}] 💾 Stored generator for Redis match`);
 
-        // Gửi MỘT LẦN DUY NHẤT sự kiện 'game:start' với đầy đủ dữ liệu
+        // Send game:start event ONCE with full data to each player
         for (const playerId of playerIds) {
           const opponentId = playerIds.find(id => id !== playerId);
           io.to(playerId).emit('game:start', {
             next: first,
             roomId,
             opponent: opponentId,
-            seed: match?.seed || r?.seed
+            seed: match.seed
           });
         }
         
-        // Dọn dẹp sau khi đã gửi
+        // Cleanup after sending
         playersReadyForGame.delete(roomId);
         
         console.log(`[Room ${roomId}] 🎮 Game started! Piece queue sent to all players.`);

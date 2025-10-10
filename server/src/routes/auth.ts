@@ -22,7 +22,7 @@ router.post('/register', async (req, res) => {
   try {
     // Kiểm tra email đã tồn tại chưa
     const existingUsers = await sequelize.query(
-      'SELECT account_id FROM account WHERE email = :email',
+      'SELECT user_id FROM users WHERE email = :email',
       { 
         replacements: { email }, 
         type: QueryTypes.SELECT 
@@ -38,7 +38,7 @@ router.post('/register', async (req, res) => {
 
     // Kiểm tra username đã tồn tại chưa
     const existingUsername = await sequelize.query(
-      'SELECT account_id FROM account WHERE username = :username',
+      'SELECT user_id FROM users WHERE user_name = :username',
       { 
         replacements: { username }, 
         type: QueryTypes.SELECT 
@@ -55,13 +55,20 @@ router.post('/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     
-    // Tạo người dùng mới - INSERT và lấy về user vừa tạo
+    // Get max user_id and increment (workaround for sequence permission issue)
+    const maxIdResult = await sequelize.query(
+      'SELECT COALESCE(MAX(user_id), 0) + 1 as next_id FROM users',
+      { type: QueryTypes.SELECT }
+    );
+    const nextId = (maxIdResult[0] as any).next_id;
+    
+    // Tạo người dùng mới - INSERT với explicit ID
     const result: any = await sequelize.query(
-      `INSERT INTO account (username, email, password, created_at)
-       VALUES (:username, :email, :password, NOW())
-       RETURNING account_id, username, email, created_at`,
+      `INSERT INTO users (user_id, user_name, email, password, created_at, updated_at, is_active, is_banned, is_verified, role)
+       VALUES (:userId, :username, :email, :password, NOW(), NOW(), true, false, false, 'player')
+       RETURNING user_id, user_name, email, created_at`,
       { 
-        replacements: { username, email, password: hashedPassword }, 
+        replacements: { userId: nextId, username, email, password: hashedPassword }, 
         type: QueryTypes.INSERT 
       }
     );
@@ -75,9 +82,9 @@ router.post('/register', async (req, res) => {
     // Tạo JWT token
     const token = jwt.sign(
       { 
-        accountId: newUser.account_id, 
+        accountId: newUser.user_id, 
         email: newUser.email,
-        username: newUser.username
+        username: newUser.user_name
       },
       JWT_SECRET,
       { expiresIn: '7d' }
@@ -88,16 +95,22 @@ router.post('/register', async (req, res) => {
       message: 'Đăng ký thành công!',
       token,
       user: {
-        accountId: newUser.account_id,
-        username: newUser.username,
+        accountId: newUser.user_id,
+        username: newUser.user_name,
         email: newUser.email
       }
     });
   } catch (err) {
     console.error('[Auth] Register error:', err);
+    // Log chi tiết lỗi để debug
+    if (err instanceof Error) {
+      console.error('[Auth] Error message:', err.message);
+      console.error('[Auth] Error stack:', err.stack);
+    }
     res.status(500).json({ 
       success: false,
-      message: 'Lỗi server khi đăng ký.' 
+      message: 'Lỗi server khi đăng ký.',
+      error: process.env.NODE_ENV === 'development' ? (err instanceof Error ? err.message : String(err)) : undefined
     });
   }
 });
@@ -115,7 +128,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const users = await sequelize.query(
-      'SELECT account_id, username, email, password FROM account WHERE email = :email',
+      'SELECT user_id, user_name, email, password FROM users WHERE email = :email',
       { 
         replacements: { email }, 
         type: QueryTypes.SELECT 
@@ -141,12 +154,21 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // Update last_login
+    await sequelize.query(
+      'UPDATE users SET last_login = NOW() WHERE user_id = :userId',
+      {
+        replacements: { userId: user.user_id },
+        type: QueryTypes.UPDATE
+      }
+    );
+
     // Tạo JWT token
     const token = jwt.sign(
       { 
-        accountId: user.account_id, 
+        accountId: user.user_id, 
         email: user.email,
-        username: user.username
+        username: user.user_name
       },
       JWT_SECRET,
       { expiresIn: '7d' }
@@ -157,8 +179,8 @@ router.post('/login', async (req, res) => {
       message: 'Đăng nhập thành công!',
       token,
       user: {
-        accountId: user.account_id,
-        username: user.username,
+        accountId: user.user_id,
+        username: user.user_name,
         email: user.email
       }
     });
@@ -189,7 +211,7 @@ router.get('/verify', async (req, res) => {
     
     // Fetch user from database to ensure they still exist
     const users = await sequelize.query(
-      'SELECT account_id, username, email FROM account WHERE account_id = :accountId',
+      'SELECT user_id, user_name, email FROM users WHERE user_id = :accountId',
       { 
         replacements: { accountId: decoded.accountId }, 
         type: QueryTypes.SELECT 
@@ -208,8 +230,8 @@ router.get('/verify', async (req, res) => {
     res.json({
       success: true,
       user: {
-        accountId: user.account_id,
-        username: user.username,
+        accountId: user.user_id,
+        username: user.user_name,
         email: user.email
       }
     });

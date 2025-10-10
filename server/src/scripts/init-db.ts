@@ -8,29 +8,40 @@ async function initDatabase() {
     await sequelize.authenticate();
     console.log('[DB Init] Connected successfully');
 
-    // Read and execute migration file
-    const migrationPath = path.join(__dirname, '..', 'migrations', '001_create_account_table.sql');
-    const migrationSQL = fs.readFileSync(migrationPath, 'utf-8');
+    // Read and execute migration files in order
+    const migrations = [
+      '001_create_account_table.sql',
+      '002_rename_account_to_users.sql'
+    ];
 
-    console.log('[DB Init] Running account table migration...');
-    await sequelize.query(migrationSQL);
-    console.log('[DB Init] ✅ Account table created/verified');
+    for (const migrationFile of migrations) {
+      const migrationPath = path.join(__dirname, '..', 'migrations', migrationFile);
+      
+      if (fs.existsSync(migrationPath)) {
+        const migrationSQL = fs.readFileSync(migrationPath, 'utf-8');
+        console.log(`[DB Init] Running migration: ${migrationFile}...`);
+        await sequelize.query(migrationSQL);
+        console.log(`[DB Init] ✅ Migration ${migrationFile} completed`);
+      } else {
+        console.log(`[DB Init] ⚠️ Migration file not found: ${migrationFile}`);
+      }
+    }
 
-    // Verify table exists
+    // Verify users table exists
     const [tables] = await sequelize.query(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'account'"
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users'"
     );
     
     if (tables.length > 0) {
-      console.log('[DB Init] ✅ Verified: account table exists');
+      console.log('[DB Init] ✅ Verified: users table exists');
       
       // Show column structure
       const [columns] = await sequelize.query(
-        "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'account' ORDER BY ordinal_position"
+        "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'users' ORDER BY ordinal_position"
       );
-      console.log('[DB Init] Account table structure:', columns);
+      console.log('[DB Init] Users table structure:', columns);
     } else {
-      console.log('[DB Init] ⚠️ Warning: account table not found');
+      console.log('[DB Init] ⚠️ Warning: users table not found');
     }
 
     console.log('[DB Init] ✅ Database initialization complete');
