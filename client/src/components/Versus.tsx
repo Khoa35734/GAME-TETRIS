@@ -137,8 +137,8 @@ const Versus: React.FC = () => {
   
   // Lock delay state
   const [isGrounded, setIsGrounded] = useState(false);
-  const inactivityTimeoutRef = useRef<number | null>(null);
-  const capTimeoutRef = useRef<number | null>(null);
+  const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const capTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const capExpiredRef = useRef<boolean>(false);
   const groundedSinceRef = useRef<number | null>(null);
   const lastGroundActionRef = useRef<number | null>(null);
