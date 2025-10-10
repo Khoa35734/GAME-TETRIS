@@ -157,7 +157,13 @@ const Versus: React.FC = () => {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [isRtcReady, setIsRtcReady] = useState(false);
-  const udpStatsRef = useRef({ sent: 0, received: 0, failed: 0 });
+  const [rtcRetryCount, setRtcRetryCount] = useState(0);
+  const maxRetries = 3;
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const udpStatsRef = useRef({ sent: 0, received: 0, failed: 0, parseErrors: 0 });
+  // ========================================
+  // ⚡ WEBRTC CONNECTION SETUP
+  // ========================================
   const lastSnapshotRef = useRef<number>(0);
   const closingRef = useRef(false);
   
@@ -285,7 +291,7 @@ const Versus: React.FC = () => {
       pcRef.current = null;
     }
 
-    udpStatsRef.current = { sent: 0, received: 0, failed: udpStatsRef.current.failed };
+    udpStatsRef.current = { sent: 0, received: 0, failed: udpStatsRef.current.failed, parseErrors: udpStatsRef.current.parseErrors };
     
     // Small delay before allowing new connections
     setTimeout(() => {
@@ -344,112 +350,184 @@ const Versus: React.FC = () => {
   // ========================================
   
   /**
-   * Send data via UDP if ready, otherwise fallback to TCP
+   * ⚡ Enhanced UDP Send with comprehensive fallback
+   * Supports: snapshot, garbage, input, gamestate, topout
    */
   const sendViaUDP = useCallback((type: string, data: any) => {
     if (isRtcReady && dcRef.current?.readyState === 'open') {
       try {
-        const msg = JSON.stringify({ type, ...data, ts: Date.now() });
+        const msg = JSON.stringify({ 
+          type, 
+          ...data, 
+          ts: Date.now(),
+          from: socket.id 
+        });
         dcRef.current.send(msg);
         udpStatsRef.current.sent++;
+        console.log(`⚡ [UDP] Sent ${type}:`, Object.keys(data).join(', '));
         return true; // Success via UDP
       } catch (err) {
-        console.warn('[UDP] Send failed, fallback to TCP:', err);
+        console.warn(`⚠️ [UDP] Send ${type} failed, fallback to TCP:`, err);
         udpStatsRef.current.failed++;
         return false; // Will fallback to TCP
       }
     }
+    console.log(`📡 [TCP] UDP not ready for ${type}, using TCP fallback`);
     return false; // UDP not ready, use TCP
   }, [isRtcReady]);
 
   /**
-   * Send garbage attack via UDP with TCP fallback
+   * 💣 Send garbage attack via UDP with TCP fallback
    */
   const sendGarbage = useCallback((lines: number) => {
     const sent = sendViaUDP('garbage', { lines });
     if (!sent && roomId) {
       // TCP fallback
+      console.log('📡 [TCP] Sending garbage via Socket.IO:', lines);
       socket.emit('game:attack', roomId, { lines });
     }
   }, [sendViaUDP, roomId]);
 
   /**
-   * Send board snapshot via UDP (periodic sync)
+   * 🎮 Send input (for predictive rendering) via UDP
+   */
+  const sendInput = useCallback((action: string, data?: any) => {
+    const sent = sendViaUDP('input', { action, ...data });
+    if (!sent) {
+      // Input is not critical, no TCP fallback needed
+      console.log('📡 [Input] UDP not available, skipping input send');
+    }
+  }, [sendViaUDP]);
+
+  /**
+   * 🏁 Send topout via UDP with TCP fallback
+   */
+  const sendTopout = useCallback((reason?: string) => {
+    const sent = sendViaUDP('topout', { reason });
+    if (!sent && roomId) {
+      // TCP fallback - critical message
+      console.log('📡 [TCP] Sending topout via Socket.IO:', reason);
+      socket.emit('game:topout', roomId, reason);
+    }
+  }, [sendViaUDP, roomId]);
+
+  /**
+   * 🎯 Send full game state via UDP with TCP fallback
+   */
+  const sendGameState = useCallback((gameState: any) => {
+    const sent = sendViaUDP('gamestate', gameState);
+    if (!sent && roomId) {
+      // TCP fallback
+      console.log('📡 [TCP] Sending game state via Socket.IO');
+      socket.emit('game:state', roomId, gameState);
+    }
+  }, [sendViaUDP, roomId]);
+
+  /**
+   * 📡 Send board snapshot via UDP (periodic sync)
    */
   const sendSnapshot = useCallback(() => {
     const now = Date.now();
     if (now - lastSnapshotRef.current < 500) return; // Max 2 snapshots/sec
     
     lastSnapshotRef.current = now;
-    const sent = sendViaUDP('snapshot', {
+    const snapshotData = {
       matrix: cloneStageForNetwork(stage),
       hold,
       nextFour: nextFour.slice(0, 4),
       combo,
       b2b,
       pendingGarbage: pendingGarbageLeft,
-    });
+    };
     
+    const sent = sendViaUDP('snapshot', snapshotData);
     if (!sent && roomId) {
       // TCP fallback - use existing game:state
-      socket.emit('game:state', roomId, {
-        matrix: cloneStageForNetwork(stage),
-        hold,
-        nextFour: nextFour.slice(0, 4),
-        combo,
-        b2b,
-        pendingGarbage: pendingGarbageLeft,
-      });
+      console.log('📡 [TCP] Sending snapshot via Socket.IO');
+      socket.emit('game:state', roomId, snapshotData);
     }
   }, [sendViaUDP, stage, hold, nextFour, combo, b2b, pendingGarbageLeft, roomId]);
 
   /**
-   * Handle incoming UDP messages
+   * ⚡ Handle incoming UDP messages with comprehensive support
    */
   const handleUDPMessage = useCallback((data: string) => {
     try {
       const msg = JSON.parse(data);
       udpStatsRef.current.received++;
       
+      // Log received message for debugging
+      console.log(`⚡ [UDP] Received ${msg.type} from ${msg.from}`);
+      
       switch (msg.type) {
         case 'input':
-          // Opponent input received (for future predictive rendering)
-          console.log('[UDP] Opponent input:', msg.action);
+          // Opponent input received (for predictive rendering)
+          console.log('🎮 [UDP] Opponent input:', msg.action);
+          // Future: Use for predictive rendering
           break;
           
         case 'garbage':
-          // Fast garbage notification
-          console.log('[UDP] Garbage received:', msg.lines);
-          setIncomingGarbage(prev => prev + msg.lines);
+          // Fast garbage notification via UDP
+          console.log('💣 [UDP] Garbage attack received:', msg.lines);
+          setIncomingGarbage(prev => {
+            const newValue = prev + msg.lines;
+            console.log('💣 [UDP] Updated incoming garbage:', prev, '→', newValue);
+            return newValue;
+          });
           break;
           
         case 'snapshot':
           // Full board state sync via UDP
-          console.log('⚡ [UDP] Snapshot received:', {
+          console.log('📡 [UDP] Board snapshot received:', {
             hasMatrix: !!msg.matrix,
             hasHold: msg.hold !== undefined,
             hasNextFour: !!msg.nextFour,
+            combo: msg.combo,
+            b2b: msg.b2b,
             pendingGarbage: msg.pendingGarbage
           });
+          
           if (msg.matrix) {
             setOppStage(msg.matrix);
-            console.log('⚡ [UDP] Updated opponent board from snapshot');
+            console.log('📡 [UDP] ✅ Updated opponent board from UDP snapshot');
           }
           if (msg.hold !== undefined) setOppHold(msg.hold);
           if (msg.nextFour) setOppNextFour(msg.nextFour);
           if (msg.combo !== undefined || msg.b2b !== undefined) {
-            // Update opponent combo/b2b display if you have it
+            // Future: Update opponent combo/b2b display
+            console.log('📡 [UDP] Opponent stats - Combo:', msg.combo, 'B2B:', msg.b2b);
           }
           if (msg.pendingGarbage !== undefined) {
             setOpponentIncomingGarbage(msg.pendingGarbage);
           }
           break;
           
+        case 'gamestate':
+          // Full game state (similar to snapshot but more comprehensive)
+          console.log('🎯 [UDP] Game state received');
+          if (msg.matrix) setOppStage(msg.matrix);
+          if (msg.hold !== undefined) setOppHold(msg.hold);
+          if (msg.nextFour) setOppNextFour(msg.nextFour);
+          if (msg.combo !== undefined || msg.b2b !== undefined) {
+            console.log('🎯 [UDP] Opponent game state - Combo:', msg.combo, 'B2B:', msg.b2b);
+          }
+          if (msg.pendingGarbage !== undefined) {
+            setOpponentIncomingGarbage(msg.pendingGarbage);
+          }
+          break;
+          
+        case 'topout':
+          // Opponent topped out via UDP
+          console.log('🏁 [UDP] Opponent topout received:', msg.reason);
+          // Note: Server will also send game:over via TCP for reliability
+          break;
+          
         default:
-          console.warn('[UDP] Unknown message type:', msg.type);
+          console.warn('⚠️ [UDP] Unknown message type:', msg.type, msg);
       }
     } catch (err) {
-      console.error('[UDP] Parse error:', err);
+      console.error('❌ [UDP] Parse error:', err, 'Data:', data);
+      udpStatsRef.current.parseErrors = (udpStatsRef.current.parseErrors || 0) + 1;
     }
   }, []);
 
@@ -504,22 +582,28 @@ const Versus: React.FC = () => {
   
   const initWebRTC = useCallback(async (isHost: boolean) => {
     try {
+      console.log('🚨 [DEBUG] initWebRTC called with isHost:', isHost);
+      console.log('🚨 [DEBUG] Current roomId:', roomId);
+      console.log('🚨 [DEBUG] pcRef.current exists:', !!pcRef.current);
+      console.log('🚨 [DEBUG] closingRef.current:', closingRef.current);
+      
       if (pcRef.current) {
-        console.log('[WebRTC] PeerConnection already exists, skipping re-init');
+        console.log('⚠️ [WebRTC] PeerConnection already exists, skipping re-init');
         return;
       }
       
       if (closingRef.current) {
-        console.log('[WebRTC] Cleanup in progress, waiting...');
+        console.log('⏳ [WebRTC] Cleanup in progress, waiting...');
         // Wait for cleanup to complete
         await new Promise(resolve => setTimeout(resolve, 200));
       }
 
-      console.log('[WebRTC] Initializing as', isHost ? 'HOST' : 'PEER');
+      console.log('🚀 [WebRTC] Initializing as', isHost ? 'HOST' : 'PEER');
 
       const pc = createPeerConnection();
 
       if (isHost) {
+        console.log('🏠 [WebRTC] HOST: Creating data channel...');
         // Host creates data channel
         const dc = pc.createDataChannel('tetris', {
           ordered: false, // Unordered for speed
@@ -539,16 +623,16 @@ const Versus: React.FC = () => {
         };
 
         dc.onerror = (err) => {
-          console.error('[WebRTC] Data channel error (host):', err);
+          console.error('❌ [WebRTC] Data channel error (host):', err);
         };
 
         dc.onmessage = (e) => handleUDPMessage(e.data);
 
         // Create offer
-        console.log('[WebRTC] Creating offer...');
+        console.log('📤 [WebRTC] Creating offer...');
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        console.log('[WebRTC] Sending offer to room:', roomId);
+        console.log('📤 [WebRTC] Sending offer to room:', roomId);
         socket.emit('webrtc:offer', { roomId, offer });
         
       } else {
@@ -593,11 +677,13 @@ const Versus: React.FC = () => {
   useEffect(() => {
     const handleOffer = async ({ offer }: any) => {
       try {
-        console.log('[WebRTC] 📥 Received offer, creating answer...');
+        console.log('🚨 [DEBUG] WebRTC offer received');
+        console.log('🚨 [DEBUG] Offer details:', { type: offer?.type, sdp: offer?.sdp?.length });
+        console.log('📥 [WebRTC] Received offer, creating answer...');
         const pc = createPeerConnection();
 
         pc.ondatachannel = (e) => {
-          console.log('[WebRTC] 📨 Data channel received (answerer)');
+          console.log('📨 [WebRTC] Data channel received (answerer)');
           dcRef.current = e.channel;
           
           dcRef.current.onopen = () => {
@@ -611,22 +697,22 @@ const Versus: React.FC = () => {
           };
           
           dcRef.current.onerror = (err) => {
-            console.error('[WebRTC] Data channel error (answerer):', err);
+            console.error('❌ [WebRTC] Data channel error (answerer):', err);
           };
           
           dcRef.current.onmessage = (event) => handleUDPMessage(event.data);
         };
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        console.log('[WebRTC] Remote description set');
+        console.log('✅ [WebRTC] Remote description set');
         
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        console.log('[WebRTC] 📤 Sending answer to room:', roomId);
+        console.log('📤 [WebRTC] Sending answer to room:', roomId);
         socket.emit('webrtc:answer', { roomId, answer });
         
       } catch (err) {
-        console.error('[WebRTC] ❌ Offer handling failed:', err);
+        console.error('❌ [WebRTC] Offer handling failed:', err);
         cleanupWebRTC('offer-error');
       }
     };
@@ -679,40 +765,47 @@ const Versus: React.FC = () => {
   
   useEffect(() => {
     const handleGameStartForWebRTC = ({ opponent }: any) => {
+      console.log('🚨 [DEBUG] handleGameStartForWebRTC called with:', { opponent });
+      console.log('🚨 [DEBUG] Current roomId:', roomId);
+      console.log('🚨 [DEBUG] My socket.id:', socket.id);
+      
       if (!opponent) {
-        console.warn('[WebRTC] No opponent in game:start, skipping WebRTC init');
+        console.warn('❌ [WebRTC] No opponent in game:start, skipping WebRTC init');
         return;
       }
       
       // This logic is now reliable because `opponent` is always a socket.id
       const isHost = (socket.id || '') < opponent;
-      console.log('[WebRTC] 🎮 Game started!');
-      console.log('[WebRTC] My socket.id:', socket.id);
-      console.log('[WebRTC] Opponent socket.id:', opponent);
-      console.log('[WebRTC] I am', isHost ? '🏠 HOST (will create offer)' : '📡 PEER (will receive offer)');
+      console.log('✅ [WebRTC] 🎮 Game started!');
+      console.log('✅ [WebRTC] My socket.id:', socket.id);
+      console.log('✅ [WebRTC] Opponent socket.id:', opponent);
+      console.log('✅ [WebRTC] I am', isHost ? '🏠 HOST (will create offer)' : '📡 PEER (will receive offer)');
 
       // Only cleanup if there's an existing connection
       if (pcRef.current || dcRef.current) {
-        console.log('[WebRTC] Cleaning up previous connection before starting new one');
+        console.log('🔄 [WebRTC] Cleaning up previous connection before starting new one');
         cleanupWebRTC('pre-game-start');
         
         // Wait for cleanup to complete, then init
         setTimeout(() => {
-          console.log('[WebRTC] Starting new connection...');
+          console.log('🚀 [WebRTC] Starting new connection...');
           initWebRTC(isHost);
         }, 300);
       } else {
         // No existing connection, start immediately with small delay for both sides to be ready
+        console.log('🆕 [WebRTC] No existing connection, starting fresh...');
         setTimeout(() => {
-          console.log('[WebRTC] Starting fresh connection...');
+          console.log('🚀 [WebRTC] Starting fresh connection...');
           initWebRTC(isHost);
         }, 500);
       }
     };
 
+    console.log('🎧 [DEBUG] Setting up game:start listener');
     socket.on('game:start', handleGameStartForWebRTC);
 
     return () => {
+      console.log('🔌 [DEBUG] Cleaning up game:start listener');
       socket.off('game:start', handleGameStartForWebRTC);
     };
   }, [initWebRTC, cleanupWebRTC]);
@@ -836,7 +929,8 @@ const Versus: React.FC = () => {
         // User is AFK - send topout with 'afk' reason
         console.log('⏰ AFK timeout - sending topout');
         if (roomId) {
-          socket.emit('game:topout', roomId, 'afk');
+          console.log('📤 Sending topout (AFK) via UDP/TCP');
+          sendTopout('afk');
         }
       }, AFK_TIMEOUT_MS);
     }
@@ -896,7 +990,10 @@ const Versus: React.FC = () => {
       if (afkTimeoutRef.current) clearTimeout(afkTimeoutRef.current);
       afkTimeoutRef.current = window.setTimeout(() => {
         console.log('⏰ AFK timeout - sending topout');
-        if (roomId) socket.emit('game:topout', roomId, 'afk');
+        if (roomId) {
+          console.log('📤 Sending topout (AFK) via UDP/TCP');
+          sendTopout('afk');
+        }
       }, AFK_TIMEOUT_MS);
     }
   }, [roomId, clearHold, setLevel, setRows, setStage, resetPlayer, setMatchResult]);
@@ -1106,12 +1203,36 @@ const Versus: React.FC = () => {
         // ✅ Xóa hàng rác chờ sau khi đã nhận
         setIncomingGarbage(0);
 
+        // 🔧 FIX: Adjust player position if it overlaps with new garbage
+        if (updated && !gameOver) {
+          // Check if current player position collides with updated stage
+          if (checkCollision(player, updated, { x: 0, y: 0 })) {
+            console.log('⚠️ Player position overlaps with garbage, adjusting...');
+            // Try to move player down until no collision
+            let adjustY = 1;
+            while (checkCollision(player, updated, { x: 0, y: adjustY }) && adjustY < 10) {
+              adjustY++;
+            }
+            if (!checkCollision(player, updated, { x: 0, y: adjustY })) {
+              console.log(`✅ Adjusted player position down by ${adjustY} rows`);
+              updatePlayerPos({ x: 0, y: adjustY, collided: false });
+            } else {
+              console.log('❌ Could not find valid position for player after garbage application');
+              // Force lock if can't adjust
+              setLocking(true);
+            }
+          }
+        }
+
         if (updated && isGameOverFromBuffer(updated)) {
           console.log('⚠️ Game over from garbage!');
           setGameOver(true);
           setDropTime(null);
           setTimerOn(false);
-          if (roomId) socket.emit('game:topout', roomId);
+          if (roomId) {
+            console.log('📤 Sending topout (garbage overflow) via UDP/TCP');
+            sendTopout('garbage');
+          }
         }
       }
     };
@@ -1122,11 +1243,36 @@ const Versus: React.FC = () => {
       console.log('🗑️ [LEGACY] Received garbage:', g);
       if (g > 0 && !gameOver) {
         const updated = await applyGarbageRows(g);
+
+        // 🔧 FIX: Adjust player position if it overlaps with new garbage
+        if (updated && !gameOver) {
+          // Check if current player position collides with updated stage
+          if (checkCollision(player, updated, { x: 0, y: 0 })) {
+            console.log('⚠️ [LEGACY] Player position overlaps with garbage, adjusting...');
+            // Try to move player down until no collision
+            let adjustY = 1;
+            while (checkCollision(player, updated, { x: 0, y: adjustY }) && adjustY < 10) {
+              adjustY++;
+            }
+            if (!checkCollision(player, updated, { x: 0, y: adjustY })) {
+              console.log(`✅ [LEGACY] Adjusted player position down by ${adjustY} rows`);
+              updatePlayerPos({ x: 0, y: adjustY, collided: false });
+            } else {
+              console.log('❌ [LEGACY] Could not find valid position for player after garbage application');
+              // Force lock if can't adjust
+              setLocking(true);
+            }
+          }
+        }
+
         if (updated && isGameOverFromBuffer(updated)) {
           setGameOver(true);
           setDropTime(null);
           setTimerOn(false);
-          if (roomId) socket.emit('game:topout', roomId);
+          if (roomId) {
+            console.log('📤 Sending topout (legacy garbage overflow) via UDP/TCP');
+            sendTopout('garbage');
+          }
         }
       }
     };
@@ -1374,6 +1520,9 @@ const Versus: React.FC = () => {
       const dir = keyCode === 37 ? -1 : 1;
       if (e.repeat) return;
       
+      // Send input via UDP for predictive rendering
+      sendInput('move', { direction: dir });
+      
       // Start DAS intent
       setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
       
@@ -1384,27 +1533,33 @@ const Versus: React.FC = () => {
       }
     } else if (keyCode === 40) { // Down
       if (!e.repeat) {
+        sendInput('soft_drop');
         setDropTime(MOVE_INTERVAL);
       }
     } else if (keyCode === 38 || keyCode === 88) { // Up arrow or X (Rotate CW)
+      sendInput('rotate', { direction: 1 });
       playerRotateSRS(1);
       if (isGrounded) {
         onGroundAction();
       }
     } else if (keyCode === 90 || keyCode === 17) { // Z or Ctrl (Rotate CCW)
+      sendInput('rotate', { direction: -1 });
       playerRotateSRS(-1);
       if (isGrounded) {
         onGroundAction();
       }
     } else if (ENABLE_180_ROTATION && keyCode === 65) { // A (Rotate 180°)
+      sendInput('rotate', { direction: 2 });
       playerRotateSRS(2);
       if (isGrounded) {
         onGroundAction();
       }
     } else if (keyCode === 32) { // Space (Hard Drop)
+      sendInput('hard_drop');
       hardDrop();
     } else if (keyCode === 67) { // C (Hold)
       if (!hasHeld && canHold) {
+        sendInput('hold');
         holdSwap();
         setHasHeld(true);
         setRotationState(0); // 🎮 Reset rotation state on hold
@@ -1582,8 +1737,8 @@ const Versus: React.FC = () => {
         setDropTime(null);
         setTimerOn(false);
         if (roomId) {
-          console.log('📤 Sending game:topout (board overflow) to room:', roomId);
-          socket.emit('game:topout', roomId);
+          console.log('📤 Sending topout (board overflow) via UDP/TCP');
+          sendTopout('topout');
         }
         return;
     }
@@ -1671,8 +1826,8 @@ const Versus: React.FC = () => {
         onClick={() => {
           console.log('🚪 Exit button clicked:', { roomId, matchResult });
           if (roomId && matchResult === null) {
-            console.log('📤 Sending game:topout (manual exit)');
-            socket.emit('game:topout', roomId);
+            console.log('📤 Sending topout (manual exit) via UDP/TCP');
+            sendTopout('manual_exit');
           }
           if (meId) socket.emit('ranked:leave', meId);
           if (autoExitTimerRef.current) {
@@ -1706,7 +1861,7 @@ const Versus: React.FC = () => {
             alignItems: 'center',
             gap: 6,
           }}
-          title={`Sent: ${udpStatsRef.current.sent} | Received: ${udpStatsRef.current.received} | Failed: ${udpStatsRef.current.failed}`}
+          title={`UDP Stats - Sent: ${udpStatsRef.current.sent} | Received: ${udpStatsRef.current.received} | Failed: ${udpStatsRef.current.failed} | Parse Errors: ${udpStatsRef.current.parseErrors}`}
         >
           <span style={{ fontSize: 14 }}>{isRtcReady ? '⚡' : '📶'}</span>
           {isRtcReady ? 'UDP Active' : 'TCP Mode'}
