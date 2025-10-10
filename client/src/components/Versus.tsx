@@ -785,14 +785,14 @@ const Versus: React.FC = () => {
     clearInactivity();
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
-    }, INACTIVITY_LOCK_MS) as unknown as number;
+    }, INACTIVITY_LOCK_MS);
 
     if (!groundedSinceRef.current) {
       groundedSinceRef.current = Date.now();
       capTimeoutRef.current = setTimeout(() => {
         capExpiredRef.current = true;
         doLock();
-      }, HARD_CAP_MS) as unknown as number;
+      }, HARD_CAP_MS);
     }
   }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
@@ -811,7 +811,7 @@ const Versus: React.FC = () => {
     }
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
-    }, INACTIVITY_LOCK_MS) as unknown as number;
+    }, INACTIVITY_LOCK_MS);
   }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
   useEffect(() => {

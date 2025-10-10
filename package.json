@@ -3,12 +3,15 @@
     "@types/react": "^19.1.10",
     "@types/redis": "^4.0.10",
     "@types/sequelize": "^4.28.20",
+    "bcrypt": "^6.0.0",
+    "jsonwebtoken": "^9.0.2",
     "react": "^19.1.1",
     "redis": "^5.8.3",
     "sequelize": "^6.37.7",
     "styled-components": "^6.1.19"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "concurrently": "^8.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
