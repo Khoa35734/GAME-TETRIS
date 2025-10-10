@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { STAGE_WIDTH, checkCollision } from "../gamehelper";
 import { TETROMINOES } from "../components/tetrominos";
 import type { Stage, CellValue } from "./useStage";
@@ -33,7 +33,9 @@ export const usePlayer = (): [
   () => void,     // clearHold
   // server sync helpers
   (seed: TType[]) => void,
-  (more: TType[]) => void
+  (more: TType[]) => void,
+  // SRS support
+  React.Dispatch<React.SetStateAction<Player>>  // setPlayer for direct updates
 ] => {
   const { nextN, popNext, setSeed, pushMany } = useQueue(5); // 5 khối hiển thị
 
@@ -174,5 +176,6 @@ export const usePlayer = (): [
     clearHold,
     setSeed,
     pushMany,
+    setPlayer, // 🎮 Exposed for SRS rotation
   ];
 };

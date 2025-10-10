@@ -102,10 +102,8 @@ const Tetris: React.FC = () => {
   // progress not exposed to UI; animation drives stage directly
   const whiteoutRaf = useRef<number | null>(null);
 
-  // AFK Warning System (5 giây không nhấn phím) - DISABLED FOR TESTING
-  const [showAFKWarning, setShowAFKWarning] = useState(false);
+  // AFK Warning System - DISABLED FOR TESTING (removed unused state)
   const afkTimeoutRef = useRef<number | null>(null);
-  const lastKeyPressRef = useRef<number>(Date.now());
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -238,29 +236,12 @@ const Tetris: React.FC = () => {
     inactivityTimeoutRef.current = window.setTimeout(() => doLock(), INACTIVITY_LOCK_MS);
   };
 
-  // AFK Timer Management - DISABLED FOR TESTING
+  // AFK Timer Management - DISABLED FOR TESTING (removed)
   const clearAFKTimer = () => {
     if (afkTimeoutRef.current) {
       clearTimeout(afkTimeoutRef.current);
       afkTimeoutRef.current = null;
     }
-  };
-
-  const resetAFKTimer = () => {
-    clearAFKTimer();
-    lastKeyPressRef.current = Date.now();
-    
-    // DISABLED: Không start AFK timer để test garbage mechanics
-    /*
-    // Chỉ start AFK timer khi game đang chơi (không countdown, không game over, không warning)
-    if (countdown === null && !gameOver && !startGameOverSequence && !showAFKWarning) {
-      afkTimeoutRef.current = window.setTimeout(() => {
-        // 5 giây không nhấn phím → hiện warning và pause game
-        setShowAFKWarning(true);
-        setDropTime(null); // Pause game
-      }, 5000);
-    }
-    */
   };
 
   const drop = (): void => {
@@ -304,19 +285,8 @@ const Tetris: React.FC = () => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    // Reset AFK timer khi có bất kỳ phím nào được nhấn - DISABLED
-    /*
-    if (showAFKWarning) {
-      // Đang hiện warning → nhấn phím bất kỳ để resume
-      setShowAFKWarning(false);
-      setDropTime(getFallSpeed(level)); // Resume game
-      resetAFKTimer();
-      return;
-    }
-    */
+    // AFK warning system disabled for testing
     
-    // resetAFKTimer(); // DISABLED - Reset AFK mỗi khi nhấn phím
-
     if (gameOver || startGameOverSequence || countdown !== null) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
@@ -535,18 +505,11 @@ const Tetris: React.FC = () => {
   // Dọn dẹp khi unmount
   useEffect(() => () => { clearInactivity(); clearCap(); clearAFKTimer(); }, []);
 
-  // AFK Timer: Bắt đầu khi game start, reset khi có input - DISABLED FOR TESTING
+  // AFK Timer cleanup on unmount - DISABLED FOR TESTING
   useEffect(() => {
-    /*
-    if (countdown === null && !gameOver && !startGameOverSequence && !showAFKWarning) {
-      resetAFKTimer();
-    } else {
-      clearAFKTimer();
-    }
-    */
     // Cleanup on unmount or state change
     return () => clearAFKTimer();
-  }, [countdown, gameOver, startGameOverSequence, showAFKWarning]);
+  }, [countdown, gameOver, startGameOverSequence]);
 
   return (
     <StyledTetrisWrapper
@@ -674,60 +637,6 @@ const Tetris: React.FC = () => {
           }}
         >
           {countdown}
-        </div>
-      )}
-
-      {/* AFK Warning Overlay */}
-      {showAFKWarning && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 1000,
-            animation: 'fadeIn 0.3s ease-out'
-          }}
-        >
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(30, 10, 10, 0.95) 100%)',
-              border: '3px solid #ff4444',
-              borderRadius: 16,
-              padding: '40px 60px',
-              textAlign: 'center',
-              boxShadow: '0 20px 60px rgba(255, 68, 68, 0.5), inset 0 0 40px rgba(255, 68, 68, 0.1)',
-              animation: 'pulse 2s ease-in-out infinite'
-            }}
-          >
-            <div
-              style={{
-                fontSize: '3rem',
-                fontWeight: 800,
-                color: '#ff4444',
-                textShadow: '0 0 20px rgba(255, 68, 68, 0.8), 0 4px 12px rgba(0, 0, 0, 0.6)',
-                marginBottom: '24px',
-                letterSpacing: '4px'
-              }}
-            >
-              ⚠️ WARNING ⚠️
-            </div>
-            <div
-              style={{
-                fontSize: '1.3rem',
-                color: '#fff',
-                fontWeight: 600,
-                lineHeight: 1.6,
-                textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)'
-              }}
-            >
-              Bạn đang AFK!<br />
-              Nhấn phím bất kỳ để tiếp tục trận đấu
-            </div>
-          </div>
         </div>
       )}
     </StyledTetrisWrapper>

@@ -8,6 +8,7 @@ type Player = {
   name: string | null;
   ready: boolean;
   alive: boolean;
+  ping?: number | null;
 };
 
 type ChatMessage = {
@@ -31,6 +32,8 @@ const RoomLobby: React.FC = () => {
   const [isReady, setIsReady] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [identityReady, setIdentityReady] = useState(false);
+  const [myPing, setMyPing] = useState<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!roomId) {
@@ -82,6 +85,30 @@ const RoomLobby: React.FC = () => {
     resolveIdentity();
   }, []);
 
+  // Ping tracking
+  useEffect(() => {
+    // Measure ping every 2 seconds
+    pingIntervalRef.current = window.setInterval(() => {
+      const timestamp = Date.now();
+      socket.emit('ping', timestamp);
+    }, 2000);
+
+    const onPong = (timestamp?: number) => {
+      if (timestamp) {
+        const ping = Date.now() - timestamp;
+        setMyPing(ping);
+        // Send ping to server so it can broadcast to others
+        socket.emit('client:ping', ping);
+      }
+    };
+    socket.on('pong', onPong);
+
+    return () => {
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      socket.off('pong', onPong);
+    };
+  }, []);
+
   useEffect(() => {
     if (!roomId) {
       setError('ID phòng không hợp lệ');
@@ -105,6 +132,11 @@ const RoomLobby: React.FC = () => {
       setChatMessages((prev) => [...prev, data]);
     };
 
+    const onGameStarting = () => {
+      console.log('[RoomLobby] 🎮 Game starting signal received, navigating to versus...');
+      navigate(`/versus/${roomId}`);
+    };
+
     const requestSync = () => {
       if (!roomId) return;
       socket.emit('room:sync', roomId, (payload: any) => {
@@ -122,6 +154,7 @@ const RoomLobby: React.FC = () => {
 
     socket.on('room:update', onRoomUpdate);
     socket.on('room:chat', onRoomChat);
+    socket.on('game:starting', onGameStarting); // Listen for game:starting instead of game:start
 
     if (!hasJoinedRef.current) {
       const nameToUse = displayName || 'Guest';
@@ -171,6 +204,7 @@ const RoomLobby: React.FC = () => {
     return () => {
       socket.off('room:update', onRoomUpdate);
       socket.off('room:chat', onRoomChat);
+      socket.off('game:starting', onGameStarting); // Clean up game:starting listener
       if (hasJoinedRef.current && roomId) {
         socket.emit('room:leave', roomId);
         hasJoinedRef.current = false;
@@ -198,7 +232,15 @@ const RoomLobby: React.FC = () => {
 
   const startGame = () => {
     if (!roomId || host !== socket.id) return;
-    socket.emit('game:start', roomId);
+    console.log('[RoomLobby] Host starting game for room:', roomId);
+    socket.emit('room:startGame', roomId, (result: any) => {
+      if (result?.ok) {
+        console.log('[RoomLobby] Game start acknowledged by server, waiting for game:start event...');
+      } else {
+        console.error('[RoomLobby] Failed to start game:', result?.error);
+        setError(result?.error || 'Không thể bắt đầu trận đấu');
+      }
+    });
   };
 
   if (error) {
@@ -214,7 +256,19 @@ const RoomLobby: React.FC = () => {
   }
 
   const isHost = host === socket.id;
-  const canStart = isHost && players.length >= 2 && players.every((p) => p.ready);
+  // Chủ phòng không cần ready, chỉ check người chơi khác (non-host)
+  const nonHostPlayers = players.filter(p => p.id !== host);
+  const allNonHostReady = nonHostPlayers.every((p) => p.ready);
+  const canStart = isHost && players.length >= 2 && allNonHostReady;
+  
+  console.log('[RoomLobby] canStart check:', {
+    isHost,
+    playersCount: players.length,
+    nonHostPlayers: nonHostPlayers.length,
+    allNonHostReady,
+    canStart,
+    players: players.map(p => ({ id: p.id.slice(0, 8), ready: p.ready, isHost: p.id === host }))
+  });
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000', color: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -251,6 +305,16 @@ const RoomLobby: React.FC = () => {
                     {p.ready && <span style={{ color: '#4ecdc4' }}>✓ Sẵn sàng</span>}
                     {!p.ready && <span style={{ color: '#888' }}>⏳ Chưa sẵn sàng</span>}
                   </div>
+                  {typeof p.ping === 'number' && (
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+                      📶 Ping: {p.ping}ms
+                    </div>
+                  )}
+                  {isMe && typeof myPing === 'number' && (
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+                      📶 Ping: {myPing}ms
+                    </div>
+                  )}
                 </div>
               );
             })}
