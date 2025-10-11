@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService, type AuthResponse } from "../services/authService";
 import SettingsPage from './SettingsPage';
+import FriendsManager from './FriendsManager';
 
 interface User {
   username: string;
@@ -32,8 +33,13 @@ const HomeMenu: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState("");
   const [showGameModes, setShowGameModes] = useState<boolean>(() => !!localStorage.getItem('tetris:user'));
   const [showSettings, setShowSettings] = useState(false);
+  const [showFriends, setShowFriends] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
+
+  // Background music
+  const bgMusicRef = useRef<HTMLAudioElement | null>(null);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
 
   // Player stats (mặc định)
   const [playerStats] = useState(() => {
@@ -253,6 +259,61 @@ const HomeMenu: React.FC = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [currentUser, activeTab, loading]);
 
+  // Background music effect
+  useEffect(() => {
+    // Initialize audio
+    if (!bgMusicRef.current) {
+      const audio = new Audio('/sound/bg.mp3');
+      audio.loop = true;
+      audio.volume = 0.3; // Set volume to 30%
+      bgMusicRef.current = audio;
+    }
+
+    // Auto-play music on mount (with user interaction fallback)
+    const playMusic = async () => {
+      try {
+        await bgMusicRef.current?.play();
+        setIsMusicPlaying(true);
+      } catch (error) {
+        console.log('Autoplay prevented, waiting for user interaction');
+        // Add click listener to start music on first user interaction
+        const startMusic = async () => {
+          try {
+            await bgMusicRef.current?.play();
+            setIsMusicPlaying(true);
+            document.removeEventListener('click', startMusic);
+          } catch (e) {
+            console.error('Failed to play music:', e);
+          }
+        };
+        document.addEventListener('click', startMusic, { once: true });
+      }
+    };
+
+    playMusic();
+
+    // Cleanup: pause music when component unmounts
+    return () => {
+      if (bgMusicRef.current) {
+        bgMusicRef.current.pause();
+        bgMusicRef.current.currentTime = 0;
+      }
+    };
+  }, []);
+
+  // Toggle music function
+  const toggleMusic = () => {
+    if (bgMusicRef.current) {
+      if (isMusicPlaying) {
+        bgMusicRef.current.pause();
+        setIsMusicPlaying(false);
+      } else {
+        bgMusicRef.current.play();
+        setIsMusicPlaying(true);
+      }
+    }
+  };
+
   // Game Mode Component
   const GameModeCard: React.FC<GameModeProps> = ({ icon, title, description, locked, lockedReason, onClick }) => (
     <div
@@ -465,8 +526,83 @@ const HomeMenu: React.FC = () => {
             </div>
           </div>
 
-          {/* Right side - Leaderboard, Settings & Logout */}
+          {/* Right side - Music, Leaderboard, Settings & Logout */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Music Toggle Button */}
+            <button
+              onClick={toggleMusic}
+              style={{
+                background: isMusicPlaying 
+                  ? 'rgba(78, 205, 196, 0.15)' 
+                  : 'rgba(255, 107, 107, 0.15)',
+                border: isMusicPlaying
+                  ? '1px solid rgba(78, 205, 196, 0.4)'
+                  : '1px solid rgba(255, 107, 107, 0.4)',
+                color: isMusicPlaying ? '#4ecdc4' : '#ff6b6b',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                if (isMusicPlaying) {
+                  e.currentTarget.style.background = 'rgba(78, 205, 196, 0.25)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(78, 205, 196, 0.4)';
+                } else {
+                  e.currentTarget.style.background = 'rgba(255, 107, 107, 0.25)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 107, 107, 0.4)';
+                }
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                if (isMusicPlaying) {
+                  e.currentTarget.style.background = 'rgba(78, 205, 196, 0.15)';
+                } else {
+                  e.currentTarget.style.background = 'rgba(255, 107, 107, 0.15)';
+                }
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              {isMusicPlaying ? '🎵 Nhạc' : '🔇 Nhạc'}
+            </button>
+
+            {/* Friends Button */}
+            <button
+              onClick={() => setShowFriends(true)}
+              style={{
+                background: 'rgba(156, 39, 176, 0.15)',
+                border: '1px solid rgba(156, 39, 176, 0.4)',
+                color: '#ba68c8',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(156, 39, 176, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(156, 39, 176, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(156, 39, 176, 0.15)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              👥 Bạn bè
+            </button>
+
             {/* Leaderboard Button */}
             <button
               onClick={() => setShowLeaderboard(true)}
@@ -1348,6 +1484,22 @@ const HomeMenu: React.FC = () => {
           }}
         >
           <SettingsPage onBack={() => setShowSettings(false)} />
+        </div>
+      )}
+
+      {/* Friends Modal/Page */}
+      {showFriends && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.9)',
+            backdropFilter: 'blur(10px)',
+            zIndex: 2000,
+            overflowY: 'auto'
+          }}
+        >
+          <FriendsManager onBack={() => setShowFriends(false)} />
         </div>
       )}
 

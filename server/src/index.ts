@@ -10,7 +10,9 @@ import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRan
 import { initPostgres } from './postgres';
 import authRouter from './routes/auth';
 import settingsRouter from './routes/settings';
+import friendsRouter from './routes/friends';
 import { matchManager, MatchData, PlayerMatchState } from './matchManager';
+import { setupFriendshipAssociations } from './models/Friendship';
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces for LAN access
@@ -31,6 +33,7 @@ function normalizeIp(ip: string | undefined | null): string {
 app.use(cors());
 app.use('/api/auth', authRouter); // Mount auth routes
 app.use('/api/settings', settingsRouter); // Mount settings routes
+app.use('/api/friends', friendsRouter); // Mount friends routes
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/whoami', (req, res) => {
   // Express req.ip returns remote address (e.g., ::ffff:192.168.1.10)
@@ -177,7 +180,13 @@ const matchGenerators = new Map<string, Generator<TType, any, any>>();
 const playerPings = new Map<string, { ping: number; lastUpdate: number }>();
 
 initRedis().catch(err => console.error('[redis] init failed', err));
-initPostgres().catch(err => console.error('[postgres] init skipped/failed', err));
+initPostgres()
+  .then(() => {
+    // Setup Sequelize associations after models are loaded
+    setupFriendshipAssociations();
+    console.log('[postgres] Friendship associations setup complete');
+  })
+  .catch(err => console.error('[postgres] init skipped/failed', err));
 
 io.on('connection', (socket) => {
   // Map this socket to client IP
