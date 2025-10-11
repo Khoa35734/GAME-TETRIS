@@ -9,6 +9,7 @@ import { Server } from 'socket.io';
 import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch } from './redisStore';
 import { initPostgres } from './postgres';
 import authRouter from './routes/auth';
+import settingsRouter from './routes/settings';
 import { matchManager, MatchData, PlayerMatchState } from './matchManager';
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -29,6 +30,7 @@ function normalizeIp(ip: string | undefined | null): string {
 }
 app.use(cors());
 app.use('/api/auth', authRouter); // Mount auth routes
+app.use('/api/settings', settingsRouter); // Mount settings routes
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/whoami', (req, res) => {
   // Express req.ip returns remote address (e.g., ::ffff:192.168.1.10)
