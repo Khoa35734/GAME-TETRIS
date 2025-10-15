@@ -1,12 +1,14 @@
 import axios from 'axios';
+import { getApiBaseUrl } from './apiConfig';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const getApiUrl = () => getApiBaseUrl();
 
 export interface Friend {
   userId: number;
   username: string;
   email: string;
   createdAt: string;
+  isOnline?: boolean; // Online status
 }
 
 export interface FriendRequest {
@@ -29,7 +31,6 @@ const getAuthToken = (): string | null => {
   return localStorage.getItem('tetris:token');
 };
 
-// Lấy danh sách bạn bè
 export const getFriends = async (): Promise<{ success: boolean; friends?: Friend[]; message?: string }> => {
   try {
     const token = getAuthToken();
@@ -37,7 +38,7 @@ export const getFriends = async (): Promise<{ success: boolean; friends?: Friend
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get(`${API_BASE_URL}/friends`, {
+    const response = await axios.get(`${getApiUrl()}/friends`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -51,7 +52,6 @@ export const getFriends = async (): Promise<{ success: boolean; friends?: Friend
   }
 };
 
-// Lấy danh sách lời mời kết bạn
 export const getFriendRequests = async (): Promise<{
   success: boolean;
   incoming?: FriendRequest[];
@@ -64,7 +64,7 @@ export const getFriendRequests = async (): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get(`${API_BASE_URL}/friends/requests`, {
+    const response = await axios.get(`${getApiUrl()}/friends/requests`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -78,7 +78,6 @@ export const getFriendRequests = async (): Promise<{
   }
 };
 
-// Tìm user theo user_id
 export const searchUser = async (userId: number): Promise<{
   success: boolean;
   user?: SearchResult;
@@ -91,7 +90,7 @@ export const searchUser = async (userId: number): Promise<{
     }
 
     const response = await axios.post(
-      `${API_BASE_URL}/friends/search`,
+      `${getApiUrl()}/friends/search`,
       { userId },
       {
         headers: { Authorization: `Bearer ${token}` },
@@ -108,7 +107,6 @@ export const searchUser = async (userId: number): Promise<{
   }
 };
 
-// Gửi lời mời kết bạn
 export const sendFriendRequest = async (friendId: number): Promise<{
   success: boolean;
   message?: string;
@@ -120,7 +118,7 @@ export const sendFriendRequest = async (friendId: number): Promise<{
     }
 
     const response = await axios.post(
-      `${API_BASE_URL}/friends/request`,
+      `${getApiUrl()}/friends/request`,
       { friendId },
       {
         headers: { Authorization: `Bearer ${token}` },
@@ -137,7 +135,6 @@ export const sendFriendRequest = async (friendId: number): Promise<{
   }
 };
 
-// Chấp nhận lời mời kết bạn
 export const acceptFriendRequest = async (friendId: number): Promise<{
   success: boolean;
   message?: string;
@@ -149,7 +146,7 @@ export const acceptFriendRequest = async (friendId: number): Promise<{
     }
 
     const response = await axios.post(
-      `${API_BASE_URL}/friends/accept`,
+      `${getApiUrl()}/friends/accept`,
       { friendId },
       {
         headers: { Authorization: `Bearer ${token}` },
@@ -166,7 +163,6 @@ export const acceptFriendRequest = async (friendId: number): Promise<{
   }
 };
 
-// Từ chối lời mời kết bạn
 export const rejectFriendRequest = async (friendId: number): Promise<{
   success: boolean;
   message?: string;
@@ -178,7 +174,7 @@ export const rejectFriendRequest = async (friendId: number): Promise<{
     }
 
     const response = await axios.post(
-      `${API_BASE_URL}/friends/reject`,
+      `${getApiUrl()}/friends/reject`,
       { friendId },
       {
         headers: { Authorization: `Bearer ${token}` },
@@ -195,7 +191,6 @@ export const rejectFriendRequest = async (friendId: number): Promise<{
   }
 };
 
-// Xóa bạn bè
 export const removeFriend = async (friendId: number): Promise<{
   success: boolean;
   message?: string;
@@ -206,7 +201,7 @@ export const removeFriend = async (friendId: number): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.delete(`${API_BASE_URL}/friends/${friendId}`, {
+    const response = await axios.delete(`${getApiUrl()}/friends/${friendId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 

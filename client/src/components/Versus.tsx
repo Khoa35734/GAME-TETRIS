@@ -1974,7 +1974,7 @@ const Versus: React.FC = () => {
                 borderRadius: '8px',
                 boxShadow: '0 0 20px rgba(78, 205, 196, 0.5), inset 0 0 10px rgba(78, 205, 196, 0.1)',
                 padding: '4px',
-                background: 'rgba(78, 205, 196, 0.05)'
+                background: 'transparent'
               }}>
                 <Stage stage={stage} />
               </div>
@@ -2032,7 +2032,7 @@ const Versus: React.FC = () => {
                 borderRadius: '8px',
                 boxShadow: '0 0 20px rgba(255, 107, 107, 0.5), inset 0 0 10px rgba(255, 107, 107, 0.1)',
                 padding: '4px',
-                background: 'rgba(255, 107, 107, 0.05)'
+                background: 'transparent'
               }}>
                 <Stage stage={(netOppStage as any) ?? oppStage} />
               </div>

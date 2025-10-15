@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { authService, type AuthResponse } from "../services/authService";
 import SettingsPage from './SettingsPage';
 import FriendsManager from './FriendsManager';
+import ConnectionDebug from './ConnectionDebug'; // Debug tool
+import ProfileModal from './ProfileModal'; // Profile modal
+import socket from '../socket'; // Import socket để gửi authentication
 
 interface User {
   username: string;
@@ -35,6 +38,8 @@ const HomeMenu: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showDebug, setShowDebug] = useState(false); // Debug panel
+  const [showProfile, setShowProfile] = useState(false); // Profile modal
   const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
 
   // Background music
@@ -117,6 +122,10 @@ const HomeMenu: React.FC = () => {
         setCurrentUser(user);
         setShowGameModes(true);
         setLoginForm({ email: "", password: "" });
+
+        // [THÊM MỚI] Gửi authentication đến server để track online status
+        console.log('🔐 [Login] Authenticating socket with accountId:', result.user.accountId);
+        socket.emit('user:authenticate', result.user.accountId);
       } else {
         setError(result.message || "Đăng nhập thất bại!");
       }
@@ -174,6 +183,10 @@ const HomeMenu: React.FC = () => {
         setCurrentUser(user);
         setShowGameModes(true);
         setRegisterForm({ username: "", email: "", password: "", confirmPassword: "" });
+
+        // [THÊM MỚI] Gửi authentication đến server để track online status
+        console.log('🔐 [Register] Authenticating socket with accountId:', result.user.accountId);
+        socket.emit('user:authenticate', result.user.accountId);
       } else {
         setError(result.message || "Đăng ký thất bại!");
       }
@@ -220,7 +233,7 @@ const HomeMenu: React.FC = () => {
           currentUser.isGuest ? "Khách" : "Đã đăng nhập"
         }`
       );
-      navigate("/single");
+      navigate("/single/settings");
     }
   };
 
@@ -252,6 +265,11 @@ const HomeMenu: React.FC = () => {
       }
       if (e.key === "Escape" && currentUser) {
         logout();
+      }
+      // Toggle debug panel with Ctrl+D
+      if (e.ctrlKey && e.key === "d") {
+        e.preventDefault();
+        setShowDebug((prev) => !prev);
       }
     };
 
@@ -430,6 +448,7 @@ const HomeMenu: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
             {/* Avatar */}
             <div
+              onClick={() => setShowProfile(true)}
               style={{
                 width: 50, height: 50,
                 borderRadius: '50%',
@@ -439,7 +458,17 @@ const HomeMenu: React.FC = () => {
                 fontWeight: 'bold',
                 color: '#fff',
                 border: '2px solid #4ecdc4',
-                boxShadow: '0 0 15px rgba(78, 205, 196, 0.5)'
+                boxShadow: '0 0 15px rgba(78, 205, 196, 0.5)',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+                e.currentTarget.style.boxShadow = '0 0 25px rgba(78, 205, 196, 0.8)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = '0 0 15px rgba(78, 205, 196, 0.5)';
               }}
             >
               {currentUser.username.charAt(0).toUpperCase()}
@@ -1410,15 +1439,15 @@ const HomeMenu: React.FC = () => {
               <div>
                 <h1
                   style={{
-                    fontSize: "2rem",
+                    fontSize: "3rem",
                     fontWeight: "bold",
                     marginBottom: "30px",
                     textTransform: "uppercase",
-                    letterSpacing: "1px",
+                    letterSpacing: "2px",
                     textAlign: "center",
-                    fontFamily: "'Press Start 2P', cursive",
+                    fontFamily: "'SVN-Determination Sans', 'Press Start 2P', cursive",
                     color: "#eb2614ff",
-                    textShadow: "0 0 10px #c91e0fff, 0 0 20px #ff6b6b",
+                    textShadow: "0 0 15px #c91e0fff, 0 0 30px #ff6b6b",
                     animation: "pulse 2s infinite",
                   }}
                 >
@@ -1443,7 +1472,7 @@ const HomeMenu: React.FC = () => {
                     description="Chơi 1v1 với người chơi khác trực tuyến"
                     locked={isGuest}
                     lockedReason={guestLockReason}
-                    onClick={() => navigate('/online/ranked')}
+                    onClick={() => navigate('/online/casual')}
                   />
                   <GameModeCard
                     icon="👥"
@@ -1487,21 +1516,8 @@ const HomeMenu: React.FC = () => {
         </div>
       )}
 
-      {/* Friends Modal/Page */}
-      {showFriends && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.9)',
-            backdropFilter: 'blur(10px)',
-            zIndex: 2000,
-            overflowY: 'auto'
-          }}
-        >
-          <FriendsManager onBack={() => setShowFriends(false)} />
-        </div>
-      )}
+      {/* Friends Sidebar - Slides from right */}
+      {showFriends && <FriendsManager onBack={() => setShowFriends(false)} />}
 
       {/* Leaderboard Modal */}
       {showLeaderboard && (
@@ -1771,6 +1787,13 @@ const HomeMenu: React.FC = () => {
       {/* CSS Animation Styles */}
       <style>
         {`
+          @font-face {
+            font-family: 'SVN-Determination Sans';
+            src: url('/Font/SVN-Determination-Sans.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+          }
+          
           @keyframes gridMove {
             0% { transform: translate(0, 0); }
             100% { transform: translate(50px, 50px); }
@@ -1848,6 +1871,12 @@ const HomeMenu: React.FC = () => {
         href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
         rel="stylesheet"
       />
+
+      {/* Debug Panel (Ctrl+D to toggle) */}
+      {showDebug && <ConnectionDebug onClose={() => setShowDebug(false)} />}
+      
+      {/* Profile Modal */}
+      <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
     </div>
   );
 };

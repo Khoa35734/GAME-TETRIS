@@ -3,6 +3,7 @@ import Friendship, { FriendshipStatus } from '../models/Friendship';
 import User from '../models/User';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
+import { isUserOnline } from '../index';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || '123456';
@@ -62,6 +63,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
         username: f.user_name,
         email: f.email,
         createdAt: f.created_at,
+        isOnline: isUserOnline(f.user_id), // Check online status
       })),
     });
   } catch (error: any) {

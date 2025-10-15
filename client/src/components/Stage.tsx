@@ -8,10 +8,11 @@ import type { Stage as StageType } from '../gamehelper';
 
 type Props = {
   stage: StageType; // Sử dụng kiểu đã import
+  showGhost?: boolean; // Optional prop to control ghost piece visibility
 }
 
-const Stage: React.FC<Props> = ({ stage }) => (
-  <StyledStage width={stage[0].length} height={stage.length}>
+const Stage: React.FC<Props> = ({ stage, showGhost = true }) => (
+  <StyledStage width={stage[0].length} height={stage.length} showGhost={showGhost}>
     {stage.map((row, y) =>
       row.map((cell, x) => (
         <Cell key={`${y}-${x}`} type={cell[0]} isBuffer={y < END_BUFFER_ROWS} />

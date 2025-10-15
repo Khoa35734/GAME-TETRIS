@@ -55,9 +55,9 @@ router.post('/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     
-    // Get max user_id and increment (workaround for sequence permission issue)
+    // Get max user_id and increment (minimum 8 digits starting from 10000001)
     const maxIdResult = await sequelize.query(
-      'SELECT COALESCE(MAX(user_id), 0) + 1 as next_id FROM users',
+      'SELECT COALESCE(GREATEST(MAX(user_id), 10000000), 10000000) + 1 as next_id FROM users',
       { type: QueryTypes.SELECT }
     );
     const nextId = (maxIdResult[0] as any).next_id;

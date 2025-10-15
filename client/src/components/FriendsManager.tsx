@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
+import socket from '../socket'; // Import socket
 import type { Friend, FriendRequest, SearchResult } from '../services/friendsService';
 import {
   getFriends,
@@ -15,19 +16,83 @@ interface FriendsManagerProps {
   onBack: () => void;
 }
 
+// Animation: Slide in from right
+const slideInFromRight = keyframes`
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+`;
+
+// Animation: Fade in backdrop
+const fadeIn = keyframes`
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+`;
+
+// Backdrop overlay
+const Backdrop = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(5px);
+  z-index: 1999;
+  animation: ${fadeIn} 0.3s ease-out;
+`;
+
+// Main container - slides from right
 const Container = styled.div`
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 500px;
+  max-width: 90vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-left: 2px solid rgba(78, 205, 196, 0.3);
+  box-shadow: -5px 0 30px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
-  max-width: 900px;
-  margin: 0 auto;
   color: white;
   font-family: 'Pixcel', monospace;
-  min-height: 100vh;
+  z-index: 2000;
+  animation: ${slideInFromRight} 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* Custom scrollbar */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(78, 205, 196, 0.5);
+    border-radius: 4px;
+
+    &:hover {
+      background: rgba(78, 205, 196, 0.7);
+    }
+  }
 `;
 
 const BackButton = styled.button`
-  position: absolute;
-  top: 20px;
-  left: 20px;
+  position: sticky;
+  top: 10px;
+  margin-bottom: 20px;
   padding: 10px 20px;
   font-family: 'Pixcel', monospace;
   font-size: 1rem;
@@ -37,34 +102,38 @@ const BackButton = styled.button`
   color: white;
   cursor: pointer;
   transition: all 0.2s;
+  z-index: 10;
 
   &:hover {
     background: rgba(0, 0, 0, 0.9);
     border-color: #4af;
-    transform: translateY(-2px);
+    transform: translateX(-5px);
   }
 `;
 
 const Title = styled.h1`
   text-align: center;
-  font-size: 2.5rem;
-  margin-bottom: 30px;
+  font-size: 1.8rem;
+  margin-bottom: 20px;
+  margin-top: 10px;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  color: #4ecdc4;
 `;
 
 const TabContainer = styled.div`
   display: flex;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 30px;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
 `;
 
-const Tab = styled.button<{ active: boolean }>`
-  padding: 12px 24px;
-  font-size: 1rem;
+const Tab = styled.button<{ $active: boolean }>`
+  padding: 10px 18px;
+  font-size: 0.9rem;
   font-family: 'Pixcel', monospace;
-  background: ${(props) => (props.active ? 'rgba(78, 205, 196, 0.3)' : 'rgba(0, 0, 0, 0.6)')};
-  border: 2px solid ${(props) => (props.active ? '#4ecdc4' : '#444')};
+  background: ${(props) => (props.$active ? 'rgba(78, 205, 196, 0.3)' : 'rgba(0, 0, 0, 0.6)')};
+  border: 2px solid ${(props) => (props.$active ? '#4ecdc4' : '#444')};
   border-radius: 8px;
   color: white;
   cursor: pointer;
@@ -150,13 +219,56 @@ const UserCard = styled.div`
 
 const UserInfo = styled.div`
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+`;
+
+const UserHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+`;
+
+const OnlineIndicator = styled.div<{ $isOnline: boolean }>`
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: ${(props) => (props.$isOnline ? '#4ecdc4' : '#666')};
+  box-shadow: ${(props) =>
+    props.$isOnline ? '0 0 8px rgba(78, 205, 196, 0.8)' : 'none'};
+  flex-shrink: 0;
+  position: relative;
+
+  ${(props) =>
+    props.$isOnline &&
+    `
+    &::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid rgba(78, 205, 196, 0.3);
+      animation: pulse 2s ease-in-out infinite;
+    }
+  `}
+
+  @keyframes pulse {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.2);
+      opacity: 0.5;
+    }
+  }
 `;
 
 const Username = styled.div`
   font-size: 1.2rem;
   font-weight: bold;
   color: #4ecdc4;
-  margin-bottom: 5px;
 `;
 
 const UserDetail = styled.div`
@@ -227,6 +339,49 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
       loadRequests();
     }
   }, [activeTab]);
+
+  // [THÊM MỚI] Listen cho online/offline events
+  useEffect(() => {
+    const handleUserOnline = (userId: number) => {
+      console.log('🟢 [FriendsManager] User came online:', userId);
+      setFriends((prev) => {
+        const updated = prev.map((f) => {
+          if (f.userId === userId) {
+            console.log('   ✅ Matched friend:', f.username, '(userId:', f.userId, ')');
+            return { ...f, isOnline: true };
+          }
+          return f;
+        });
+        console.log('   📋 Updated friends:', updated.map(f => ({ id: f.userId, name: f.username, online: f.isOnline })));
+        return updated;
+      });
+    };
+
+    const handleUserOffline = (userId: number) => {
+      console.log('⚪ [FriendsManager] User went offline:', userId);
+      setFriends((prev) => {
+        const updated = prev.map((f) => {
+          if (f.userId === userId) {
+            console.log('   ✅ Matched friend:', f.username, '(userId:', f.userId, ')');
+            return { ...f, isOnline: false };
+          }
+          return f;
+        });
+        console.log('   📋 Updated friends:', updated.map(f => ({ id: f.userId, name: f.username, online: f.isOnline })));
+        return updated;
+      });
+    };
+
+    console.log('👂 [FriendsManager] Registering socket listeners for online/offline events');
+    socket.on('user:online', handleUserOnline);
+    socket.on('user:offline', handleUserOffline);
+
+    return () => {
+      console.log('🔇 [FriendsManager] Cleaning up socket listeners');
+      socket.off('user:online', handleUserOnline);
+      socket.off('user:offline', handleUserOffline);
+    };
+  }, []);
 
   const showMessage = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setMessage({ text, type });
@@ -334,13 +489,13 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
       {message && <Message type={message.type}>{message.text}</Message>}
 
       <TabContainer>
-        <Tab active={activeTab === 'friends'} onClick={() => setActiveTab('friends')}>
+        <Tab $active={activeTab === 'friends'} onClick={() => setActiveTab('friends')}>
           Bạn bè ({friends.length})
         </Tab>
-        <Tab active={activeTab === 'requests'} onClick={() => setActiveTab('requests')}>
+        <Tab $active={activeTab === 'requests'} onClick={() => setActiveTab('requests')}>
           Lời mời ({incomingRequests.length})
         </Tab>
-        <Tab active={activeTab === 'search'} onClick={() => setActiveTab('search')}>
+        <Tab $active={activeTab === 'search'} onClick={() => setActiveTab('search')}>
           Tìm bạn
         </Tab>
       </TabContainer>
@@ -404,9 +559,15 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
             friends.map((friend) => (
               <UserCard key={friend.userId}>
                 <UserInfo>
-                  <Username>{friend.username}</Username>
+                  <UserHeader>
+                    <OnlineIndicator $isOnline={friend.isOnline || false} />
+                    <Username>{friend.username}</Username>
+                  </UserHeader>
                   <UserDetail>User ID: #{friend.userId}</UserDetail>
                   <UserDetail>{friend.email}</UserDetail>
+                  <UserDetail style={{ color: friend.isOnline ? '#4ecdc4' : '#666', fontSize: '0.85rem' }}>
+                    {friend.isOnline ? '🟢 Online' : '⚪ Offline'}
+                  </UserDetail>
                 </UserInfo>
                 <Button variant="danger" onClick={() => handleRemoveFriend(friend.userId)}>
                   ✕ Xóa bạn
@@ -464,4 +625,13 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
   );
 };
 
-export default FriendsManager;
+const FriendsManagerWithBackdrop: React.FC<FriendsManagerProps> = ({ onBack }) => {
+  return (
+    <>
+      <Backdrop onClick={onBack} />
+      <FriendsManager onBack={onBack} />
+    </>
+  );
+};
+
+export default FriendsManagerWithBackdrop;

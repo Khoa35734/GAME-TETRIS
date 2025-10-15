@@ -1,6 +1,7 @@
 import axios from 'axios';
+import { getApiBaseUrl } from './apiConfig';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const getApiUrl = () => getApiBaseUrl();
 
 export interface KeyBindings {
   moveLeft: string;
@@ -53,7 +54,7 @@ export const getUserSettings = async (): Promise<{ success: boolean; settings?: 
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get(`${API_BASE_URL}/settings`, {
+    const response = await axios.get(`${getApiUrl()}/settings`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -77,7 +78,7 @@ export const updateUserSettings = async (settings: Partial<UserSettings>): Promi
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.put(`${API_BASE_URL}/settings`, settings, {
+    const response = await axios.put(`${getApiUrl()}/settings`, settings, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -102,7 +103,7 @@ export const updateKeyBindings = async (keyBindings: KeyBindings): Promise<{ suc
     }
 
     const response = await axios.patch(
-      `${API_BASE_URL}/settings/keys`,
+      `${getApiUrl()}/settings/keys`,
       { key_bindings: keyBindings },
       {
         headers: {
@@ -129,7 +130,7 @@ export const resetSettings = async (): Promise<{ success: boolean; message?: str
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post(`${API_BASE_URL}/settings/reset`, {}, {
+    const response = await axios.post(`${getApiUrl()}/settings/reset`, {}, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
