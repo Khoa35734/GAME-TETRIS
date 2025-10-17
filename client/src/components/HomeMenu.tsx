@@ -6,7 +6,8 @@ interface User {
   username: string;
   email?: string;
   isGuest: boolean;
-  accountId: number; // Thêm accountId để định danh duy nhất
+  accountId: number;
+  role?: string; // Thêm role để phân quyền
 }
 
 interface GameModeProps {
@@ -106,9 +107,17 @@ const HomeMenu: React.FC = () => {
           email: result.user.email,
           isGuest: false,
           accountId: result.user.accountId,
+          role: result.user.role || 'player',
         };
         setCurrentUser(user);
-        setShowGameModes(true);
+        
+        // ✅ Phân quyền: Admin -> AdminDashboard, Player -> Game Modes
+        if (user.role === 'admin') {
+          navigate('/admin');
+        } else {
+          setShowGameModes(true);
+        }
+        
         setLoginForm({ email: "", password: "" });
       } else {
         setError(result.message || "Đăng nhập thất bại!");
