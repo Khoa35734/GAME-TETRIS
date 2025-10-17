@@ -84,7 +84,8 @@ router.post('/register', async (req, res) => {
       { 
         accountId: newUser.user_id, 
         email: newUser.email,
-        username: newUser.user_name
+        username: newUser.user_name,
+        role: 'player'
       },
       JWT_SECRET,
       { expiresIn: '7d' }
@@ -97,7 +98,8 @@ router.post('/register', async (req, res) => {
       user: {
         accountId: newUser.user_id,
         username: newUser.user_name,
-        email: newUser.email
+        email: newUser.email,
+        role: 'player'
       }
     });
   } catch (err) {
@@ -128,7 +130,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const users = await sequelize.query(
-      'SELECT user_id, user_name, email, password FROM users WHERE email = :email',
+      'SELECT user_id, user_name, email, password, role FROM users WHERE email = :email',
       { 
         replacements: { email }, 
         type: QueryTypes.SELECT 
@@ -168,7 +170,8 @@ router.post('/login', async (req, res) => {
       { 
         accountId: user.user_id, 
         email: user.email,
-        username: user.user_name
+        username: user.user_name,
+        role: user.role || 'player'
       },
       JWT_SECRET,
       { expiresIn: '7d' }
@@ -181,7 +184,8 @@ router.post('/login', async (req, res) => {
       user: {
         accountId: user.user_id,
         username: user.user_name,
-        email: user.email
+        email: user.email,
+        role: user.role || 'player'
       }
     });
   } catch (err) {

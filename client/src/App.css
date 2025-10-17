@@ -52,3 +52,13 @@
     transform: scale(0.98);
   }
 }
+
+/* Spin animation for admin dashboard */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
