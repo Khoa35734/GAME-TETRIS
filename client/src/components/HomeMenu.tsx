@@ -125,18 +125,17 @@ const HomeMenu: React.FC = () => {
           email: result.user.email,
           isGuest: false,
           accountId: accountId,
+          role: result.user.role || 'player',
         };
         setCurrentUser(user);
         
-        // Save to localStorage for auto-authentication
-        try { 
-          localStorage.setItem('tetris:user', JSON.stringify(user));
-          console.log('💾 [Login] User saved to localStorage:', { accountId, type: typeof accountId });
-        } catch (err) {
-          console.error('❌ [Login] Failed to save user to localStorage:', err);
+        // ✅ Phân quyền: Admin -> AdminDashboard, Player -> Game Modes
+        if (user.role === 'admin') {
+          navigate('/admin');
+        } else {
+          setShowGameModes(true);
         }
         
-        setShowGameModes(true);
         setLoginForm({ email: "", password: "" });
 
         // [THÊM MỚI] Gửi authentication đến server để track online status

@@ -6,16 +6,32 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
-import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch, storeSocketUser, removeSocketUser, getSocketUserInfo } from './redisStore';
-import { initPostgres } from './postgres';
+import {
+  initRedis,
+  redis,
+  saveRoom,
+  deleteRoom,
+  addToRankedQueue,
+  removeFromRankedQueue,
+  popBestMatch,
+  storeSocketUser,
+  removeSocketUser,
+  getSocketUserInfo,
+} from './redisStore';
+import { initPostgres, sequelize } from './postgres';
 import authRouter from './routes/auth';
 import settingsRouter from './routes/settings';
 import friendsRouter from './routes/friends';
 import matchesRouter from './routes/matches';
+import feedbacksRouter from './routes/feedbacks';
+import reportsRouter from './routes/reports';
+import broadcastsRouter from './routes/broadcasts';
+import adminRoutes from './routes/admin';
 import { matchManager, MatchData, PlayerMatchState } from './matchManager';
 import { setupFriendshipAssociations } from './models/Friendship';
 import MatchmakingSystem from './matchmaking';
 import BO3MatchManager from './bo3MatchManager';
+import { QueryTypes } from 'sequelize';
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces for LAN access
@@ -33,13 +49,11 @@ function normalizeIp(ip: string | undefined | null): string {
   if (v === '::1') v = '127.0.0.1';
   return v;
 }
+
 app.use(cors());
 
-// =========================================================
-// 🚀 API ROUTES
-// =========================================================
 
-// Get reports from `user_reports` table
+
 app.get('/api/reports', async (_req, res) => {
   try {
     console.log('[GET /api/reports] Fetching reports from database...');
@@ -64,7 +78,6 @@ app.get('/api/reports', async (_req, res) => {
       `,
       { type: QueryTypes.SELECT }
     );
-
     res.json(result);
   } catch (err) {
     console.error('[GET /api/reports] Database Error:', err);
@@ -98,7 +111,6 @@ app.get('/api/feedbacks', async (_req, res) => {
       `,
       { type: QueryTypes.SELECT }
     );
-
     res.json(result);
   } catch (err) {
     console.error('[GET /api/feedbacks] Database Error:', err);
@@ -133,7 +145,6 @@ app.get('/api/broadcasts', async (_req, res) => {
       `,
       { type: QueryTypes.SELECT }
     );
-
     res.json(result);
   } catch (err) {
     console.error('[GET /api/broadcasts] Database Error:', err);
@@ -144,13 +155,12 @@ app.get('/api/broadcasts', async (_req, res) => {
   }
 });
 
-// Get rooms from Redisgf
+// Get rooms from Redis
 app.get('/api/rooms', async (_req, res) => {
   try {
     console.log('[GET /api/rooms] Fetching rooms from Redis...');
     const matchKeys = await redis.keys('match:*');
     const rooms = [];
-
     for (const key of matchKeys) {
       const matchData = await redis.get(key);
       if (matchData) {
@@ -163,7 +173,6 @@ app.get('/api/rooms', async (_req, res) => {
         });
       }
     }
-
     res.json(rooms);
   } catch (err) {
     console.error('[GET /api/rooms] Redis Error:', err);
@@ -198,7 +207,6 @@ app.get('/api/players', async (_req, res) => {
       `,
       { type: QueryTypes.SELECT }
     );
-
     res.json(result);
   } catch (err) {
     console.error('[GET /api/players] Database Error:', err);
@@ -208,11 +216,24 @@ app.get('/api/players', async (_req, res) => {
     });
   }
 });
-app.use('/api/auth', authRouter); // Mount auth routes
-app.use('/api/settings', settingsRouter); // Mount settings routes
-app.use('/api/friends', friendsRouter); // Mount friends routes
-app.use('/api/matches', matchesRouter); // Mount matches routes
+
+// =========================================================
+// 🚀 Routers (từ cả hai file)
+// =========================================================
+app.use('/api/auth', authRouter);
+app.use('/api/settings', settingsRouter);
+app.use('/api/friends', friendsRouter);
+app.use('/api/matches', matchesRouter);
+app.use('/api/feedbacks', feedbacksRouter);
+app.use('/api/reports', reportsRouter);
+app.use('/api/broadcast', broadcastsRouter);
+app.use('/api/admin', adminRoutes);
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Matchmaking system stats
+let matchmakingSystem: MatchmakingSystem;
+let bo3MatchManager: BO3MatchManager;
 app.get('/api/matchmaking/stats', (_req, res) => {
   if (matchmakingSystem) {
     res.json(matchmakingSystem.getQueueStats());
@@ -220,8 +241,12 @@ app.get('/api/matchmaking/stats', (_req, res) => {
     res.status(503).json({ error: 'Matchmaking system not initialized' });
   }
 });
+
+// Test connection page (socket + http)
 app.get('/test-connection', (req, res) => {
-  const clientIp = normalizeIp((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip);
+  const clientIp = normalizeIp(
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip
+  );
   res.setHeader('Content-Type', 'text/html');
   res.send(`
     <!DOCTYPE html>
@@ -316,30 +341,30 @@ app.get('/test-connection', (req, res) => {
     </html>
   `);
 });
+
+// Server LAN IPs
 app.get('/api/server-info', (_req, res) => {
-  // Get server's LAN IP addresses
   const os = require('os');
   const interfaces = os.networkInterfaces();
   const addresses: string[] = [];
-  
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name] || []) {
-      // Skip internal (loopback) and non-IPv4 addresses
       if (iface.family === 'IPv4' && !iface.internal) {
         addresses.push(iface.address);
       }
     }
   }
-  
-  res.json({ 
-    ok: true, 
+  res.json({
+    ok: true,
     serverIPs: addresses,
     port: PORT,
-    apiBaseUrl: addresses.length > 0 ? `http://${addresses[0]}:${PORT}/api` : `http://localhost:${PORT}/api`
+    apiBaseUrl: addresses.length > 0 ? `http://${addresses[0]}:${PORT}/api` : `http://localhost:${PORT}/api`,
   });
 });
+
+// Online users debug
+const onlineUsers = new Map<number, string>(); // userId -> socketId
 app.get('/api/debug/online-users', (_req, res) => {
-  // Debug endpoint to check online users
   res.json({
     ok: true,
     onlineUsers: Array.from(onlineUsers.entries()).map(([userId, socketId]) => ({
@@ -349,8 +374,8 @@ app.get('/api/debug/online-users', (_req, res) => {
     totalOnline: onlineUsers.size,
   });
 });
+
 app.get('/whoami', (req, res) => {
-  // Express req.ip returns remote address (e.g., ::ffff:192.168.1.10)
   const raw = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
   const ip = normalizeIp(raw);
   res.json({ ip });
@@ -374,7 +399,7 @@ app.get('/ws-test', (_req, res) => {
           const p = document.createElement('div'); p.textContent = a.join(' ');
           el.appendChild(p);
         };
-        const url = location.origin.replace(/^http/,'ws').replace(/^ws\:/,'http:');
+        const url = location.origin.replace(/^http/,'ws').replace(/^ws\\:/,'http:');
         const socket = io(url, { transports: ['websocket','polling'] });
         socket.on('connect', ()=>{ log('connected:', socket.id); socket.emit('ping'); });
         socket.on('pong', ()=> log('pong')); 
@@ -389,40 +414,38 @@ app.get('/ws-test', (_req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { 
-    origin: '*', 
+  cors: {
+    origin: '*',
     methods: ['GET', 'POST'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization'],
   },
   transports: ['websocket', 'polling'],
   allowEIO3: true,
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
 });
 
-// Log all incoming connections
+// Log all incoming connections at engine level
 io.engine.on('connection', (rawSocket) => {
   const transport = rawSocket.transport.name; // polling or websocket
   const remoteAddress = rawSocket.request.socket.remoteAddress;
   console.log(`🔌 [Socket.IO Engine] New connection from ${remoteAddress} via ${transport}`);
-  
   rawSocket.on('upgrade', () => {
     console.log(`⬆️ [Socket.IO Engine] Connection upgraded to websocket from ${remoteAddress}`);
   });
-  
   rawSocket.on('close', () => {
     console.log(`❌ [Socket.IO Engine] Connection closed from ${remoteAddress}`);
   });
 });
 
-type TType = 'I'|'J'|'L'|'O'|'S'|'T'|'Z';
-const BAG: TType[] = ['I','J','L','O','S','T','Z'];
+type TType = 'I' | 'J' | 'L' | 'O' | 'S' | 'T' | 'Z';
+const BAG: TType[] = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
 
 function* bagGenerator(seed = Date.now()) {
   // Simple LCG for deterministic shuffle per room
   let s = seed >>> 0;
-  const rand = () => (s = (1664525 * s + 1013904223) >>> 0) / 2**32;
+  const rand = () => ((s = (1664525 * s + 1013904223) >>> 0) / 2 ** 32);
   while (true) {
     const bag = [...BAG];
     for (let i = bag.length - 1; i > 0; i--) {
@@ -441,7 +464,6 @@ function nextPieces(gen: Generator<TType, any, any>, n: number) {
 
 /**
  * Convert MatchData to legacy room snapshot format
- * Used for room:update events to maintain client compatibility
  */
 function matchToRoomSnapshot(match: MatchData) {
   return {
@@ -449,7 +471,7 @@ function matchToRoomSnapshot(match: MatchData) {
     host: match.hostPlayerId,
     started: match.status === 'in_progress',
     maxPlayers: match.maxPlayers,
-    players: match.players.map(p => {
+    players: match.players.map((p) => {
       const pingData = playerPings.get(p.socketId || p.playerId);
       return {
         id: p.playerId,
@@ -459,7 +481,7 @@ function matchToRoomSnapshot(match: MatchData) {
         combo: p.combo || 0,
         b2b: p.b2b || 0,
         pendingGarbage: p.pendingGarbage || 0,
-        ping: pingData?.ping ?? null
+        ping: pingData?.ping ?? null,
       };
     }),
   };
@@ -470,7 +492,7 @@ function matchToRoomSnapshot(match: MatchData) {
  */
 function findPlayerInMatch(match: MatchData | null, socketId: string): PlayerMatchState | undefined {
   if (!match) return undefined;
-  return match.players.find(p => p.socketId === socketId);
+  return match.players.find((p) => p.socketId === socketId);
 }
 
 type PlayerState = {
@@ -506,12 +528,6 @@ const accountToSocket = new Map<string, string>();
 // Track IP to live socket ids (can be multiple tabs) - DEPRECATED, giữ lại cho legacy
 const ipToSockets = new Map<string, Set<string>>();
 
-// [THÊM MỚI] Map để theo dõi userId online (từ authentication)
-const onlineUsers = new Map<number, string>(); // userId -> socketId
-
-// [THÊM MỚI] Map để theo dõi những người chơi đã sẵn sàng cho trận đấu
-const playersReadyForGame = new Map<string, Set<string>>();
-
 // [REDIS SUPPORT] Map to store generators for Redis-based matches
 // Key: matchId, Value: Generator instance
 const matchGenerators = new Map<string, Generator<TType, any, any>>();
@@ -521,21 +537,22 @@ const matchGenerators = new Map<string, Generator<TType, any, any>>();
 const playerPings = new Map<string, { ping: number; lastUpdate: number }>();
 
 // [MATCHMAKING SYSTEM] Initialize matchmaking
-let matchmakingSystem: MatchmakingSystem;
-let bo3MatchManager: BO3MatchManager;
+let matchmakingInitialized = false;
 
-initRedis().catch(err => console.error('[redis] init failed', err));
+// INIT external services
+initRedis().catch((err) => console.error('[redis] init failed', err));
 initPostgres()
   .then(() => {
-    // Setup Sequelize associations after models are loaded
     setupFriendshipAssociations();
     console.log('[postgres] Friendship associations setup complete');
   })
-  .catch(err => console.error('[postgres] init skipped/failed', err));
+  .catch((err) => console.error('[postgres] init skipped/failed', err));
 
 io.on('connection', (socket) => {
   // Map this socket to client IP
-  const rawIp = (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || socket.handshake.address;
+  const rawIp =
+    (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+    socket.handshake.address;
   const ip = normalizeIp(typeof rawIp === 'string' ? rawIp : '');
   if (ip) {
     const set = ipToSockets.get(ip) ?? new Set<string>();
@@ -567,69 +584,72 @@ io.on('connection', (socket) => {
   });
 
   socket.on('webrtc:failed', ({ roomId, reason }: { roomId: string; reason?: string }) => {
-    console.log(`[WebRTC] ❌ Connection failed for ${socket.id} in room ${roomId}: ${reason || 'unknown'}`);
+    console.log(
+      `[WebRTC] ❌ Connection failed for ${socket.id} in room ${roomId}: ${reason || 'unknown'}`
+    );
     socket.to(roomId).emit('webrtc:failed', { from: socket.id, reason });
   });
 
   // =========================================================
   // 🔌 TCP Game Logic (Socket.IO) - FALLBACK & RELIABLE EVENTS
   // =========================================================
-  
+
   // Ping/Pong for connectivity and latency tracking
   socket.on('ping', (timestamp?: number) => {
     socket.emit('pong', timestamp);
   });
-  
+
   // Client reports their measured ping
   socket.on('client:ping', (ping: number) => {
     playerPings.set(socket.id, { ping, lastUpdate: Date.now() });
   });
 
-  // [THÊM MỚI] User authentication - Client gửi userId sau khi login
+  // [Auth + Online presence] Client sends userId after login
   socket.on('user:authenticate', async (userId: any) => {
     console.log(`📥 [Auth] Received authentication request:`, { userId, type: typeof userId });
-    
+
     // Convert to number if needed
     const accountId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-    
+
     if (accountId && typeof accountId === 'number' && !isNaN(accountId)) {
       onlineUsers.set(accountId, socket.id);
-      
+
       // Store in Redis for persistence across reconnects
       const username = `User${accountId}`; // TODO: Fetch from database
       await storeSocketUser(socket.id, accountId, username);
-      
+
       // Also store in socket as backup (but Redis is source of truth)
       (socket as any).accountId = accountId;
       (socket as any).username = username;
-      
+
       console.log(`🟢 [Online] User ${accountId} connected (socket: ${socket.id})`);
       console.log(`   💾 [Redis] User auth stored in Redis`);
       console.log(`   📊 Total online users: ${onlineUsers.size}`);
       console.log(`   👥 Online user IDs:`, Array.from(onlineUsers.keys()));
-      
+
       // Send confirmation back to client
       socket.emit('user:authenticated', { accountId, username });
       console.log(`   ✅ [Auth] Confirmation sent to client`);
-      
+
       // Broadcast user online to all connected clients
       io.emit('user:online', accountId);
       console.log(`   📡 Broadcasted user:online event for userId: ${accountId}`);
     } else {
-      console.warn(`⚠️ [Auth] Invalid userId received:`, { 
-        received: userId, 
-        type: typeof userId, 
+      console.warn(`⚠️ [Auth] Invalid userId received:`, {
+        received: userId,
+        type: typeof userId,
         converted: accountId,
-        isNaN: isNaN(accountId)
+        isNaN: isNaN(accountId),
       });
     }
   });
-  
+
   // Broadcast chat for quick manual test
   socket.on('chat:message', (data: any) => {
     io.emit('chat:message', { from: socket.id, ...data });
   });
-  
+
+  // Create room
   socket.on('room:create', async (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
     let options: { maxPlayers?: number; name?: string } | undefined;
     let cb: ((result: RoomAck) => void) | undefined;
@@ -650,10 +670,9 @@ io.on('connection', (socket) => {
       }
 
       const maxPlayers = Math.max(2, Math.min(Number(options?.maxPlayers) || 2, 6));
-      const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
       const displayName = typeof options?.name === 'string' ? options.name : undefined;
 
-      // Create match in Redis via MatchManager (ONLY Redis, no legacy Map)
+      // Create match in Redis via MatchManager
       const match = await matchManager.createMatch({
         matchId: roomId,
         hostPlayerId: socket.id,
@@ -667,7 +686,9 @@ io.on('connection', (socket) => {
       // Join socket.io room for broadcasting
       await socket.join(roomId);
 
-      console.log(`[room:create] ✅ ${socket.id} created match ${roomId} (max ${maxPlayers} players) in Redis`);
+      console.log(
+        `[room:create] ✅ ${socket.id} created match ${roomId} (max ${maxPlayers} players) in Redis`
+      );
 
       // Send success response
       cb?.({ ok: true, roomId });
@@ -675,13 +696,13 @@ io.on('connection', (socket) => {
       // Broadcast to room using new snapshot format
       const snapshot = matchToRoomSnapshot(match);
       io.to(roomId).emit('room:update', snapshot);
-
     } catch (err) {
       console.error('[room:create] Error:', err);
       cb?.({ ok: false, error: 'unknown' });
     }
   });
 
+  // Join room
   socket.on('room:join', async (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
     let options: { name?: string } | undefined;
     let cb: ((result: RoomAck) => void) | undefined;
@@ -694,9 +715,9 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Get match from Redis (ONLY Redis, no legacy fallback)
+      // Get match from Redis
       const match = await matchManager.getMatch(roomId);
-      
+
       if (!match) {
         cb?.({ ok: false, error: 'not-found' });
         return;
@@ -707,9 +728,9 @@ io.on('connection', (socket) => {
         cb?.({ ok: false, error: 'started' });
         return;
       }
-      
+
       if (match.players.length >= match.maxPlayers) {
-        const existingPlayer = match.players.find(p => p.socketId === socket.id);
+        const existingPlayer = match.players.find((p) => p.socketId === socket.id);
         if (!existingPlayer) {
           cb?.({ ok: false, error: 'full' });
           return;
@@ -719,8 +740,8 @@ io.on('connection', (socket) => {
       const displayName = typeof options?.name === 'string' ? options.name : undefined;
 
       // Check if player already in match (reconnect case)
-      const existingPlayer = match.players.find(p => p.socketId === socket.id);
-      
+      const existingPlayer = match.players.find((p) => p.socketId === socket.id);
+
       if (!existingPlayer) {
         // New player joining
         await matchManager.addPlayer(roomId, {
@@ -732,7 +753,6 @@ io.on('connection', (socket) => {
       } else {
         // Reconnecting player
         console.log(`[room:join] ✅ ${socket.id} reconnected to match ${roomId}`);
-        // Notify others about reconnect
         socket.to(roomId).emit('player:reconnect', { playerId: socket.id });
       }
 
@@ -748,26 +768,26 @@ io.on('connection', (socket) => {
         const snapshot = matchToRoomSnapshot(updatedMatch);
         io.to(roomId).emit('room:update', snapshot);
       }
-
     } catch (err) {
       console.error('[room:join] Error:', err);
       cb?.({ ok: false, error: 'unknown' });
     }
   });
 
+  // Sync room snapshot
   socket.on('room:sync', async (roomId: string, cb?: (result: any) => void) => {
     if (typeof roomId !== 'string' || !roomId.trim()) {
       cb?.({ ok: false, error: 'invalid-room' });
       return;
     }
-    
+
     try {
       const match = await matchManager.getMatch(roomId.trim());
       if (!match) {
         cb?.({ ok: false, error: 'not-found' });
         return;
       }
-      
+
       const snapshot = matchToRoomSnapshot(match);
       io.to(socket.id).emit('room:update', snapshot);
       cb?.({ ok: true, data: snapshot });
@@ -777,6 +797,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Leave room
   socket.on('room:leave', async (roomId: string) => {
     try {
       const match = await matchManager.getMatch(roomId);
@@ -790,155 +811,160 @@ io.on('connection', (socket) => {
         console.warn(`[room:leave] Player ${socket.id} not found in match ${roomId}`);
         return;
       }
-      
-      // Remove player from match (MatchManager automatically handles host transfer)
+
       await matchManager.removePlayer(roomId, player.playerId);
       socket.leave(roomId);
-      console.log(`[room:leave] ✅ Player ${socket.id.slice(0, 8)} left match ${roomId.slice(0, 8)}`);
+      console.log(
+        `[room:leave] ✅ Player ${socket.id.slice(0, 8)} left match ${roomId.slice(0, 8)}`
+      );
 
-      // Check if match is now empty
       const updatedMatch = await matchManager.getMatch(roomId);
       if (!updatedMatch || updatedMatch.players.length === 0) {
-        // Delete empty match
         await matchManager.deleteMatch(roomId);
         console.log(`[room:leave] 🗑️ Empty match ${roomId.slice(0, 8)} deleted`);
       } else {
-        // Broadcast updated room state (host may have changed)
         const snapshot = matchToRoomSnapshot(updatedMatch);
         io.to(roomId).emit('room:update', snapshot);
       }
-
     } catch (err) {
       console.error('[room:leave] Error:', err);
     }
   });
 
+  // Toggle ready
   socket.on('room:ready', async (roomId: string, ready: boolean) => {
     try {
       const match = await matchManager.getMatch(roomId);
-      
+
       if (!match) {
         console.error('[room:ready] Match not found:', roomId);
         return;
       }
 
-      // Update in MatchManager
       const player = findPlayerInMatch(match, socket.id);
       if (player) {
         await matchManager.setPlayerReady(roomId, player.playerId, ready);
-        console.log(`[room:ready] ✅ Player ${socket.id.slice(0, 8)} ready=${ready} in match ${roomId.slice(0, 8)}`);
+        console.log(
+          `[room:ready] ✅ Player ${socket.id.slice(0, 8)} ready=${ready} in match ${roomId.slice(
+            0,
+            8
+          )}`
+        );
       } else {
-        console.warn(`[room:ready] ⚠️ Player ${socket.id.slice(0, 8)} not found in match ${roomId.slice(0, 8)}`);
+        console.warn(
+          `[room:ready] ⚠️ Player ${socket.id.slice(0, 8)} not found in match ${roomId.slice(
+            0,
+            8
+          )}`
+        );
       }
 
-      // Broadcast updated room state
       const updatedMatch = await matchManager.getMatch(roomId);
       if (updatedMatch) {
         const snapshot = matchToRoomSnapshot(updatedMatch);
         io.to(roomId).emit('room:update', snapshot);
       }
-
     } catch (err) {
       console.error('[room:ready] Error:', err);
     }
   });
 
-  // [MỚI] room:invite - Mời bạn bè vào phòng
-  socket.on('room:invite', async (data: {
-    roomId: string;
-    friendId: number;
-    friendUsername: string;
-    inviterName: string;
-  }, cb?: (result: any) => void) => {
-    try {
-      const { roomId, friendId, friendUsername, inviterName } = data;
+  // [NEW] room:invite - Invite friend by userId
+  const playersReadyForGame = new Map<string, Set<string>>();
+  socket.on(
+    'room:invite',
+    async (
+      data: {
+        roomId: string;
+        friendId: number;
+        friendUsername: string;
+        inviterName: string;
+      },
+      cb?: (result: any) => void
+    ) => {
+      try {
+        const { roomId, friendId, friendUsername, inviterName } = data;
 
-      // 1. Validate input
-      if (!roomId || !friendId || !friendUsername) {
-        console.error('[room:invite] ❌ Missing required fields');
-        cb?.({ ok: false, error: 'Thiếu thông tin cần thiết' });
-        return;
+        if (!roomId || !friendId || !friendUsername) {
+          console.error('[room:invite] ❌ Missing required fields');
+          cb?.({ ok: false, error: 'Thiếu thông tin cần thiết' });
+          return;
+        }
+
+        const match = await matchManager.getMatch(roomId);
+        if (!match) {
+          console.error('[room:invite] ❌ Match not found:', roomId);
+          cb?.({ ok: false, error: 'Phòng không tồn tại' });
+          return;
+        }
+
+        const inviter = findPlayerInMatch(match, socket.id);
+        if (!inviter || inviter.playerId !== match.hostPlayerId) {
+          console.error('[room:invite] ❌ Only host can invite');
+          cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể mời bạn bè' });
+          return;
+        }
+
+        if (match.players.length >= match.maxPlayers) {
+          console.error('[room:invite] ❌ Room is full');
+          cb?.({ ok: false, error: 'Phòng đã đầy' });
+          return;
+        }
+
+        const friendSocketId = onlineUsers.get(friendId);
+        if (!friendSocketId) {
+          console.error('[room:invite] ❌ Friend is offline:', friendId);
+          cb?.({ ok: false, error: `${friendUsername} hiện đang offline` });
+          return;
+        }
+
+        const friendInRoom = match.players.some((p) => {
+          const userIdStr = p.playerId.split('_')[0];
+          return parseInt(userIdStr) === friendId;
+        });
+        if (friendInRoom) {
+          console.error('[room:invite] ❌ Friend already in room');
+          cb?.({ ok: false, error: `${friendUsername} đã ở trong phòng` });
+          return;
+        }
+
+        io.to(friendSocketId).emit('room:invitation', {
+          roomId,
+          roomName: match.matchId,
+          inviterName: inviterName || inviter.playerId,
+          maxPlayers: match.maxPlayers,
+          currentPlayers: match.players.length,
+          timestamp: Date.now(),
+        });
+
+        console.log(
+          `[room:invite] ✅ Invitation sent from ${inviterName || inviter.playerId} to ${friendUsername} (${friendId}) for room ${roomId.slice(
+            0,
+            8
+          )}`
+        );
+
+        cb?.({
+          ok: true,
+          message: `Đã gửi lời mời đến ${friendUsername}`,
+        });
+      } catch (err) {
+        console.error('[room:invite] Error:', err);
+        cb?.({ ok: false, error: 'Lỗi khi gửi lời mời' });
       }
-
-      // 2. Get match from Redis
-      const match = await matchManager.getMatch(roomId);
-      if (!match) {
-        console.error('[room:invite] ❌ Match not found:', roomId);
-        cb?.({ ok: false, error: 'Phòng không tồn tại' });
-        return;
-      }
-
-      // 3. Check if sender is host
-      const inviter = findPlayerInMatch(match, socket.id);
-      if (!inviter || inviter.playerId !== match.hostPlayerId) {
-        console.error('[room:invite] ❌ Only host can invite');
-        cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể mời bạn bè' });
-        return;
-      }
-
-      // 4. Check if room has space
-      if (match.players.length >= match.maxPlayers) {
-        console.error('[room:invite] ❌ Room is full');
-        cb?.({ ok: false, error: 'Phòng đã đầy' });
-        return;
-      }
-
-      // 5. Check if friend is online
-      const friendSocketId = onlineUsers.get(friendId);
-      if (!friendSocketId) {
-        console.error('[room:invite] ❌ Friend is offline:', friendId);
-        cb?.({ ok: false, error: `${friendUsername} hiện đang offline` });
-        return;
-      }
-
-      // 6. Check if friend is already in the room
-      const friendInRoom = match.players.some(p => {
-        // Extract userId from playerId (format: "userId_timestamp" or just "userId")
-        const userIdStr = p.playerId.split('_')[0];
-        return parseInt(userIdStr) === friendId;
-      });
-
-      if (friendInRoom) {
-        console.error('[room:invite] ❌ Friend already in room');
-        cb?.({ ok: false, error: `${friendUsername} đã ở trong phòng` });
-        return;
-      }
-
-      // 7. Send notification to friend
-      io.to(friendSocketId).emit('room:invitation', {
-        roomId,
-        roomName: match.matchId, // Using matchId as room name
-        inviterName: inviterName || inviter.playerId, // Use playerId if displayName not provided
-        maxPlayers: match.maxPlayers,
-        currentPlayers: match.players.length,
-        timestamp: Date.now()
-      });
-
-      console.log(`[room:invite] ✅ Invitation sent from ${inviterName || inviter.playerId} to ${friendUsername} (${friendId}) for room ${roomId.slice(0, 8)}`);
-
-      // 8. Success response
-      cb?.({ 
-        ok: true, 
-        message: `Đã gửi lời mời đến ${friendUsername}` 
-      });
-
-    } catch (err) {
-      console.error('[room:invite] Error:', err);
-      cb?.({ ok: false, error: 'Lỗi khi gửi lời mời' });
     }
-  });
+  );
 
-  // [SỬA LẠI] room:startGame giờ chỉ báo hiệu, không gửi dữ liệu game
+  // Start game (announce only; clients must reply with game:im_ready)
   socket.on('room:startGame', async (roomId: string, cb?: (result: any) => void) => {
     try {
       const match = await matchManager.getMatch(roomId);
-      
+
       if (!match) {
         cb?.({ ok: false, error: 'Phòng không tồn tại' });
         return;
       }
 
-      // Check host permission
       const player = findPlayerInMatch(match, socket.id);
       if (!player || player.playerId !== match.hostPlayerId) {
         console.error('[room:startGame] Only host can start game');
@@ -946,39 +972,36 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Check player count
       if (match.players.length < 2) {
         cb?.({ ok: false, error: 'Cần ít nhất 2 người chơi' });
         return;
       }
 
-      // Check if all non-host players are ready (host doesn't need to be ready)
-      const nonHostPlayers = match.players.filter(p => p.playerId !== match.hostPlayerId);
-      const allNonHostReady = nonHostPlayers.every(p => p.ready);
-      
+      const nonHostPlayers = match.players.filter((p) => p.playerId !== match.hostPlayerId);
+      const allNonHostReady = nonHostPlayers.every((p) => p.ready);
+
       console.log(`[room:startGame] 🔍 Ready check:`, {
         matchId: roomId.slice(0, 8),
         hostPlayerId: match.hostPlayerId.slice(0, 8),
         totalPlayers: match.players.length,
         nonHostPlayersCount: nonHostPlayers.length,
         allNonHostReady,
-        players: match.players.map(p => ({ 
+        players: match.players.map((p) => ({
           playerId: p.playerId.slice(0, 8),
           socketId: p.socketId?.slice(0, 8) || 'N/A',
-          isHost: p.playerId === match.hostPlayerId, 
-          ready: p.ready 
-        }))
+          isHost: p.playerId === match.hostPlayerId,
+          ready: p.ready,
+        })),
       });
-      
+
       if (!allNonHostReady) {
         cb?.({ ok: false, error: 'Chưa đủ người sẵn sàng' });
         return;
       }
 
-      // Start match in Redis
       await matchManager.startMatch(roomId);
       console.log(`[room:startGame] ✅ Match ${roomId} started by ${socket.id}`);
-      
+
       // Initialize ready set for this room
       playersReadyForGame.set(roomId, new Set());
 
@@ -987,62 +1010,52 @@ io.on('connection', (socket) => {
       console.log(`[Room ${roomId}] Game is starting. Waiting for clients to be ready...`);
 
       cb?.({ ok: true, seed: match.seed });
-
     } catch (err) {
       console.error('[room:startGame] Error:', err);
       cb?.({ ok: false, error: 'unknown' });
     }
   });
-  
-  // [THÊM MỚI] Lắng nghe sự kiện client báo đã sẵn sàng
+
+  // Client says they are ready to receive game data
   socket.on('game:im_ready', async (roomId: string) => {
     try {
       const match = await matchManager.getMatch(roomId);
       const readySet = playersReadyForGame.get(roomId);
-      
+
       if (!match) {
         console.warn(`[game:im_ready] Received ready signal for non-existent match: ${roomId}`);
         return;
       }
-      
       if (!readySet) {
         console.warn(`[game:im_ready] No ready set found for room: ${roomId}`);
         return;
       }
 
       readySet.add(socket.id);
-      
       const expectedPlayers = match.players.length;
-      
       console.log(`[Room ${roomId}] Player ${socket.id} is ready. (${readySet.size}/${expectedPlayers})`);
 
-      // When ALL clients in the room have reported ready
       if (readySet.size === expectedPlayers) {
         console.log(`[Room ${roomId}] ✅ All players are ready. Sending full game data.`);
-        
-        // Create generator from match seed and STORE IT for future requests
+
         const gen = bagGenerator(match.seed);
         const first = nextPieces(gen, 14);
-        const playerIds = match.players.map(p => p.socketId);
-        
-        // Store generator for this match so game:requestNext can use it
+        const playerIds = match.players.map((p) => p.socketId);
+
         matchGenerators.set(roomId, gen);
         console.log(`[Room ${roomId}] 💾 Stored generator for Redis match`);
 
-        // Send game:start event ONCE with full data to each player
         for (const playerId of playerIds) {
-          const opponentId = playerIds.find(id => id !== playerId);
+          const opponentId = playerIds.find((id) => id !== playerId);
           io.to(playerId).emit('game:start', {
             next: first,
             roomId,
             opponent: opponentId,
-            seed: match.seed
+            seed: match.seed,
           });
         }
-        
-        // Cleanup after sending
+
         playersReadyForGame.delete(roomId);
-        
         console.log(`[Room ${roomId}] 🎮 Game started! Piece queue sent to all players.`);
       }
     } catch (err) {
@@ -1050,45 +1063,40 @@ io.on('connection', (socket) => {
     }
   });
 
-
-  // This event is now only triggered by the robust handshake above
+  // Legacy game:start (kept for backward compatibility)
   socket.on('game:start', (roomId: string) => {
-    // This listener can be simplified or removed if all start logic is handled by the ready handshake
-    // For now, keeping it but it's less critical.
     const r = rooms.get(roomId);
     if (!r || r.host !== socket.id) return;
-    if (![...r.players.values()].every(p => p.ready)) return;
+    if (![...r.players.values()].every((p) => p.ready)) return;
     r.started = true;
-    const first = nextPieces(r.gen, 14); 
+    const first = nextPieces(r.gen, 14);
     saveRoom(r);
-    
+
     for (const [playerId] of r.players) {
-      const opponentId = [...r.players.keys()].find(id => id !== playerId);
-      io.to(playerId).emit('game:start', { 
-        next: first, 
+      const opponentId = [...r.players.keys()].find((id) => id !== playerId);
+      io.to(playerId).emit('game:start', {
+        next: first,
         roomId,
-        opponent: opponentId 
+        opponent: opponentId,
       });
     }
   });
 
+  // Request more pieces
   socket.on('game:requestNext', async (roomId: string, n: number = 7) => {
     try {
       const match = await matchManager.getMatch(roomId);
       const r = rooms.get(roomId);
-      
+
       if (!match && !r) {
         console.warn(`[game:requestNext] Room not found: ${roomId}`);
         return;
       }
-      
+
       let pieces: any[] = [];
-      
       if (r && r.started) {
-        // Use legacy room generator
         pieces = nextPieces(r.gen, n);
       } else if (match && match.status === 'in_progress') {
-        // Get stored generator for this Redis match
         const gen = matchGenerators.get(roomId);
         if (gen) {
           pieces = nextPieces(gen, n);
@@ -1097,7 +1105,7 @@ io.on('connection', (socket) => {
           console.warn(`[game:requestNext] No generator found for Redis match ${roomId}`);
         }
       }
-      
+
       if (pieces.length > 0) {
         io.to(socket.id).emit('game:next', pieces);
       }
@@ -1109,25 +1117,21 @@ io.on('connection', (socket) => {
   // Relay real-time board state to other players in the same room
   socket.on('game:state', async (roomId: string, payload: any) => {
     try {
-      // Check both Redis and legacy Map (DUAL MODE)
       const match = await matchManager.getMatch(roomId);
       const r = rooms.get(roomId);
-      
+
       if (!match && !r) {
         console.warn(`[game:state] Room not found: ${roomId}`);
         return;
       }
-      
-      // Broadcast to all other players in the room
+
       socket.to(roomId).emit('game:state', { ...payload, from: socket.id });
-      
-      // Optional: Log for debugging (can remove in production)
-      // console.log(`[game:state] Broadcasted state from ${socket.id} to room ${roomId}`);
     } catch (err) {
       console.error('[game:state] Error:', err);
     }
   });
 
+  // Room chat (legacy map)
   socket.on('room:chat', (roomId: string, message: any, cb?: (ack: RoomAck) => void) => {
     const r = rooms.get(roomId);
     if (!r) {
@@ -1147,26 +1151,23 @@ io.on('connection', (socket) => {
     cb?.({ ok: true, roomId });
   });
 
-  // NEW: Client sends attack (garbage) to server
+  // Attack flow (garbage)
   socket.on('game:attack', async (roomId: string, payload: { lines: number; isClear?: boolean }) => {
     const { lines: rawLines, isClear = false } = payload;
     const lines = Math.max(0, Math.min(10, Number(rawLines) || 0));
-    
     if (lines === 0) return;
 
     try {
       const match = await matchManager.getMatch(roomId);
       const r = rooms.get(roomId);
-      
+
       if (!match && !r) {
         console.error('[game:attack] Match/Room not found:', roomId);
         return;
       }
 
-      // Get attacker info
       let attackerId = socket.id;
-      let attackerAlive = false;
-      
+
       if (match) {
         const attacker = findPlayerInMatch(match, socket.id);
         if (!attacker || !attacker.alive) {
@@ -1174,29 +1175,22 @@ io.on('connection', (socket) => {
           return;
         }
         attackerId = attacker.playerId;
-        attackerAlive = true;
-        
-        // Note: We don't update totalGarbageSent here because updatePlayerStats
-        // doesn't support it. The stat will be calculated at match end.
       } else if (r) {
         const p = r.players.get(socket.id);
         if (!p || !p.alive) {
           console.error('[game:attack] Attacker not in legacy room or dead');
           return;
         }
-        attackerAlive = true;
         p.lastAttackTime = Date.now();
       }
 
       console.log(`[game:attack] ${socket.id} sending ${lines} garbage lines (isClear=${isClear})`);
 
-      // Find opponents
       const opponents: Array<{ id: string; socketId: string }> = [];
-      
       if (match) {
         match.players
-          .filter(p => p.playerId !== attackerId && p.alive)
-          .forEach(p => opponents.push({ id: p.playerId, socketId: p.socketId }));
+          .filter((p) => p.playerId !== attackerId && p.alive)
+          .forEach((p) => opponents.push({ id: p.playerId, socketId: p.socketId }));
       } else if (r) {
         [...r.players.entries()]
           .filter(([sid, sp]) => sid !== socket.id && sp.alive)
@@ -1208,22 +1202,16 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Queue garbage to each opponent
       for (const opponent of opponents) {
         let actualGarbage = 0;
 
         if (match) {
-          // Use Redis atomic operations
           if (isClear) {
-            // Target just cleared lines → CANCEL mechanic
             const result = await matchManager.cancelGarbage(roomId, opponent.id, lines);
             actualGarbage = result.remaining;
-
             console.log(
               `[game:attack] 🔄 Cancel mechanic for ${opponent.id}: ${result.cancelled} cancelled, ${result.remaining} remaining`
             );
-
-            // Notify opponent about cancel
             if (result.cancelled > 0) {
               io.to(opponent.socketId).emit('game:garbageCancelled', {
                 cancelled: result.cancelled,
@@ -1231,43 +1219,30 @@ io.on('connection', (socket) => {
               });
             }
           } else {
-            // Normal attack → QUEUE garbage
             actualGarbage = await matchManager.queueGarbage(roomId, opponent.id, lines);
           }
 
-          // Notify opponent about incoming garbage
           if (actualGarbage > 0) {
-            io.to(opponent.socketId).emit('game:incomingGarbage', { 
+            io.to(opponent.socketId).emit('game:incomingGarbage', {
               lines: actualGarbage,
               from: attackerId,
             });
-
-            // Update opponent stats
-            const oppData = match.players.find(p => p.playerId === opponent.id);
-            if (oppData) {
-              // Note: pendingGarbage is managed by queueGarbage/cancelGarbage
-              // We don't need to update it separately here
-            }
           }
-
         } else if (r) {
-          // Legacy room logic (keep for backward compatibility)
           const opp = r.players.get(opponent.id);
           if (!opp) continue;
 
           if (isClear && opp.pendingGarbage > 0) {
-            // Cancel mechanic
             const cancelled = Math.min(opp.pendingGarbage, lines);
             opp.pendingGarbage -= cancelled;
             const remaining = lines - cancelled;
-            
-            console.log(`[game:attack] Cancelled ${cancelled} garbage for ${opponent.id}, remaining: ${remaining}`);
-            
-            io.to(opponent.socketId).emit('game:garbageCancelled', { 
-              cancelled, 
-              remaining: opp.pendingGarbage 
+            console.log(
+              `[game:attack] Cancelled ${cancelled} garbage for ${opponent.id}, remaining: ${remaining}`
+            );
+            io.to(opponent.socketId).emit('game:garbageCancelled', {
+              cancelled,
+              remaining: opp.pendingGarbage,
             });
-            
             if (remaining > 0) {
               opp.pendingGarbage += remaining;
               actualGarbage = remaining;
@@ -1277,15 +1252,16 @@ io.on('connection', (socket) => {
             actualGarbage = lines;
           }
 
-          console.log(`[game:attack] Queued ${actualGarbage} garbage to ${opponent.id}, total pending: ${opp.pendingGarbage}`);
-          
-          io.to(opponent.socketId).emit('game:incomingGarbage', { 
+          console.log(
+            `[game:attack] Queued ${actualGarbage} garbage to ${opponent.id}, total pending: ${opp.pendingGarbage}`
+          );
+
+          io.to(opponent.socketId).emit('game:incomingGarbage', {
             lines: opp.pendingGarbage,
             from: attackerId,
           });
         }
 
-        // Schedule actual application after delay (~500ms)
         setTimeout(async () => {
           if (match) {
             const toApply = await matchManager.consumeGarbage(roomId, opponent.id);
@@ -1298,7 +1274,7 @@ io.on('connection', (socket) => {
             if (!rr) return;
             const oo = rr.players.get(opponent.id);
             if (!oo || !oo.alive) return;
-            
+
             const toApply = oo.pendingGarbage;
             if (toApply > 0) {
               oo.pendingGarbage = 0;
@@ -1309,113 +1285,107 @@ io.on('connection', (socket) => {
         }, 500);
       }
 
-      // Save room state (legacy)
       if (r) {
-        saveRoom(r).catch(err => console.error('[game:attack] saveRoom error:', err));
+        saveRoom(r).catch((err) => console.error('[game:attack] saveRoom error:', err));
       }
-
     } catch (err) {
       console.error('[game:attack] Error:', err);
     }
   });
 
   // Keep old game:lock for backward compatibility / other logic
-  socket.on('game:lock', (roomId: string, payload: { lines: number; tspinType?: 'none' | 'mini' | 'normal'; pc?: boolean }) => {
-    const r = rooms.get(roomId);
-    if (!r || !r.started) return;
-    const p = r.players.get(socket.id);
-    if (!p) return;
+  socket.on(
+    'game:lock',
+    (roomId: string, payload: { lines: number; tspinType?: 'none' | 'mini' | 'normal'; pc?: boolean }) => {
+      const r = rooms.get(roomId);
+      if (!r || !r.started) return;
+      const p = r.players.get(socket.id);
+      if (!p) return;
 
-    const lines = Math.max(0, Math.min(4, Number(payload?.lines) || 0));
-    const tspinType = payload?.tspinType ?? 'none';
-    const pc = Boolean(payload?.pc);
+      const lines = Math.max(0, Math.min(4, Number(payload?.lines) || 0));
+      const tspinType = payload?.tspinType ?? 'none';
+      const pc = Boolean(payload?.pc);
 
-    console.log(`[LOCK] Player ${socket.id} locked piece: ${lines} lines, tspinType: ${tspinType}, pc: ${pc}`);
+      console.log(
+        `[LOCK] Player ${socket.id} locked piece: ${lines} lines, tspinType: ${tspinType}, pc: ${pc}`
+      );
 
-    // Update combo and b2b state
-    const isTetris = tspinType === 'none' && lines === 4;
-    const isTSpinClear = tspinType !== 'none' && lines > 0;
+      const isTetris = tspinType === 'none' && lines === 4;
+      const isTSpinClear = tspinType !== 'none' && lines > 0;
 
-    if (lines > 0 && (isTetris || isTSpinClear)) {
-      p.b2b += 1;
-    } else if (lines > 0) {
-      p.b2b = 0;
+      if (lines > 0 && (isTetris || isTSpinClear)) {
+        p.b2b += 1;
+      } else if (lines > 0) {
+        p.b2b = 0;
+      }
+
+      if (lines > 0) {
+        p.combo = Math.max(1, p.combo + 1);
+      } else {
+        p.combo = 0;
+      }
+
+      saveRoom(r);
     }
+  );
 
-    if (lines > 0) {
-      p.combo = Math.max(1, p.combo + 1);
-    } else {
-      p.combo = 0;
-    }
-
-    saveRoom(r);
-  });
-
+  // Topout flow (end of round)
   socket.on('game:topout', async (roomId: string, reason?: string) => {
     try {
-      // 🔄 DUAL MODE: Check both Redis and legacy Map
       const match = await matchManager.getMatch(roomId);
       const r = rooms.get(roomId);
-      
+
       if (!match && !r) {
         console.warn(`[game:topout] Room/Match not found: ${roomId}`);
         return;
       }
 
-      // ========================================
-      // REDIS MATCH LOGIC
-      // ========================================
       if (match) {
         const player = findPlayerInMatch(match, socket.id);
         if (!player) {
           console.warn(`[game:topout] Player not found in Redis match: ${socket.id}`);
           return;
         }
-        
-        console.log(`[game:topout] Player ${player.playerId} topped out in match ${roomId}. Reason: ${reason || 'topout'}`);
-        
-        // Mark player as dead (modify in-memory, then save)
+
+        console.log(
+          `[game:topout] Player ${player.playerId} topped out in match ${roomId}. Reason: ${
+            reason || 'topout'
+          }`
+        );
+
         player.alive = false;
         match.updatedAt = Date.now();
-        await redis.set(`match:${roomId}`, JSON.stringify(match), { EX: 7200 }); // 2h TTL
-        
-        // Broadcast room update
+        await redis.set(`match:${roomId}`, JSON.stringify(match), { EX: 7200 });
+
         io.to(roomId).emit('room:update', matchToRoomSnapshot(match));
-        
-        // Check if game should end
-        const alivePlayers = match.players.filter(p => p.alive);
-        
+
+        const alivePlayers = match.players.filter((p) => p.alive);
+
         if (alivePlayers.length <= 1) {
           console.log(`[game:topout] Match ${roomId} ended. Alive players:`, alivePlayers.length);
-          
+
           const winner = alivePlayers[0] || null;
           const winnerId = winner?.playerId || undefined;
-          
-          // Send different messages based on reason
+
           if (reason === 'afk') {
-            // Loser (AFK player) gets: "Bạn đã AFK nên bị xử thua"
-            io.to(socket.id).emit('game:over', { 
-              winner: winner?.socketId ?? null, 
-              reason: 'Bạn đã AFK nên bị xử thua' 
+            io.to(socket.id).emit('game:over', {
+              winner: winner?.socketId ?? null,
+              reason: 'Bạn đã AFK nên bị xử thua',
             });
-            // Winner gets: "Đối thủ đã AFK"
             if (winner) {
-              io.to(winner.socketId).emit('game:over', { 
-                winner: winner.socketId, 
-                reason: 'Đối thủ đã AFK' 
+              io.to(winner.socketId).emit('game:over', {
+                winner: winner.socketId,
+                reason: 'Đối thủ đã AFK',
               });
             }
           } else {
-            // Normal game over
             io.to(roomId).emit('game:over', { winner: winner?.socketId ?? null });
           }
-          
-          // End match and save stats
+
           await matchManager.endMatch(roomId, winnerId);
-          
-          // Reset all players for potential rematch (update in-memory and save)
-          match.status = 'waiting'; // Allow rematch
-          match.players.forEach(p => {
+
+          match.status = 'waiting';
+          match.players.forEach((p) => {
             p.alive = true;
             p.ready = false;
             p.combo = 0;
@@ -1423,54 +1393,45 @@ io.on('connection', (socket) => {
           });
           match.updatedAt = Date.now();
           await redis.set(`match:${roomId}`, JSON.stringify(match), { EX: 7200 });
-          
-          // Clear all garbage queues
+
           for (const p of match.players) {
             await redis.del(`garbage:${roomId}:${p.playerId}`);
           }
-          
+
           console.log(`[game:topout] ✅ Match ${roomId} reset for rematch`);
         }
-        
+
         return;
       }
 
-      // ========================================
-      // LEGACY ROOM LOGIC
-      // ========================================
+      // Legacy
       if (r) {
         const p = r.players.get(socket.id);
         if (!p) return;
         p.alive = false;
         saveRoom(r);
         io.to(roomId).emit('room:update', roomSnapshot(roomId));
-        const alive = [...r.players.values()].filter(p => p.alive);
+        const alive = [...r.players.values()].filter((p) => p.alive);
         if (alive.length <= 1) {
-          // Determine different reasons for each side
           if (reason === 'afk') {
-            // Send different messages to each player
-            // Loser (AFK player) gets: "Bạn đã AFK nên bị xử thua"
-            io.to(socket.id).emit('game:over', { 
-              winner: alive[0]?.id ?? null, 
-              reason: 'Bạn đã AFK nên bị xử thua' 
+            io.to(socket.id).emit('game:over', {
+              winner: alive[0]?.id ?? null,
+              reason: 'Bạn đã AFK nên bị xử thua',
             });
-            // Winner gets: "Đối thủ đã AFK"
             if (alive[0]) {
-              io.to(alive[0].id).emit('game:over', { 
-                winner: alive[0].id, 
-                reason: 'Đối thủ đã AFK' 
+              io.to(alive[0].id).emit('game:over', {
+                winner: alive[0].id,
+                reason: 'Đối thủ đã AFK',
               });
             }
           } else {
-            // Normal game over - same message for both
             io.to(roomId).emit('game:over', { winner: alive[0]?.id ?? null });
           }
           r.started = false;
-          // reset ready state
-          r.players.forEach(pl => { 
-            pl.ready = false; 
-            pl.alive = true; 
-            pl.combo = 0; 
+          r.players.forEach((pl) => {
+            pl.ready = false;
+            pl.alive = true;
+            pl.combo = 0;
             pl.b2b = 0;
             pl.pendingGarbage = 0;
             pl.lastAttackTime = 0;
@@ -1484,56 +1445,75 @@ io.on('connection', (socket) => {
   });
 
   // Ranked queue events
-  socket.on('ranked:enter', async (playerId: string, elo: number, cb?: (ok:boolean)=>void) => {
-    // playerId giờ là accountId (string number)
-    try { 
-      accountToSocket.set(playerId, socket.id); // Map accountId → socket.id
-      await addToRankedQueue(playerId, elo); 
-      cb?.(true); 
-    } catch { cb?.(false); }
+  socket.on('ranked:enter', async (playerId: string, elo: number, cb?: (ok: boolean) => void) => {
+    try {
+      accountToSocket.set(playerId, socket.id);
+      await addToRankedQueue(playerId, elo);
+      cb?.(true);
+    } catch {
+      cb?.(false);
+    }
   });
-  
-  socket.on('ranked:leave', async (playerId: string) => { 
+
+  socket.on('ranked:leave', async (playerId: string) => {
     accountToSocket.delete(playerId);
-    await removeFromRankedQueue(playerId); 
+    await removeFromRankedQueue(playerId);
   });
-  
-  socket.on('ranked:match', async (playerId: string, elo: number, cb?: (data:any)=>void) => {
-    // Note: This flow should also be updated to the ready-handshake for robustness
+
+  socket.on('ranked:match', async (playerId: string, elo: number, cb?: (data: any) => void) => {
     const opponent = await popBestMatch(elo, 150, playerId);
     if (!opponent) {
-      // No opponent yet, ensure we are in queue
       accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
     if (opponent.playerId === playerId) {
-      // Safety: shouldn't happen due to exclude, but guard
       accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       return cb?.({ match: null });
     }
-    
-    // Resolve opponent's socket.id từ accountId
+
     const oppSocketId = accountToSocket.get(String(opponent.playerId));
     if (!oppSocketId || !io.sockets.sockets.has(oppSocketId as any)) {
-      // Opponent not currently connected; requeue and exit
       accountToSocket.set(playerId, socket.id);
       await addToRankedQueue(playerId, elo);
       cb?.({ match: null });
       return;
     }
 
-    // Create ephemeral room for the match
-    const roomId = `rk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
-    const seed = Date.now() ^ roomId.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+    const roomId = `rk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const seed = Date.now() ^ roomId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
     const room: Room = {
       id: roomId,
-      host: socket.id, // requester is host
+      host: socket.id,
       gen: bagGenerator(seed),
       players: new Map([
-        [socket.id, { id: socket.id, ready: true, alive: true, combo: 0, b2b: 0, name: playerId, pendingGarbage: 0, lastAttackTime: 0 }],
-        [oppSocketId, { id: oppSocketId, ready: true, alive: true, combo: 0, b2b: 0, name: opponent.playerId, pendingGarbage: 0, lastAttackTime: 0 }]
+        [
+          socket.id,
+          {
+            id: socket.id,
+            ready: true,
+            alive: true,
+            combo: 0,
+            b2b: 0,
+            name: playerId,
+            pendingGarbage: 0,
+            lastAttackTime: 0,
+          },
+        ],
+        [
+          oppSocketId,
+          {
+            id: oppSocketId,
+            ready: true,
+            alive: true,
+            combo: 0,
+            b2b: 0,
+            name: opponent.playerId,
+            pendingGarbage: 0,
+            lastAttackTime: 0,
+          },
+        ],
       ]),
       started: true,
       seed,
@@ -1541,97 +1521,91 @@ io.on('connection', (socket) => {
     };
     rooms.set(roomId, room);
     saveRoom(room);
-    // Join sockets into the room
-    try { socket.join(roomId); } catch {}
+
+    try {
+      socket.join(roomId);
+    } catch {}
     const oppSocket = oppSocketId ? io.sockets.sockets.get(oppSocketId) : undefined;
-    try { oppSocket?.join(roomId); } catch {}
-    // Notify both sockets if connected
+    try {
+      oppSocket?.join(roomId);
+    } catch {}
+
     socket.emit('ranked:found', { roomId, opponent: opponent.playerId, elo: opponent.elo });
-    if (oppSocketId) io.to(oppSocketId).emit('ranked:found', { roomId, opponent: playerId, elo });
-    // Broadcast room update
+    if (oppSocketId)
+      io.to(oppSocketId).emit('ranked:found', { roomId, opponent: playerId, elo });
+
     io.to(roomId).emit('room:update', roomSnapshot(roomId));
     const first = nextPieces(room.gen, 14);
-    
-    // Fix for ranked match: send opponent's socket.id for WebRTC negotiation
+
     io.to(socket.id).emit('game:start', { next: first, roomId, opponent: oppSocketId });
-    if (oppSocketId) io.to(oppSocketId).emit('game:start', { next: first, roomId, opponent: socket.id });
+    if (oppSocketId)
+      io.to(oppSocketId).emit('game:start', { next: first, roomId, opponent: socket.id });
 
     cb?.({ match: { roomId, opponent: opponent.playerId, elo: opponent.elo } });
   });
 
+  // Disconnect handling
   socket.on('disconnect', async () => {
     console.log(`[disconnect] ${socket.id} disconnected`);
 
     try {
       // Find match this player was in (Redis)
       const matchInfo = await matchManager.getMatchByPlayer(socket.id);
-      
+
       if (matchInfo) {
         const { matchId } = matchInfo;
         const match = await matchManager.getMatch(matchId);
-        
-        if (match) {
-          // Mark as disconnected in Redis
-          await matchManager.markDisconnected(matchId, socket.id);
 
+        if (match) {
+          await matchManager.markDisconnected(matchId, socket.id);
           console.log(`[disconnect] Player ${socket.id} marked disconnected in match ${matchId}`);
 
-          // Notify other players
           socket.to(matchId).emit('player:disconnect', { playerId: socket.id });
 
-          // If match was in progress, handle disconnect
           if (match.status === 'in_progress') {
             const player = findPlayerInMatch(match, socket.id);
             if (player) {
-              // Mark player as not alive
               player.alive = false;
               player.lastActionTime = Date.now();
               match.updatedAt = Date.now();
-              
-              // Broadcast player death
+
               io.to(matchId).emit('game:playerDied', { playerId: socket.id });
 
-              // Check if match should end
-              const alivePlayers = match.players.filter(p => p.alive);
-              
+              const alivePlayers = match.players.filter((p) => p.alive);
+
               if (alivePlayers.length === 1) {
-                // One player left - declare winner
                 await matchManager.endMatch(matchId, alivePlayers[0].playerId);
-                
-                // Cleanup generator for this match
+
                 matchGenerators.delete(matchId);
                 console.log(`[disconnect] 🧹 Cleaned up generator for match ${matchId}`);
-                
+
                 io.to(matchId).emit('game:over', {
                   winner: alivePlayers[0].playerId,
                   reason: 'Đối thủ đã ngắt kết nối',
                 });
-                
+
                 console.log(`[disconnect] Winner: ${alivePlayers[0].playerId} in match ${matchId}`);
               } else if (alivePlayers.length === 0) {
-                // All dead - draw
                 await matchManager.endMatch(matchId);
-                
-                // Cleanup generator for this match
+
                 matchGenerators.delete(matchId);
                 console.log(`[disconnect] 🧹 Cleaned up generator for match ${matchId}`);
-                
+
                 io.to(matchId).emit('game:draw');
                 console.log(`[disconnect] Draw in match ${matchId}`);
               }
             }
           } else {
-            // Match not started yet
             const wasHost = match.hostPlayerId === socket.id;
-            
+
             if (wasHost) {
-              // Host left → delete match
               await matchManager.deleteMatch(matchId);
-              deleteRoom(matchId).catch(err => console.error('[disconnect] deleteRoom error:', err));
+              deleteRoom(matchId).catch((err) =>
+                console.error('[disconnect] deleteRoom error:', err)
+              );
               io.to(matchId).emit('room:closed', { reason: 'host-left' });
               console.log(`[disconnect] Host left, match ${matchId} deleted`);
             } else {
-              // Regular player left → just update
               const updatedMatch = await matchManager.getMatch(matchId);
               if (updatedMatch) {
                 const snapshot = matchToRoomSnapshot(updatedMatch);
@@ -1642,56 +1616,50 @@ io.on('connection', (socket) => {
         }
       }
 
-      // Also handle legacy rooms (DUAL MODE)
+      // Legacy rooms
       for (const [roomId, r] of rooms) {
         const p = r.players.get(socket.id);
         if (!p) continue;
-        
-        // Notify other players in room about disconnect
+
         socket.to(roomId).emit('player:disconnect', { playerId: socket.id });
-        
-        // Mark temporarily disconnected
+
         p.alive = false;
-        saveRoom(r).catch(err => console.error('[disconnect] saveRoom error:', err));
+        saveRoom(r).catch((err) => console.error('[disconnect] saveRoom error:', err));
         io.to(roomId).emit('room:update', roomSnapshot(roomId));
-        
-        // After 5s, if still not back and game started, declare the other as winner
+
         setTimeout(() => {
           const rr = rooms.get(roomId);
           if (!rr || !rr.started) return;
           const pp = rr.players.get(socket.id);
           if (pp && pp.alive === false) {
-            // pp loses - send different messages to each player
-            const alive = [...rr.players.values()].filter(x => x.id !== socket.id);
-            
-            // Loser (disconnected player) - if they're still connected somehow
-            io.to(socket.id).emit('game:over', { 
-              winner: alive[0]?.id ?? null, 
-              reason: 'Bạn đã ngắt kết nối nên bị xử thua' 
+            const alive = [...rr.players.values()].filter((x) => x.id !== socket.id);
+
+            io.to(socket.id).emit('game:over', {
+              winner: alive[0]?.id ?? null,
+              reason: 'Bạn đã ngắt kết nối nên bị xử thua',
             });
-            
-            // Winner gets different message
+
             if (alive[0]) {
-              io.to(alive[0].id).emit('game:over', { 
-                winner: alive[0].id, 
-                reason: 'Đối thủ đã ngắt kết nối' 
+              io.to(alive[0].id).emit('game:over', {
+                winner: alive[0].id,
+                reason: 'Đối thủ đã ngắt kết nối',
               });
             }
-            
+
             rr.started = false;
-            rr.players.forEach(pl => { 
-              pl.ready = false; 
-              pl.alive = true; 
-              pl.combo = 0; 
+            rr.players.forEach((pl) => {
+              pl.ready = false;
+              pl.alive = true;
+              pl.combo = 0;
               pl.b2b = 0;
               pl.pendingGarbage = 0;
               pl.lastAttackTime = 0;
             });
-            saveRoom(rr).catch(err => console.error('[disconnect] saveRoom error:', err));
+            saveRoom(rr).catch((err) => console.error('[disconnect] saveRoom error:', err));
           }
         }, 5000);
       }
-      
+
       // Remove accountId → socket.id mapping
       for (const [accountId, sockId] of accountToSocket.entries()) {
         if (sockId === socket.id) {
@@ -1699,29 +1667,24 @@ io.on('connection', (socket) => {
         }
       }
 
-      // [THÊM MỚI] Remove user from online tracking và broadcast offline
+      // Presence: user offline broadcast + cleanup
       for (const [userId, sockId] of onlineUsers.entries()) {
         if (sockId === socket.id) {
           onlineUsers.delete(userId);
           console.log(`⚪ [Offline] User ${userId} disconnected (socket: ${socket.id})`);
           console.log(`   📊 Total online users: ${onlineUsers.size}`);
           console.log(`   👥 Remaining online user IDs:`, Array.from(onlineUsers.keys()));
-          
-          // Broadcast user offline to all connected clients
           io.emit('user:offline', userId);
           console.log(`   📡 Broadcasted user:offline event for userId: ${userId}`);
           break;
         }
       }
-      
-      // Remove from Redis
+
       await removeSocketUser(socket.id);
       console.log(`   💾 [Redis] User auth removed from Redis`);
-      
-      // Remove ping tracking
+
       playerPings.delete(socket.id);
-      
-      // Remove legacy IP mapping
+
       if (ip) {
         const set = ipToSockets.get(ip);
         if (set) {
@@ -1729,7 +1692,6 @@ io.on('connection', (socket) => {
           if (set.size === 0) ipToSockets.delete(ip);
         }
       }
-      
     } catch (err) {
       console.error('[disconnect] Error:', err);
     }
@@ -1760,35 +1722,35 @@ function roomSnapshot(roomId: string) {
     host: r.host,
     started: r.started,
     maxPlayers: r.maxPlayers,
-    players: [...r.players.values()].map(p => {
+    players: [...r.players.values()].map((p) => {
       const pingData = playerPings.get(p.id);
       return {
         id: p.id,
         ready: p.ready,
         alive: p.alive,
         name: p.name ?? null,
-        ping: pingData?.ping ?? null
+        ping: pingData?.ping ?? null,
       };
-    })
+    }),
   };
 }
 
-// [THÊM MỚI] Export function để check user online status
+// Presence helpers
 export function isUserOnline(userId: number): boolean {
   return onlineUsers.has(userId);
 }
-
 export function getOnlineUsers(): number[] {
   return Array.from(onlineUsers.keys());
 }
 
 server.listen(PORT, HOST, () => {
   console.log(`Versus server listening on http://${HOST}:${PORT}`);
-  
+
   // Initialize matchmaking system after server starts
   matchmakingSystem = new MatchmakingSystem(io);
+  matchmakingInitialized = true;
   console.log('[Matchmaking] System initialized ✅');
-  
+
   // Initialize BO3 match manager
   bo3MatchManager = new BO3MatchManager(io);
   console.log('[BO3] Match Manager initialized ✅');
