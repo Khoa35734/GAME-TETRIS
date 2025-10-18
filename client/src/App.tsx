@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 
 // Import ProtectedRoute
 import ProtectedRoute from './components/ProtectedRoute';
 
+// Import ProtectedRoute
+
 // Import các thành phần admin
+import AdminDashboard from './components/admin/AdminDashboard';
 import ReportsManagement from './components/admin/ReportsManagement';
 import FeedbackManagement from './components/admin/FeedbackManagement';
 import BroadcastMessages from './components/admin/BroadcastMessages';
-import AdminDashboard from './components/admin/AdminDashboard';
 
 // Import các thành phần game
 import Tetris from './components/Tetris';
@@ -18,13 +20,9 @@ import Versus from './components/Versus';
 import OnlineCreateRoom from './components/OnlineCreateRoom';
 import OnlineJoinRoom from './components/OnlineJoinRoom';
 import RoomLobby from './components/RoomLobby';
-import { InvitationNotification } from './components/InvitationNotification';
-import { MobileWarning } from './components/MobileWarning';
-import SinglePlayerSettings from './components/SinglePlayerSettings';
-import OnlineRanked from './components/OnlineRanked';
-import OnlineCasual from './components/OnlineCasual';
 
 const Home: React.FC = () => {
+  const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const handleLoginTest = () => {
@@ -138,10 +136,6 @@ const App: React.FC = () => {
           </div>
         </nav>
 
-        {/* Global components */}
-        <MobileWarning />
-        <InvitationNotification />
-
         <Routes>
           {/* Admin Routes - Protected */}
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -154,11 +148,9 @@ const App: React.FC = () => {
           
           {/* Game Routes */}
           <Route path="/" element={<HomeMenu />} />
-          <Route path="/single/settings" element={<SinglePlayerSettings />} />
           <Route path="/single" element={<Tetris />} />
           <Route path="/online" element={<OnlineMenu />} />
-          <Route path="/online/ranked" element={<OnlineRanked />} />
-          <Route path="/online/casual" element={<OnlineCasual />} />
+          <Route path="/online/ranked" element={<Versus />} />
           <Route path="/online/create" element={<OnlineCreateRoom />} />
           <Route path="/online/join" element={<OnlineJoinRoom />} />
           <Route path="/room/:roomId" element={<RoomLobby />} />
@@ -168,7 +160,7 @@ const App: React.FC = () => {
           <Route path="/admin-home" element={<Home />} />
           
           {/* Redirect */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Home />} />
         </Routes>
       </div>
     </Router>
