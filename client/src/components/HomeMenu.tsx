@@ -11,7 +11,8 @@ interface User {
   username: string;
   email?: string;
   isGuest: boolean;
-  accountId: number; // Thêm accountId để định danh duy nhất
+  accountId: number;
+  role?: string; // Thêm role để phân quyền
 }
 
 interface GameModeProps {

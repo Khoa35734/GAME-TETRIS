@@ -11,6 +11,7 @@ export interface AuthResponse {
     accountId: number;
     username: string;
     email: string;
+    role?: string;
   };
 }
 
@@ -35,6 +36,7 @@ export const authService = {
           accountId: data.user.accountId,
           username: data.user.username,
           email: data.user.email,
+          role: data.user.role || 'player',
           isGuest: false
         }));
       }
@@ -69,6 +71,7 @@ export const authService = {
           accountId: data.user.accountId,
           username: data.user.username,
           email: data.user.email,
+          role: data.user.role || 'player',
           isGuest: false
         }));
       }

@@ -214,8 +214,8 @@ const Versus: React.FC = () => {
   
   // Lock delay state
   const [isGrounded, setIsGrounded] = useState(false);
-  const inactivityTimeoutRef = useRef<number | null>(null);
-  const capTimeoutRef = useRef<number | null>(null);
+  const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const capTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const capExpiredRef = useRef<boolean>(false);
   const groundedSinceRef = useRef<number | null>(null);
   const lastGroundActionRef = useRef<number | null>(null);
@@ -718,14 +718,14 @@ const initWebRTC = useCallback(
     clearInactivity();
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
-    }, INACTIVITY_LOCK_MS) as unknown as number;
+    }, INACTIVITY_LOCK_MS);
 
     if (!groundedSinceRef.current) {
       groundedSinceRef.current = Date.now();
       capTimeoutRef.current = setTimeout(() => {
         capExpiredRef.current = true;
         doLock();
-      }, HARD_CAP_MS) as unknown as number;
+      }, HARD_CAP_MS);
     }
   }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
@@ -744,7 +744,7 @@ const initWebRTC = useCallback(
     }
     inactivityTimeoutRef.current = setTimeout(() => {
       doLock();
-    }, INACTIVITY_LOCK_MS) as unknown as number;
+    }, INACTIVITY_LOCK_MS);
   }, [doLock, clearInactivity, clearCap, isApplyingGarbage]);
 
   useEffect(() => {
