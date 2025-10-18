@@ -4,7 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/update-env.js && vite",
     "dev": "vite --open",
     "dev:root": "npm run dev",
     "build": "tsc -b && vite build",
@@ -16,7 +15,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-native-udp": "^4.1.7",
-    "react-router-dom": "^7.9.1",
+    "react-router-dom": "^7.9.4",
     "socket.io-client": "^4.8.1",
     "styled-components": "^6.1.19"
   },

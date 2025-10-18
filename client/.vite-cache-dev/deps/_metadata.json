@@ -1,61 +1,61 @@
 {
-  "hash": "d0fc8ae3",
+  "hash": "3d4023f2",
   "configHash": "8dc96de1",
-  "lockfileHash": "dbcc9418",
-  "browserHash": "1442abf8",
+  "lockfileHash": "dceba5e5",
+  "browserHash": "6d8d9d1b",
   "optimized": {
     "react": {
       "src": "../../node_modules/react/index.js",
       "file": "react.js",
-      "fileHash": "7d2cd1c8",
+      "fileHash": "874c121c",
       "needsInterop": true
     },
     "react-dom": {
       "src": "../../node_modules/react-dom/index.js",
       "file": "react-dom.js",
-      "fileHash": "59666219",
+      "fileHash": "d6ee9eb1",
       "needsInterop": true
     },
     "react/jsx-dev-runtime": {
       "src": "../../node_modules/react/jsx-dev-runtime.js",
       "file": "react_jsx-dev-runtime.js",
-      "fileHash": "93178767",
+      "fileHash": "a10966e5",
       "needsInterop": true
     },
     "react/jsx-runtime": {
       "src": "../../node_modules/react/jsx-runtime.js",
       "file": "react_jsx-runtime.js",
-      "fileHash": "42695241",
+      "fileHash": "77bde709",
       "needsInterop": true
     },
     "axios": {
       "src": "../../node_modules/axios/index.js",
       "file": "axios.js",
-      "fileHash": "cbf30a76",
+      "fileHash": "3e95ea08",
       "needsInterop": false
     },
     "react-dom/client": {
       "src": "../../node_modules/react-dom/client.js",
       "file": "react-dom_client.js",
-      "fileHash": "10a682da",
+      "fileHash": "0b2a896b",
       "needsInterop": true
     },
     "react-router-dom": {
       "src": "../../node_modules/react-router-dom/dist/index.mjs",
       "file": "react-router-dom.js",
-      "fileHash": "20f8293c",
+      "fileHash": "051930c1",
       "needsInterop": false
     },
     "socket.io-client": {
       "src": "../../node_modules/socket.io-client/build/esm/index.js",
       "file": "socket__io-client.js",
-      "fileHash": "b8f9fff0",
+      "fileHash": "4b67225c",
       "needsInterop": false
     },
     "styled-components": {
       "src": "../../node_modules/styled-components/dist/styled-components.browser.esm.js",
       "file": "styled-components.js",
-      "fileHash": "3bda63db",
+      "fileHash": "4ed47817",
       "needsInterop": false
     }
   },
