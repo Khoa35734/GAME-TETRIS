@@ -3,6 +3,7 @@ import styled from "styled-components";
 type Props = {
   height: number;
   width: number;
+  showGhost?: boolean;
 };
 
 export const StyledStage = styled.div<Props>`
@@ -18,32 +19,34 @@ export const StyledStage = styled.div<Props>`
   grid-gap: 1px;
   position: relative;
   border: none;
-  border-top: 0; /* Xoá viền ngoài phía trên để 3 hàng đầu hoà vào background */
+  border-top: 0;
   width: var(--boardW);
   max-width: var(--boardW);
-  /* Top 3 rows: transparent to show page background; below: dark board background */
-  background: linear-gradient(
-    to bottom,
-    rgba(0,0,0,0) 0,
-    rgba(0,0,0,0) calc(var(--cell) * 3 + 2px),
-    #111 calc(var(--cell) * 3 + 2px),
-    #111 100%
-  );
-  overflow: visible; /* cho phép nhìn thấy các ô spawn ngoài vùng cũ nếu cần */
+  /* Transparent board background */
+  background: transparent;
+  overflow: visible;
 
-  /* Bottom border full width */
-  box-shadow: inset 0 -2px 0 #333;
+  /* Bottom border - subtle transparent style */
+  box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.1);
 
-  /* Side borders start below top-3 rows */
+  /* Side borders - transparent style */
   &::after {
     content: "";
     position: absolute;
-    top: calc(var(--cell) * 3 + 2px);
+    top: 0;
     left: 0;
-    height: calc(100% - (var(--cell) * 3 + 2px));
+    height: 100%;
     width: 100%;
     pointer-events: none;
-    box-shadow: inset 2px 0 0 #333, inset -2px 0 0 #333;
+    box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.1), inset -2px 0 0 rgba(255, 255, 255, 0.1);
   }
 
+  /* Hide ghost pieces if showGhost is false */
+  ${(props) => !props.showGhost && `
+    /* Target ghost cells by their type attribute or CSS */
+    div[data-ghost="true"] {
+      opacity: 0 !important;
+      visibility: hidden !important;
+    }
+  `}
 `;

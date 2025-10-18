@@ -12,10 +12,14 @@ const Cell: React.FC<CellProps> = ({ type, isBuffer }) => {
   let tetrominoType: keyof typeof TETROMINOES;
   
   if (typeof type === 'string' && type.startsWith('ghost:')) {
+    // Ghost piece - lấy màu từ type thật
     const realType = type.split(':')[1] as keyof typeof TETROMINOES;
     tetrominoType = realType in TETROMINOES ? realType : 0;
-    const color = TETROMINOES[tetrominoType].color;
-    return <StyledCell type={'ghost'} color={color} />;
+    
+    // 🔧 FIX: Ghost của O piece (2x2 vàng) dùng màu trắng thay vì vàng
+    const color = realType === 'O' ? '255, 255, 255' : TETROMINOES[tetrominoType].color;
+    
+    return <StyledCell type={'ghost'} color={color} data-ghost="true" isBuffer={isBuffer} />;
   } else if (type === 'garbage') {
     // Hàng rác - màu xám
     tetrominoType = 'garbage';

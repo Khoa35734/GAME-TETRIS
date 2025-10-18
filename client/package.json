@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "dev": "node scripts/update-env.js && vite",
     "dev": "vite --open",
     "dev:root": "npm run dev",
     "build": "tsc -b && vite build",
@@ -11,10 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/redis": "^4.0.10",
-    "@types/sequelize": "^4.28.20",
-    "cors": "^2.8.5",
+    "axios": "^1.12.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-native-udp": "^4.1.7",

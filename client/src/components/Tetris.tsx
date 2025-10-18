@@ -14,7 +14,6 @@ import { useGameStatus } from "../hooks/useGameStatus";
 
 // Components
 import Stage from "./Stage";
-import Display from "./Display";
 import StartButton from "./StartButton";
 
 // --- CAI DAT DO NHAY PHIM ---
@@ -70,12 +69,39 @@ const NEXT_SHIFT_Y = 0;
 
 const Tetris: React.FC = () => {
   const navigate = useNavigate();
+  
+  // Load settings from localStorage
+  const [gameSettings] = useState(() => {
+    const saved = localStorage.getItem('tetris:singleSettings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return {
+          linesToClear: 40,
+          showGhost: true,
+          enableHardDrop: true,
+          showNext: true,
+          showHold: true,
+        };
+      }
+    }
+    return {
+      linesToClear: 40,
+      showGhost: true,
+      enableHardDrop: true,
+      showNext: true,
+      showHold: true,
+    };
+  });
+
   // Hold state
   const [hasHeld, setHasHeld] = useState(false);
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(3); // 3-2-1
+  const [showGameOverOverlay, setShowGameOverOverlay] = useState(false); // Show after whiteout
 
   // dong bo lock
   const [locking, setLocking] = useState(false);
@@ -102,6 +128,15 @@ const Tetris: React.FC = () => {
   // progress not exposed to UI; animation drives stage directly
   const whiteoutRaf = useRef<number | null>(null);
 
+  // Real-time stats
+  const [piecesPlaced, setPiecesPlaced] = useState(0);
+  const [inputs, setInputs] = useState(0);
+  const [holds, setHolds] = useState(0);
+
+  // Hard drop repeat delay (hold Space to spam)
+  const hardDropLastTimeRef = useRef<number>(0);
+  const HARD_DROP_DELAY = 100; // ms between hard drops when holding Space
+
   // AFK Warning System - DISABLED FOR TESTING (removed unused state)
   const afkTimeoutRef = useRef<number | null>(null);
 
@@ -124,23 +159,28 @@ const Tetris: React.FC = () => {
   }, [countdown]);
 
   const movePlayer = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking || countdown !== null) return;
+    if (gameOver || startGameOverSequence || locking || countdown !== null || win) return;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
+      setInputs(prev => prev + 1); // Count input
     }
   };
 
   const movePlayerToSide = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking || countdown !== null) return;
+    if (gameOver || startGameOverSequence || locking || countdown !== null || win) return;
     let distance = 0;
     while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) distance += 1;
-    if (distance > 0) updatePlayerPos({ x: dir * distance, y: 0, collided: false });
+    if (distance > 0) {
+      updatePlayerPos({ x: dir * distance, y: 0, collided: false });
+      setInputs(prev => prev + 1); // Count input
+    }
   };
 
   const startGame = (): void => {
     setStage(createStage());
     setDropTime(getFallSpeed(0));
     setGameOver(false);
+    setShowGameOverOverlay(false); // Reset overlay
     setStartGameOverSequence(false);
   // reset whiteout
   if (whiteoutRaf.current) cancelAnimationFrame(whiteoutRaf.current);
@@ -151,6 +191,10 @@ const Tetris: React.FC = () => {
     setWin(false);
     setElapsedMs(0);
     setTimerOn(true);
+    setPiecesPlaced(0);
+    setInputs(0);
+    setHolds(0);
+    hardDropLastTimeRef.current = 0; // Reset hard drop timer
     clearHold(); // reset vùng hold về rỗng khi chơi lại
     setHasHeld(false);
     // clear lock timers + grounded
@@ -262,6 +306,12 @@ const Tetris: React.FC = () => {
 
   const hardDrop = (): void => {
     if (gameOver || startGameOverSequence || countdown !== null) return;
+    
+    // Throttle hard drop to allow spam but with delay
+    const now = Date.now();
+    if (now - hardDropLastTimeRef.current < HARD_DROP_DELAY) return;
+    hardDropLastTimeRef.current = now;
+    
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
     const finalY = player.pos.y + dropDistance;
@@ -287,7 +337,7 @@ const Tetris: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     // AFK warning system disabled for testing
     
-    if (gameOver || startGameOverSequence || countdown !== null) return;
+    if (gameOver || startGameOverSequence || countdown !== null || win) return;
   if ([32, 37, 38, 39, 40, 16].includes(e.keyCode)) {
       e.preventDefault();
       e.stopPropagation();
@@ -302,6 +352,7 @@ const Tetris: React.FC = () => {
     } else if (keyCode === 40) {
       if (!checkCollision(player, stage, { x: 0, y: 1 })) {
         updatePlayerPos({ x: 0, y: 1, collided: false });
+        setInputs(prev => prev + 1); // Count input
       } else {
         // Soft drop nhưng đã chạm đất → áp dụng timers, không khóa ngay
         startGroundTimers();
@@ -309,21 +360,29 @@ const Tetris: React.FC = () => {
     } else if (keyCode === 38) {
       if (!locking) {
         playerRotate(stage, 1);
+        setInputs(prev => prev + 1); // Count input
         // nếu vẫn chạm đất sau xoay → coi như 1 thao tác trên đất
         if (checkCollision(player, stage, { x: 0, y: 1 })) onGroundAction();
       }
   } else if (keyCode === 32) {
-      hardDrop();
+      // Hard drop only if enabled in settings
+      if (gameSettings.enableHardDrop) {
+        hardDrop();
+        setInputs(prev => prev + 1); // Count input
+      }
   } else if (keyCode === 16) { // Shift -> Hold
-      if (!hasHeld && canHold) {
+      // Hold only if enabled in settings
+      if (gameSettings.showHold && !hasHeld && canHold) {
         holdSwap();
         setHasHeld(true);
+        setHolds(prev => prev + 1); // Count hold
+        setInputs(prev => prev + 1); // Count input
       }
     }
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence || countdown !== null) return;
+    if (gameOver || startGameOverSequence || countdown !== null || win) return;
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) setMoveIntent(null);
     else if (keyCode === 40) setDropTime(isGrounded ? null : getFallSpeed(level));
@@ -331,7 +390,7 @@ const Tetris: React.FC = () => {
 
   // ROI
   useInterval(() => {
-    if (!gameOver && !startGameOverSequence && !locking) drop();
+    if (!gameOver && !startGameOverSequence && !locking && !win) drop();
   }, dropTime !== undefined ? dropTime : null);
 
   // DAS
@@ -361,6 +420,11 @@ const Tetris: React.FC = () => {
   // reset sau khi merge
   useEffect(() => {
     if (locking && player.collided && !gameOver) {
+      setPiecesPlaced(prev => {
+        const newCount = prev + 1;
+        console.log('Piece placed! Total:', newCount);
+        return newCount;
+      });
       resetPlayer();
       setMoveIntent(null);
       setLocking(false);
@@ -399,7 +463,11 @@ const Tetris: React.FC = () => {
 
   // Game over whiteout animation: sweep from bottom to top over 1s
   useEffect(() => {
-    if (!gameOver) return;
+    if (!gameOver) {
+      setShowGameOverOverlay(false); // Reset overlay flag
+      return;
+    }
+    
     const duration = 1000;
     const height = stage.length;
     const start = performance.now();
@@ -421,7 +489,12 @@ const Tetris: React.FC = () => {
         }
         return copy as any;
       });
-      if (p < 1) whiteoutRaf.current = requestAnimationFrame(animate);
+      if (p < 1) {
+        whiteoutRaf.current = requestAnimationFrame(animate);
+      } else {
+        // Animation complete, show overlay after brief delay
+        setTimeout(() => setShowGameOverOverlay(true), 200);
+      }
     };
 
     whiteoutRaf.current = requestAnimationFrame(animate);
@@ -452,12 +525,12 @@ const Tetris: React.FC = () => {
   }, [clearEventId]);
 
   useEffect(() => {
-    if (!win && rows >= 150) {
+    if (!win && rows >= gameSettings.linesToClear) {
       setWin(true);
       setTimerOn(false);
       setDropTime(null);
     }
-  }, [rows, win]);
+  }, [rows, win, gameSettings.linesToClear]);
 
   // Theo dõi thay đổi player/stage để (re)start/cancel lock delay dựa trên trạng thái chạm đất
   useEffect(() => {
@@ -570,11 +643,12 @@ const Tetris: React.FC = () => {
             <StyledTetris>
               <div style={{ transform: `translate(${BOARD_SHIFT_X}px, ${BOARD_SHIFT_Y}px)` }}>
                 {/* Trong đếm ngược vẫn hiển thị board nhưng không có khối */}
-                <Stage stage={countdown !== null ? createStage() : stage} />
+                <Stage stage={countdown !== null ? createStage() : stage} showGhost={gameSettings.showGhost} />
               </div>
             </StyledTetris>
 
-      {/* HOLD (trai tren) */}
+      {/* HOLD (trai tren) - Only show if enabled */}
+      {gameSettings.showHold && (
 <HoldPanel
   hold={hold}
   style={{
@@ -588,6 +662,7 @@ const Tetris: React.FC = () => {
     backdropFilter: "blur(6px)",
   }}
 />
+      )}
 
 {/* NEXT + STATS phai tren */}
 <div
@@ -601,24 +676,51 @@ const Tetris: React.FC = () => {
     gap: 12,
   }}
 >
-  <NextPanel queue={nextFour} style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10 }} />
-  <div style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10, color: '#fff' }}>
-    <div style={{ fontWeight: 700, marginBottom: 6 }}>STATUS</div>
-    <div>Rows: {rows} / 150</div>
-    <div>Level: {level}</div>
-    <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
-  </div>
-  {win && (
-    <div style={{ padding: 8, borderRadius: 10, background: 'rgba(0,200,0,0.55)', color: '#fff', textAlign: 'center', fontWeight: 800 }}>You Win!</div>
+  {/* Next queue - Only show if enabled */}
+  {gameSettings.showNext && (
+    <NextPanel queue={nextFour} style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10 }} />
   )}
-  {gameOver && (
+  <div style={{ background: "rgba(20,20,22,0.35)", padding: 8, borderRadius: 10, color: '#fff', fontSize: 13 }}>
+    <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 15 }}>STATUS</div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Lines:</span>{' '}
+      <span style={{ fontWeight: 600 }}>{rows}</span>
+      <span style={{ color: '#666' }}> / {gameSettings.linesToClear}</span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Level:</span> <span style={{ fontWeight: 600 }}>{level + 1}</span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Time:</span> <span style={{ fontWeight: 600 }}>{(elapsedMs/1000).toFixed(2)}s</span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>PPS:</span>{' '}
+      <span style={{ fontWeight: 600 }} title={`Pieces: ${piecesPlaced}, Time: ${(elapsedMs/1000).toFixed(2)}s`}>
+        {elapsedMs > 0 ? ((piecesPlaced / (elapsedMs / 1000))).toFixed(2) : '0.00'}
+      </span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Pieces:</span> <span style={{ fontWeight: 600 }}>{piecesPlaced}</span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Inputs:</span> <span style={{ fontWeight: 600 }}>{inputs}</span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Holds:</span> <span style={{ fontWeight: 600 }}>{holds}</span>
+    </div>
+    <div style={{ marginBottom: 4 }}>
+      <span style={{ color: '#888' }}>Finesse:</span>{' '}
+      <span style={{ fontWeight: 600 }}>
+        {piecesPlaced > 0 ? ((inputs / piecesPlaced)).toFixed(2) : '0.00'}
+      </span>
+    </div>
+  </div>
+  {/* Only show Start button when game is not running */}
+  {(gameOver || countdown === null && !timerOn) && (
     <div style={{ marginTop: 4 }}>
-      <Display gameOver={gameOver} text="Game Over" />
+      <StartButton callback={startGame} />
     </div>
   )}
-  <div style={{ marginTop: 4 }}>
-    <StartButton callback={startGame} />
-  </div>
 </div>
           </div>
 
@@ -637,6 +739,221 @@ const Tetris: React.FC = () => {
           }}
         >
           {countdown}
+        </div>
+      )}
+
+      {/* Win overlay with stats */}
+      {win && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: 'rgba(40,40,45,0.95)',
+              padding: '32px 48px',
+              borderRadius: 16,
+              border: '2px solid rgba(0,200,100,0.5)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+              color: '#fff',
+              textAlign: 'center',
+              minWidth: 320,
+            }}
+          >
+            <div style={{ fontSize: 36, fontWeight: 800, marginBottom: 24, color: '#00ff88' }}>
+              🎉 YOU WIN! 🎉
+            </div>
+            <div style={{ fontSize: 14, textAlign: 'left', lineHeight: 1.8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Time:</span>
+                <span style={{ fontWeight: 600 }}>{(elapsedMs / 1000).toFixed(2)}s</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Lines Cleared:</span>
+                <span style={{ fontWeight: 600 }}>{rows}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Level:</span>
+                <span style={{ fontWeight: 600 }}>{level + 1}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Pieces Placed:</span>
+                <span style={{ fontWeight: 600 }}>{piecesPlaced}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>PPS (Pieces/sec):</span>
+                <span style={{ fontWeight: 600 }}>
+                  {elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Total Inputs:</span>
+                <span style={{ fontWeight: 600 }}>{inputs}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Holds Used:</span>
+                <span style={{ fontWeight: 600 }}>{holds}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Finesse (Inputs/Piece):</span>
+                <span style={{ fontWeight: 600 }}>
+                  {piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00'}
+                </span>
+              </div>
+            </div>
+            <div style={{ marginTop: 24 }}>
+              <button
+                onClick={() => {
+                  setWin(false);
+                  setCountdown(3); // Start countdown before game
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '12px 32px',
+                  borderRadius: 8,
+                  fontSize: 16,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginRight: 12,
+                }}
+              >
+                Play Again
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  color: '#fff',
+                  padding: '12px 32px',
+                  borderRadius: 8,
+                  fontSize: 16,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Menu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Game Over overlay with stats */}
+      {showGameOverOverlay && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: 'rgba(40,40,45,0.95)',
+              padding: '32px 48px',
+              borderRadius: 16,
+              border: '2px solid rgba(200,50,50,0.5)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+              color: '#fff',
+              textAlign: 'center',
+              minWidth: 320,
+            }}
+          >
+            <div style={{ fontSize: 36, fontWeight: 800, marginBottom: 24, color: '#ff5555' }}>
+              💀 GAME OVER 💀
+            </div>
+            <div style={{ fontSize: 14, textAlign: 'left', lineHeight: 1.8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Time:</span>
+                <span style={{ fontWeight: 600 }}>{(elapsedMs / 1000).toFixed(2)}s</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Lines Cleared:</span>
+                <span style={{ fontWeight: 600 }}>{rows}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Level:</span>
+                <span style={{ fontWeight: 600 }}>{level + 1}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Pieces Placed:</span>
+                <span style={{ fontWeight: 600 }}>{piecesPlaced}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>PPS (Pieces/sec):</span>
+                <span style={{ fontWeight: 600 }}>
+                  {elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Total Inputs:</span>
+                <span style={{ fontWeight: 600 }}>{inputs}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Holds Used:</span>
+                <span style={{ fontWeight: 600 }}>{holds}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: '#aaa' }}>Finesse (Inputs/Piece):</span>
+                <span style={{ fontWeight: 600 }}>
+                  {piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00'}
+                </span>
+              </div>
+            </div>
+            <div style={{ marginTop: 24 }}>
+              <button
+                onClick={() => {
+                  setGameOver(false);
+                  setShowGameOverOverlay(false);
+                  setCountdown(3); // Start countdown before game
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '12px 32px',
+                  borderRadius: 8,
+                  fontSize: 16,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginRight: 12,
+                }}
+              >
+                Try Again
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  color: '#fff',
+                  padding: '12px 32px',
+                  borderRadius: 8,
+                  fontSize: 16,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Menu
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </StyledTetrisWrapper>

@@ -1,0 +1,171 @@
+### Settings API Tests
+### Prerequisites: Start server with `cd server && npm run dev`
+### Base URL
+@baseUrl = http://localhost:4000/api
+@token = YOUR_JWT_TOKEN_HERE
+
+### ========================================
+### 1. LOGIN TO GET TOKEN
+### ========================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "password123"
+}
+
+### ========================================
+### 2. GET USER SETTINGS (Auto-create if not exists)
+### ========================================
+GET {{baseUrl}}/settings
+Authorization: Bearer {{token}}
+
+### ========================================
+### 3. UPDATE FULL SETTINGS
+### ========================================
+PUT {{baseUrl}}/settings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "das_delay_ms": 100,
+  "arr_ms": 5,
+  "soft_drop_rate": 40,
+  "show_next_pieces": 6,
+  "sound_enabled": true,
+  "music_enabled": false,
+  "sound_volume": 0.8,
+  "music_volume": 0.3,
+  "key_bindings": {
+    "moveLeft": "a",
+    "moveRight": "d",
+    "softDrop": "s",
+    "hardDrop": "w",
+    "rotateClockwise": "k",
+    "rotateCounterClockwise": "j",
+    "rotate180": "l",
+    "hold": "h",
+    "restart": "r"
+  },
+  "theme_preference": "dark",
+  "language_pref": "vi"
+}
+
+### ========================================
+### 4. UPDATE ONLY KEY BINDINGS (Faster)
+### ========================================
+PATCH {{baseUrl}}/settings/keys
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "key_bindings": {
+    "moveLeft": "ArrowLeft",
+    "moveRight": "ArrowRight",
+    "softDrop": "ArrowDown",
+    "hardDrop": "Space",
+    "rotateClockwise": "ArrowUp",
+    "rotateCounterClockwise": "z",
+    "rotate180": "a",
+    "hold": "c",
+    "restart": "r"
+  }
+}
+
+### ========================================
+### 5. UPDATE WITH CUSTOM WASD LAYOUT
+### ========================================
+PATCH {{baseUrl}}/settings/keys
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "key_bindings": {
+    "moveLeft": "a",
+    "moveRight": "d",
+    "softDrop": "s",
+    "hardDrop": "w",
+    "rotateClockwise": "i",
+    "rotateCounterClockwise": "u",
+    "rotate180": "o",
+    "hold": "Shift",
+    "restart": "r"
+  }
+}
+
+### ========================================
+### 6. TEST DUPLICATE KEY DETECTION (Should fail)
+### ========================================
+PATCH {{baseUrl}}/settings/keys
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "key_bindings": {
+    "moveLeft": "a",
+    "moveRight": "a",
+    "softDrop": "s",
+    "hardDrop": "w",
+    "rotateClockwise": "k",
+    "rotateCounterClockwise": "j",
+    "rotate180": "l",
+    "hold": "h",
+    "restart": "r"
+  }
+}
+
+### ========================================
+### 7. TEST MISSING KEY (Should fail)
+### ========================================
+PATCH {{baseUrl}}/settings/keys
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "key_bindings": {
+    "moveLeft": "a",
+    "moveRight": "d",
+    "softDrop": "s"
+  }
+}
+
+### ========================================
+### 8. TEST INVALID VOLUME (Should fail)
+### ========================================
+PUT {{baseUrl}}/settings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "sound_volume": 1.5
+}
+
+### ========================================
+### 9. RESET TO DEFAULT SETTINGS
+### ========================================
+POST {{baseUrl}}/settings/reset
+Authorization: Bearer {{token}}
+
+### ========================================
+### 10. TEST WITHOUT TOKEN (Should fail with 401)
+### ========================================
+GET {{baseUrl}}/settings
+
+### ========================================
+### 11. TEST WITH INVALID TOKEN (Should fail with 403)
+### ========================================
+GET {{baseUrl}}/settings
+Authorization: Bearer invalid_token_12345
+
+### ========================================
+### NOTES:
+### ========================================
+# 1. First run the login request (#1) and copy the token
+# 2. Replace {{token}} variable at the top with your actual JWT token
+# 3. Or use VS Code REST Client extension which auto-captures response tokens
+# 4. Default key bindings use Arrow keys for movement, z/a/c for rotation/hold
+# 5. All endpoints require valid JWT token from login
+# 6. Volumes must be between 0.0 and 1.0
+# 7. Key bindings must include all 9 required actions
+# 8. Duplicate keys are not allowed across different actions
