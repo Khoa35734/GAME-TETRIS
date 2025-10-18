@@ -1,5 +1,5 @@
 import { DataTypes, Model } from 'sequelize';
-import { sequelize } from '../postgres';
+import { sequelize } from '../stores/postgres';
 
 export interface UserSettingsAttributes {
   user_id: number;

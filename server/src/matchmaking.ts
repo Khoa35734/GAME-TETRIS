@@ -2,9 +2,9 @@
 // File: server/src/matchmaking.ts
 
 import { Server, Socket } from 'socket.io';
-import { getSocketUserInfo, storeSocketUser } from './redisStore';
-import { matchManager } from './matchManager';
-import BO3MatchManager from './bo3MatchManager';
+import { getSocketUserInfo, storeSocketUser } from './stores/redisStore';
+import { matchManager } from './managers/matchManager';
+import BO3MatchManager from './managers/bo3MatchManager';
 
 interface Player {
   socketId: string;

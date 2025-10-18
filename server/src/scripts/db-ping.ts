@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { initPostgres, sequelize } from '../postgres';
+import { initPostgres, sequelize } from '../../stores/postgres';
 
 // Optional opt-out: set DB_SKIP_CHECK=1 to skip the DB check during build
 const skip = (() => {

@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { sequelize } from '../postgres';
+import { sequelize } from '../stores/postgres';
 import { QueryTypes } from 'sequelize';
 
 const router = express.Router();

@@ -1,17 +1,13 @@
-/**
- * Migration Script: Convert from in-memory rooms to Redis MatchManager
- * 
- * This script provides helper functions to gradually migrate your codebase
- * from the legacy Map-based room system to Redis-backed MatchManager.
- * 
- * Usage:
- * 1. Import this alongside your current index.ts
- * 2. Use wrapper functions during transition
- * 3. Replace all calls with direct matchManager calls
- * 4. Remove this file when migration complete
- */
+import { matchManager, MatchData, PlayerMatchState } from '../managers/matchManager';
 
-import { matchManager, MatchData, PlayerMatchState } from './managers/matchManager';
+export function normalizeIp(ip: string | string[] | undefined | null): string {
+  if (!ip) return '';
+  const raw = Array.isArray(ip) ? ip[0] : ip;
+  let v = String(raw).trim();
+  if (v.startsWith('::ffff:')) v = v.slice(7);
+  if (v === '::1') v = '127.0.0.1';
+  return v;
+}
 
 // ========================================
 // 📦 LEGACY TYPE DEFINITIONS
