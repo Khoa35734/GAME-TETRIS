@@ -27,6 +27,7 @@ import feedbacksRouter from './routes/feedbacks';
 import reportsRouter from './routes/reports';
 import broadcastsRouter from './routes/broadcasts';
 import adminRoutes from './routes/admin';
+import messagesRouter from './routes/messages';
 import { matchManager, MatchData, PlayerMatchState } from './matchManager';
 import { setupFriendshipAssociations } from './models/Friendship';
 import MatchmakingSystem from './matchmaking';
@@ -228,6 +229,7 @@ app.use('/api/feedbacks', feedbacksRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/broadcast', broadcastsRouter);
 app.use('/api/admin', adminRoutes);
+app.use('/api/messages', messagesRouter); // 📬 Messages/Inbox API
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

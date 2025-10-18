@@ -43,6 +43,7 @@ const HomeMenu: React.FC = () => {
   const [showProfile, setShowProfile] = useState(false); // Profile modal
   const [showHelp, setShowHelp] = useState(false); // Gameplay help modal
   const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
+  const [unreadCount, setUnreadCount] = useState(0); // 📬 Số tin chưa đọc
 
   // Background music
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
@@ -97,6 +98,31 @@ const HomeMenu: React.FC = () => {
   const registerEmailRef = useRef<HTMLInputElement>(null);
   const registerPasswordRef = useRef<HTMLInputElement>(null);
   const registerConfirmPasswordRef = useRef<HTMLInputElement>(null);
+
+  // 📬 Fetch unread messages count
+  const fetchUnreadCount = async () => {
+    if (!currentUser?.accountId) return;
+    
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const response = await fetch(`${API_BASE}/api/messages/stats/${currentUser.accountId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setUnreadCount(parseInt(data.unread) || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch unread count:', err);
+    }
+  };
+
+  // Load unread count khi user login và refresh mỗi 30s
+  useEffect(() => {
+    if (currentUser?.accountId) {
+      fetchUnreadCount(); // Load ngay
+      const interval = setInterval(fetchUnreadCount, 30000); // Refresh mỗi 30s
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
 
   // Handle login
   const handleLogin = async (e: React.FormEvent) => {
@@ -659,6 +685,64 @@ const HomeMenu: React.FC = () => {
               }}
             >
               👥 Bạn bè
+            </button>
+
+            {/* Inbox Button */}
+            <button
+              onClick={() => {
+                navigate('/inbox');
+                // Reset unread count sau khi vào inbox
+                setTimeout(() => fetchUnreadCount(), 1000);
+              }}
+              style={{
+                background: 'rgba(33, 150, 243, 0.15)',
+                border: '1px solid rgba(33, 150, 243, 0.4)',
+                color: '#42a5f5',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease',
+                position: 'relative'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(33, 150, 243, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(33, 150, 243, 0.15)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              📬 Hộp thư
+              {unreadCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-6px',
+                  right: '-6px',
+                  background: 'linear-gradient(135deg, #f93a5a, #f7778c)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '22px',
+                  height: '22px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75rem',
+                  fontWeight: 'bold',
+                  border: '2px solid #1a1a2e',
+                  boxShadow: '0 2px 8px rgba(249, 58, 90, 0.6)',
+                  animation: 'pulse 2s infinite'
+                }}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </button>
 
             {/* Leaderboard Button */}

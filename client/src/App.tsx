@@ -23,6 +23,7 @@ import { MobileWarning } from './components/MobileWarning';
 import SinglePlayerSettings from './components/SinglePlayerSettings';
 import OnlineRanked from './components/OnlineRanked';
 import OnlineCasual from './components/OnlineCasual';
+import Inbox from './components/Inbox'; // 📬 Inbox component
 
 const Home: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -154,6 +155,7 @@ const App: React.FC = () => {
           
           {/* Game Routes */}
           <Route path="/" element={<HomeMenu />} />
+          <Route path="/inbox" element={<Inbox />} /> {/* 📬 Inbox Route */}
           <Route path="/single/settings" element={<SinglePlayerSettings />} />
           <Route path="/single" element={<Tetris />} />
           <Route path="/online" element={<OnlineMenu />} />
