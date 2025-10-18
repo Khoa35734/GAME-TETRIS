@@ -89,6 +89,7 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    // 1. Tạo broadcast
     const [newBroadcast] = await sequelize.query(
       `INSERT INTO broadcast_messages 
         (admin_id, title, content, message_type, priority, is_active, start_date, end_date, created_at, updated_at) 
@@ -119,6 +120,56 @@ router.post('/', async (req, res) => {
         type: QueryTypes.INSERT,
       }
     );
+
+    // 2. 🚀 TỰ ĐỘNG GỬI TIN NHẮN VÀO HỘP THƯ CỦA TẤT CẢ NGƯỜI CHƠI
+    try {
+      const broadcastId = (newBroadcast as any).id;
+      
+      // Lấy thông tin admin để hiển thị tên người gửi
+      const [adminInfo] = await sequelize.query(
+        `SELECT user_name FROM users WHERE user_id = :admin_id`,
+        {
+          replacements: { admin_id },
+          type: QueryTypes.SELECT
+        }
+      );
+      
+      const adminName = (adminInfo as any)?.user_name || 'Admin';
+      
+      // Gửi tin nhắn cho TẤT CẢ users (trừ chính admin)
+      await sequelize.query(
+        `INSERT INTO messages (recipient_id, sender_id, message_type, subject, content, metadata)
+         SELECT 
+           user_id,
+           :admin_id,
+           'broadcast',
+           :subject,
+           :content,
+           :metadata
+         FROM users
+         WHERE user_id != :admin_id
+           AND is_active = TRUE`,
+        {
+          replacements: {
+            admin_id,
+            subject: `📢 ${title}`,
+            content: `${message}\n\n---\nGửi bởi: ${adminName}`,
+            metadata: JSON.stringify({
+              broadcast_id: broadcastId,
+              broadcast_type: type || 'info',
+              priority: priority || 'medium'
+            })
+          },
+          type: QueryTypes.INSERT
+        }
+      );
+      
+      console.log(`[Broadcasts] ✅ Broadcast #${broadcastId} created and sent to all users' inbox`);
+    } catch (inboxError) {
+      // Nếu gửi inbox lỗi, vẫn trả về broadcast đã tạo thành công
+      console.error('[Broadcasts] ⚠️ Error sending to inbox (broadcast still created):', inboxError);
+    }
+
     res.status(201).json(newBroadcast);
   } catch (err) {
     console.error('[Broadcasts] Error creating broadcast:', err);

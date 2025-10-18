@@ -1,14 +1,28 @@
--- Fix permissions for users table and sequence
--- Run this in your PostgreSQL database as admin/superuser
+-- Fix permissions for all tables and sequences
+-- Run this with: psql -U postgres -d tetris -f fix-permissions.sql
 
--- Grant all privileges on users table to your app user
-GRANT ALL PRIVILEGES ON TABLE users TO devuser;
+-- 1. Grant all privileges on database
+GRANT ALL PRIVILEGES ON DATABASE tetris TO devuser;
 
--- Grant usage and select on the sequence
-GRANT USAGE, SELECT ON SEQUENCE users_user_id_seq TO devuser;
+-- 2. Grant all privileges on schema
+GRANT ALL PRIVILEGES ON SCHEMA public TO devuser;
 
--- Verify permissions
-\dp users
-\dp users_user_id_seq
+-- 3. Grant all privileges on all tables
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO devuser;
 
--- If you want to grant to a different user, replace 'devuser' with your PG_USER
+-- 4. Grant all privileges on all sequences (including broadcast_messages_message_id_seq)
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO devuser;
+
+-- 5. Set default privileges for future objects
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO devuser;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO devuser;
+
+-- 6. Show all sequences to verify
+SELECT 
+    schemaname,
+    sequencename
+FROM pg_sequences 
+WHERE schemaname = 'public'
+ORDER BY sequencename;
+
+\echo '✅ Permissions granted successfully!'

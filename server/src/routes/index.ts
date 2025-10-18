@@ -7,6 +7,7 @@ import feedbacksRouter from '../routes/feedbacks';
 import reportsRouter from '../routes/reports';
 import broadcastsRouter from '../routes/broadcasts';
 import adminRoutes from '../routes/admin';
+import messagesRouter from './messages';
 
 export function mountApiRoutes(app: Express) {
   app.use('/api/auth', authRouter);
@@ -17,4 +18,6 @@ export function mountApiRoutes(app: Express) {
   app.use('/api/reports', reportsRouter);
   app.use('/api/broadcast', broadcastsRouter);
   app.use('/api/admin', adminRoutes);
+    app.use('/api/messages', messagesRouter);
+
 }

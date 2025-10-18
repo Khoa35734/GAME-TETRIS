@@ -20,6 +20,7 @@ import Versus from './components/Versus';
 import OnlineCreateRoom from './components/OnlineCreateRoom';
 import OnlineJoinRoom from './components/OnlineJoinRoom';
 import RoomLobby from './components/RoomLobby';
+import Inbox from './components/Inbox';
 
 const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -155,6 +156,7 @@ const App: React.FC = () => {
           <Route path="/online/join" element={<OnlineJoinRoom />} />
           <Route path="/room/:roomId" element={<RoomLobby />} />
           <Route path="/versus/:roomId" element={<Versus />} />
+          <Route path="/inbox" element={<Inbox />} />
           
           {/* Home Route */}
           <Route path="/admin-home" element={<Home />} />

@@ -1,83 +1,34 @@
-// import { useEffect, useState } from 'react';
-// import socket from '../socket.ts';
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 
-// type ChatMessage = { from?: string; text: string };
+// Import ProtectedRoute
+import ProtectedRoute from './ProtectedRoute';
 
-// export default function App() {
-// 	const [messages, setMessages] = useState<ChatMessage[]>([]);
-// 	const [connected, setConnected] = useState(false);
-
-// 	useEffect(() => {
-// 		function onConnect() {
-// 			setConnected(true);
-// 			console.log('Connected:', socket.id);
-// 			socket.emit('ping');
-// 		}
-// 		function onDisconnect() {
-// 			setConnected(false);
-// 		}
-// 		function onPong() {
-// 			console.log('Pong nhận được');
-// 		}
-// 		function onChat(data: ChatMessage) {
-// 			setMessages((prev) => [...prev, data]);
-// 		}
-
-// 		socket.on('connect', onConnect);
-// 		socket.on('disconnect', onDisconnect);
-// 		socket.on('pong', onPong);
-// 		socket.on('chat:message', onChat);
-
-// 			return () => {
-// 			socket.off('connect', onConnect);
-// 			socket.off('disconnect', onDisconnect);
-// 			socket.off('pong', onPong);
-// 			socket.off('chat:message', onChat);
-// 				// không đóng socket singleton khi unmount
-// 		};
-// 	}, [socket]);
-
-// 	const sendMessage = () => {
-// 		socket.emit('chat:message', { text: 'Hello từ React' });
-// 	};
-
-// 	return (
-// 		<div style={{ maxWidth: 600, margin: '40px auto', color: '#fff', fontFamily: 'system-ui' }}>
-// 			<h2>React Chat Test</h2>
-// 			<div style={{ marginBottom: 12 }}>
-// 					Trạng thái: {connected ? 'Đã kết nối' : 'Mất kết nối'}
-// 			</div>
-// 			<button onClick={sendMessage}>Send Hello</button>
-// 			<div style={{ marginTop: 16 }}>
-// 				{messages.map((m, i) => (
-// 					<p key={i}>
-// 						{m.from ? `${m.from}: ` : ''}
-// 						{m.text}
-// 					</p>
-// 				))}
-// 			</div>
-// 		</div>
-// 	);
-// }
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
-import socket from '../socket.ts';
-
-// Import các thành phần mới
-import AdminDashboard from './admin/AdminDashboard'; 
+// Import các thành phần admin
 import ReportsManagement from './admin/ReportsManagement';
 import FeedbackManagement from './admin/FeedbackManagement';
 import BroadcastMessages from './admin/BroadcastMessages';
+import AdminDashboard from './admin/AdminDashboard';
 
-// Định nghĩa kiểu dữ liệu cho tin nhắn chat
-type ChatMessage = { from?: string; text: string };
+// Import các thành phần game
+import Tetris from './Tetris';
+import HomeMenu from './HomeMenu';
+import OnlineMenu from './OnlineMenu';
+import Versus from './Versus';
+import OnlineCreateRoom from './OnlineCreateRoom';
+import OnlineJoinRoom from './OnlineJoinRoom';
+import RoomLobby from './RoomLobby';
+import { InvitationNotification } from './InvitationNotification';
+import { MobileWarning } from './MobileWarning';
+import SinglePlayerSettings from './SinglePlayerSettings';
+import OnlineRanked from './OnlineRanked';
+import OnlineCasual from './OnlineCasual';
+import Inbox from './Inbox'; // 📬 Inbox component
 
 const Home: React.FC = () => {
-  const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const handleLoginTest = () => {
-    // Giả lập đăng nhập
     setIsLoggedIn(true);
     alert('✅ Đã đăng nhập thành công (Test Mode)');
   };
@@ -88,216 +39,80 @@ const Home: React.FC = () => {
   };
 
   return (
-    <div style={{ 
-      padding: 24, 
-      fontFamily: 'Inter, sans-serif', 
-      color: '#fff',
-      minHeight: '100vh',
-      background: '#0f0f0f'
-    }}>
-      <div style={{ maxWidth: 800, margin: '0 auto' }}>
-        <h1 style={{ fontSize: 32, marginBottom: 12 }}>Admin Panel Test</h1>
-        <p style={{ color: '#9ca3af', marginBottom: 24 }}>
-          Test các chức năng admin (Chưa có đăng nhập thật)
-        </p>
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold mb-2">Tetris Admin Panel</h1>
+          <p className="text-gray-400">Quản lý hệ thống game Tetris</p>
+        </div>
 
         {/* Login Status */}
-        <div style={{
-          background: isLoggedIn ? '#064e3b' : '#7f1d1d',
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 24,
-          border: `2px solid ${isLoggedIn ? '#10b981' : '#ef4444'}`
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 16, fontWeight: 600 }}>
+        <div className={`bg-gray-800 rounded-lg p-4 mb-6 ${isLoggedIn ? 'border-green-500' : 'border-red-500'} border`}>
+          <div className="flex justify-between items-center">
+            <span className="text-lg font-semibold">
               {isLoggedIn ? '🟢 Đã đăng nhập (Test)' : '🔴 Chưa đăng nhập'}
             </span>
             {isLoggedIn ? (
-              <button onClick={handleLogout} style={logoutButtonStyle}>
+              <button onClick={handleLogout} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors">
                 Đăng xuất
               </button>
             ) : (
-              <button onClick={handleLoginTest} style={loginButtonStyle}>
+              <button onClick={handleLoginTest} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                 🔑 Login Test
               </button>
             )}
           </div>
         </div>
 
-        {/* Navigation Buttons */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Link to="/admin-dashboard" style={testButtonStyle}>
-            📊 Admin Dashboard
+        {/* Navigation Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <Link to="/admin" className="bg-gray-800 hover:bg-gray-700 p-6 rounded-lg transition-colors text-center block">
+            <div className="text-2xl mb-2">📊</div>
+            <h3 className="text-lg font-semibold">Admin Dashboard</h3>
+            <p className="text-gray-400 text-sm">Quản lý tổng quan</p>
           </Link>
-          <Link to="/reports-management" style={testButtonStyle}>
-            ⚠️ Reports Management
+
+          <Link to="/admin/reports" className="bg-gray-800 hover:bg-gray-700 p-6 rounded-lg transition-colors text-center block">
+            <div className="text-2xl mb-2">⚠️</div>
+            <h3 className="text-lg font-semibold">Reports Management</h3>
+            <p className="text-gray-400 text-sm">Quản lý báo cáo</p>
           </Link>
-          <Link to="/feedback-management" style={testButtonStyle}>
-            💬 Feedback Management
+
+          <Link to="/admin/feedback" className="bg-gray-800 hover:bg-gray-700 p-6 rounded-lg transition-colors text-center block">
+            <div className="text-2xl mb-2">💬</div>
+            <h3 className="text-lg font-semibold">Feedback Management</h3>
+            <p className="text-gray-400 text-sm">Quản lý phản hồi</p>
           </Link>
-          <Link to="/broadcast-messages" style={testButtonStyle}>
-            📢 Broadcast Messages
+
+          <Link to="/admin/broadcast" className="bg-gray-800 hover:bg-gray-700 p-6 rounded-lg transition-colors text-center block">
+            <div className="text-2xl mb-2">📢</div>
+            <h3 className="text-lg font-semibold">Broadcast Messages</h3>
+            <p className="text-gray-400 text-sm">Gửi thông báo</p>
           </Link>
-          <Link to="/chat" style={testButtonStyle}>
-            💭 Chat Test
-          </Link>
+        </div>
+
+        {/* Game Navigation */}
+        <div className="bg-gray-800 rounded-lg p-6 mb-6">
+          <h3 className="text-lg font-semibold mb-4">🎮 Game Navigation</h3>
+          <div className="grid grid-cols-2 gap-2">
+            <Link to="/" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-center transition-colors">
+              Trang Chủ Game
+            </Link>
+            <Link to="/single" className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-center transition-colors">
+              Chơi Đơn
+            </Link>
+          </div>
         </div>
 
         {/* Info Box */}
-        <div style={{
-          marginTop: 32,
-          padding: 16,
-          background: '#1e1e1e',
-          borderRadius: 8,
-          border: '1px solid #374151'
-        }}>
-          <h3 style={{ fontSize: 18, marginBottom: 8, color: '#fbbf24' }}>ℹ️ Lưu ý</h3>
-          <p style={{ color: '#9ca3af', fontSize: 14, lineHeight: 1.6 }}>
-            • Nút "Login Test" chỉ để test UI, chưa kết nối backend<br/>
-            • Sau khi làm xong chức năng đăng nhập, sẽ xóa nút này<br/>
-            • Thay thế bằng form đăng nhập thật với authentication
-          </p>
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+          <h3 className="text-lg font-semibold mb-2 text-yellow-400">ℹ️ Lưu ý</h3>
+          <ul className="text-sm text-yellow-300 space-y-1">
+            <li>• Nút "Login Test" chỉ để test UI, chưa kết nối backend</li>
+            <li>• Dữ liệu hiển thị là mock data cho testing</li>
+            <li>• Kết nối thực tế sẽ được tích hợp sau</li>
+          </ul>
         </div>
-      </div>
-    </div>
-  );
-};
-
-const testButtonStyle: React.CSSProperties = {
-  display: 'block',
-  padding: '16px 24px',
-  background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
-  color: '#fff',
-  textDecoration: 'none',
-  borderRadius: 8,
-  textAlign: 'center',
-  fontWeight: 600,
-  fontSize: 16,
-  cursor: 'pointer',
-  transition: 'all 0.2s',
-  border: 'none',
-};
-
-const loginButtonStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#10b981',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  cursor: 'pointer',
-  fontWeight: 600,
-  fontSize: 14,
-};
-
-const logoutButtonStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#ef4444',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  cursor: 'pointer',
-  fontWeight: 600,
-  fontSize: 14,
-};
-
-const ChatTest: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [connected, setConnected] = useState(false);
-
-  useEffect(() => {
-    function onConnect() {
-      setConnected(true);
-      console.log('Connected:', socket.id);
-      socket.emit('ping');
-    }
-    function onDisconnect() {
-      setConnected(false);
-    }
-    function onPong() {
-      console.log('Pong nhận được');
-    }
-    function onChat(data: ChatMessage) {
-      setMessages((prev) => [...prev, data]);
-    }
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('pong', onPong);
-    socket.on('chat:message', onChat);
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('pong', onPong);
-      socket.off('chat:message', onChat);
-    };
-  }, []);
-
-  const sendMessage = () => {
-    socket.emit('chat:message', { text: 'Hello từ React' });
-  };
-
-  return (
-    <div
-      style={{
-        maxWidth: 600,
-        margin: '40px auto',
-        color: '#fff',
-        fontFamily: 'system-ui',
-        background: '#1e1e1e',
-        padding: 20,
-        borderRadius: 8,
-        boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
-      }}
-    >
-      <h2 style={{ textAlign: 'center', marginBottom: 20 }}>React Chat Test</h2>
-      <div style={{ marginBottom: 12, fontSize: 16 }}>
-        <strong>Trạng thái:</strong> {connected ? 'Đã kết nối' : 'Mất kết nối'}
-      </div>
-      <button
-        onClick={sendMessage}
-        style={{
-          padding: '10px 20px',
-          background: connected ? '#3b82f6' : '#6b7280',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 8,
-          cursor: connected ? 'pointer' : 'not-allowed',
-          fontWeight: 'bold',
-          fontSize: 14,
-        }}
-        disabled={!connected}
-      >
-        Send Hello
-      </button>
-      <div style={{ marginTop: 16 }}>
-        <h3 style={{ marginBottom: 12 }}>Messages:</h3>
-        <div
-          style={{
-            background: '#2d2d2d',
-            padding: 12,
-            borderRadius: 8,
-            maxHeight: 300,
-            overflowY: 'auto',
-          }}
-        >
-          {messages.length === 0 ? (
-            <p style={{ color: '#9ca3af' }}>No messages yet...</p>
-          ) : (
-            messages.map((m, i) => (
-              <p key={i} style={{ margin: '4px 0' }}>
-                <strong>{m.from ? `${m.from}: ` : ''}</strong>
-                <span>{m.text}</span>
-              </p>
-            ))
-          )}
-        </div>
-      </div>
-      <div style={{ marginTop: 20, textAlign: 'center' }}>
-        <Link to="/" style={{ color: '#3b82f6', textDecoration: 'none' }}>
-          ← Quay lại Home
-        </Link>
       </div>
     </div>
   );
@@ -306,33 +121,56 @@ const ChatTest: React.FC = () => {
 const App: React.FC = () => {
   return (
     <Router>
-      <div style={{ background: '#0f0f0f', minHeight: '100vh' }}>
+      <div className="min-h-screen bg-gray-900">
         {/* Global Navigation */}
-        <nav style={{
-          padding: '12px 24px',
-          background: '#1a1a1a',
-          borderBottom: '1px solid #374151',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1000
-        }}>
-          <Link to="/" style={{
-            color: '#3b82f6',
-            textDecoration: 'none',
-            fontSize: 16,
-            fontWeight: 600
-          }}>
-            🏠 Admin Test Home
-          </Link>
+        <nav className="bg-gray-800 border-b border-gray-700 sticky top-0 z-50 px-6 py-3">
+          <div className="max-w-7xl mx-auto flex justify-between items-center">
+            <Link to="/" className="text-white font-semibold text-lg flex items-center gap-2">
+              🏠 Tetris Admin System
+            </Link>
+            <div className="flex gap-4">
+              <Link to="/" className="text-gray-300 hover:text-white transition-colors">
+                Game Home
+              </Link>
+              <Link to="/admin" className="text-gray-300 hover:text-white transition-colors">
+                Admin
+              </Link>
+            </div>
+          </div>
         </nav>
 
+        {/* Global components */}
+        <MobileWarning />
+        <InvitationNotification />
+
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/admin-dashboard" element={<AdminDashboard />} />
-          <Route path="/reports-management" element={<ReportsManagement />} />
-          <Route path="/feedback-management" element={<FeedbackManagement />} />
-          <Route path="/broadcast-messages" element={<BroadcastMessages />} />
-          <Route path="/chat" element={<ChatTest />} />
+          {/* Admin Routes - Protected */}
+          <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin-dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/reports" element={<ProtectedRoute><ReportsManagement /></ProtectedRoute>} />
+          <Route path="/admin/feedback" element={<ProtectedRoute><FeedbackManagement /></ProtectedRoute>} />
+          <Route path="/admin/feedbacks" element={<ProtectedRoute><FeedbackManagement /></ProtectedRoute>} />
+          <Route path="/admin/broadcast" element={<ProtectedRoute><BroadcastMessages /></ProtectedRoute>} />
+          <Route path="/admin/broadcasts" element={<ProtectedRoute><BroadcastMessages /></ProtectedRoute>} />
+          
+          {/* Game Routes */}
+          <Route path="/" element={<HomeMenu />} />
+          <Route path="/inbox" element={<Inbox />} /> {/* 📬 Inbox Route */}
+          <Route path="/single/settings" element={<SinglePlayerSettings />} />
+          <Route path="/single" element={<Tetris />} />
+          <Route path="/online" element={<OnlineMenu />} />
+          <Route path="/online/ranked" element={<OnlineRanked />} />
+          <Route path="/online/casual" element={<OnlineCasual />} />
+          <Route path="/online/create" element={<OnlineCreateRoom />} />
+          <Route path="/online/join" element={<OnlineJoinRoom />} />
+          <Route path="/room/:roomId" element={<RoomLobby />} />
+          <Route path="/versus/:roomId" element={<Versus />} />
+          
+          {/* Home Route */}
+          <Route path="/admin-home" element={<Home />} />
+          
+          {/* Redirect */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </Router>
