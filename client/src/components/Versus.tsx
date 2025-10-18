@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import socket, { SERVER_URL } from '../socket.ts';
+import socket, { SERVER_URL } from '../socket';
+import { useReliableUDP, type UDPMessage } from '../hooks/useReliableUDP';
+
 import Stage from './Stage';
 import { HoldPanel, NextPanel } from './SidePanels';
 import GarbageQueueBar from './GarbageQueueBar';
-import { checkCollision, createStage, getTSpinType, isGameOverFromBuffer } from '../gamehelper';
+import { checkCollision, createStage, isGameOverFromBuffer, getTSpinType } from '../gamehelper';
 import type { Stage as StageType, Cell as StageCell, TSpinType } from '../gamehelper';
 import { usePlayer } from '../hooks/usePlayer';
 import { useStage } from '../hooks/useStage';
@@ -37,7 +39,7 @@ import {
 
 // --- DAS/ARR Movement Settings (TETR.IO style) ---
 const DAS_DELAY: number = 120; // Delayed Auto Shift (ms) - có thể điều chỉnh trong settings
-const ARR: number = 0; // Auto Repeat Rate (ms) - 0 = instant, 40 = normal
+const ARR: number = 40; // Auto Repeat Rate (ms) - 0 = instant, 40 = normal (giống Tetris.tsx)
 const MOVE_INTERVAL: number = ARR || 16; // Fallback cho ARR
 
 // --- SRS/TETR.IO Settings ---
@@ -157,15 +159,7 @@ const Versus: React.FC = () => {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [isRtcReady, setIsRtcReady] = useState(false);
-  const [rtcRetryCount, setRtcRetryCount] = useState(0);
-  const maxRetries = 3;
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const udpStatsRef = useRef({ sent: 0, received: 0, failed: 0, parseErrors: 0 });
-  // ========================================
-  // ⚡ WEBRTC CONNECTION SETUP
-  // ========================================
-  const lastSnapshotRef = useRef<number>(0);
-  const closingRef = useRef(false);
   
   // Your (Right side) board state
   const [player, updatePlayerPos, resetPlayer, /* playerRotate (replaced by playerRotateSRS) */, hold, canHold, nextFour, holdSwap, clearHold, setQueueSeed, pushQueue, setPlayer] = usePlayer();
@@ -180,6 +174,16 @@ const Versus: React.FC = () => {
   const [timerOn, setTimerOn] = useState(false);
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+  
+  // Game over animation state (separate for me and opponent)
+  const [myFillWhiteProgress, setMyFillWhiteProgress] = useState(0); // 0-100%
+  const [oppFillWhiteProgress, setOppFillWhiteProgress] = useState(0); // 0-100%
+  const myFillWhiteAnimationRef = useRef<number | null>(null);
+  const oppFillWhiteAnimationRef = useRef<number | null>(null);
+  
+  // Game stats for result overlay
+  const [myStats, setMyStats] = useState({ rows: 0, level: 1, score: 0 });
+  const [oppStats, _setOppStats] = useState({ rows: 0, level: 1, score: 0 }); // Reserved for future use
   
   // ========================================
   // 📊 PING TRACKING
@@ -203,6 +207,11 @@ const Versus: React.FC = () => {
   // DAS/ARR movement state
   const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
   
+  // Space hold state for spam hard drop
+  const [_isSpaceHeld, setIsSpaceHeld] = useState(false); // State tracked for future use
+  const lastHardDropTimeRef = useRef<number>(0);
+  const HARD_DROP_SPAM_INTERVAL = 200; // 200ms between drops = 5 drops/second
+  
   // Lock delay state
   const [isGrounded, setIsGrounded] = useState(false);
   const inactivityTimeoutRef = useRef<number | null>(null);
@@ -223,7 +232,6 @@ const Versus: React.FC = () => {
   // Auto-exit after match ends (1 minute timeout)
   const [autoExitCountdown, setAutoExitCountdown] = useState<number | null>(null);
   const autoExitTimerRef = useRef<number | null>(null);
-  const AUTO_EXIT_TIMEOUT_MS = 60000; // 60 seconds (1 minute)
   
   const wrapperRef = useRef<HTMLDivElement>(null);
   const matchTimer = useRef<number | null>(null);
@@ -250,71 +258,45 @@ const Versus: React.FC = () => {
     }
   }, [urlRoomId]); // Chỉ chạy 1 lần khi urlRoomId tồn tại
 
-  const cleanupWebRTC = useCallback((reason: string = 'manual-cleanup') => {
-    if (closingRef.current) {
-      console.log(`[WebRTC] Cleanup already in progress, skipping (${reason})`);
-      return;
-    }
-    closingRef.current = true;
-    console.log(`[WebRTC] Cleaning up (${reason})`);
-
+   const cleanupWebRTC = useCallback((reason = 'manual') => {
+    console.log(`[WebRTC] Cleanup: ${reason}`);
     setIsRtcReady(false);
-
     if (dcRef.current) {
-      try {
-        dcRef.current.onopen = null;
-        dcRef.current.onclose = null;
-        dcRef.current.onerror = null;
-        dcRef.current.onmessage = null;
-        if (dcRef.current.readyState !== 'closed' && dcRef.current.readyState !== 'closing') {
-          dcRef.current.close();
-        }
-      } catch (err) {
-        console.warn('[WebRTC] Data channel cleanup error:', err);
-      }
+      try { dcRef.current.close(); } catch {}
       dcRef.current = null;
     }
-
     if (pcRef.current) {
-      try {
-        pcRef.current.onicecandidate = null;
-        pcRef.current.onconnectionstatechange = null;
-        pcRef.current.ondatachannel = null;
-        pcRef.current.onicegatheringstatechange = null;
-        pcRef.current.onsignalingstatechange = null;
-        if (pcRef.current.signalingState !== 'closed') {
-          pcRef.current.close();
-        }
-      } catch (err) {
-        console.warn('[WebRTC] Peer connection cleanup error:', err);
-      }
+      try { pcRef.current.close(); } catch {}
       pcRef.current = null;
     }
-
-    udpStatsRef.current = { sent: 0, received: 0, failed: udpStatsRef.current.failed, parseErrors: udpStatsRef.current.parseErrors };
-    
-    // Small delay before allowing new connections
-    setTimeout(() => {
-      closingRef.current = false;
-      console.log('[WebRTC] Cleanup complete, ready for new connection');
-    }, 100);
-  }, [setIsRtcReady]);
+  }, []);
 
   const applyGarbageRows = useCallback((count: number): Promise<StageType | null> => {
     if (count <= 0) return Promise.resolve(null);
     console.log(`[applyGarbageRows] Applying ${count} garbage rows with animation...`);
     
-    // Set animation flag
+    // Set animation flag để block gravity và locking
     setIsApplyingGarbage(true);
     
     return new Promise((resolve) => {
       let currentRow = 0;
       let finalStage: StageType | null = null;
+      let collisionDetected = false;
       
       const applyNextRow = () => {
+        // Nếu đã phát hiện collision, dừng apply tiếp và force drop ngay
+        if (collisionDetected) {
+          console.log(`[applyGarbageRows] ⚠️ Stopping animation early due to collision`);
+          setIsApplyingGarbage(false);
+          console.log(`[applyGarbageRows] ⚠️ Forcing piece to drop NOW!`);
+          updatePlayerPos({ x: 0, y: 0, collided: true });
+          resolve(finalStage);
+          return;
+        }
+        
         if (currentRow >= count) {
           console.log(`[applyGarbageRows] Animation complete! Total ${count} rows applied`);
-          setIsApplyingGarbage(false); // Clear animation flag
+          setIsApplyingGarbage(false);
           resolve(finalStage);
           return;
         }
@@ -327,10 +309,17 @@ const Versus: React.FC = () => {
           const width = prev[0].length;
           const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell)) as StageType;
           
-          // Add one garbage row
+          // Add one garbage row at bottom (đẩy stage lên)
           const hole = Math.floor(Math.random() * width);
           cloned.shift(); // Remove top row
           cloned.push(createGarbageRow(width, hole)); // Add garbage row at bottom
+          
+          // Kiểm tra xem garbage có chạm khối đang rơi không
+          // Player position không đổi nhưng stage đã dịch lên → tương đương player đi xuống
+          if (checkCollision(player, cloned, { x: 0, y: 0 })) {
+            console.log(`[applyGarbageRows] ⚠️ COLLISION DETECTED on row ${currentRow + 1}/${count}!`);
+            collisionDetected = true;
+          }
           
           finalStage = cloned;
           console.log(`[applyGarbageRows] Row ${currentRow + 1}/${count} applied`);
@@ -338,12 +327,18 @@ const Versus: React.FC = () => {
         });
         
         currentRow++;
-        setTimeout(applyNextRow, 100); // 100ms delay between each row
+        
+        // Nếu collision, không delay - xử lý ngay ở iteration tiếp
+        if (collisionDetected) {
+          applyNextRow();
+        } else {
+          setTimeout(applyNextRow, 100); // 100ms delay between each row
+        }
       };
       
       applyNextRow();
     });
-  }, [setStage]);
+  }, [setStage, player, updatePlayerPos]);
 
   // ========================================
   // ⚡ WEBRTC UDP HELPER FUNCTIONS
@@ -353,322 +348,154 @@ const Versus: React.FC = () => {
    * ⚡ Enhanced UDP Send with comprehensive fallback
    * Supports: snapshot, garbage, input, gamestate, topout
    */
-  const sendViaUDP = useCallback((type: string, data: any) => {
-    if (isRtcReady && dcRef.current?.readyState === 'open') {
-      try {
-        const msg = JSON.stringify({ 
-          type, 
-          ...data, 
-          ts: Date.now(),
-          from: socket.id 
-        });
-        dcRef.current.send(msg);
-        udpStatsRef.current.sent++;
-        console.log(`⚡ [UDP] Sent ${type}:`, Object.keys(data).join(', '));
-        return true; // Success via UDP
-      } catch (err) {
-        console.warn(`⚠️ [UDP] Send ${type} failed, fallback to TCP:`, err);
-        udpStatsRef.current.failed++;
-        return false; // Will fallback to TCP
-      }
-    }
-    console.log(`📡 [TCP] UDP not ready for ${type}, using TCP fallback`);
-    return false; // UDP not ready, use TCP
-  }, [isRtcReady]);
+const onUDPMessage = useCallback((msg: UDPMessage) => {
+    switch (msg.type) {
+      case 'input':
+        console.log('🎮 [UDP] Opponent input:', msg.payload);
+        break;
 
+      case 'garbage':
+        setIncomingGarbage(prev => prev + (msg.payload?.lines || 0));
+        break;
+
+      case 'snapshot':
+        if (msg.payload?.matrix) setOppStage(msg.payload.matrix);
+        if (msg.payload?.hold) setOppHold(msg.payload.hold);
+        break;
+
+      case 'topout':
+        console.log('🏁 Opponent topout:', msg.payload?.reason);
+        break;
+
+      default:
+        console.warn('⚠️ Unknown UDP msg type:', msg.type, msg);
+        break;
+    }
+  }, []);
+
+  const { sendUDP } = useReliableUDP({
+    dcRef,
+    onMessage: onUDPMessage,
+    resendLimit: 3,
+    resendInterval: 200,
+  });
   /**
    * 💣 Send garbage attack via UDP with TCP fallback
    */
-  const sendGarbage = useCallback((lines: number) => {
-    const sent = sendViaUDP('garbage', { lines });
-    if (!sent && roomId) {
-      // TCP fallback
-      console.log('📡 [TCP] Sending garbage via Socket.IO:', lines);
-      socket.emit('game:attack', roomId, { lines });
-    }
-  }, [sendViaUDP, roomId]);
+  const sendGarbage = useCallback(
+    (lines: number) => {
+      const sent = sendUDP('garbage', { lines }, true);
+      if (sent) {
+        console.log(`💣 [SEND] Garbage sent via UDP: lines=${lines}`);
+      } else if (roomId) {
+        console.log(`💣 [SEND] Garbage UDP failed → fallback to TCP`);
+        socket.emit('game:attack', roomId, { lines });
+      }
+    },
+    [sendUDP, roomId]
+  );
 
   /**
    * 🎮 Send input (for predictive rendering) via UDP
    */
-  const sendInput = useCallback((action: string, data?: any) => {
-    const sent = sendViaUDP('input', { action, ...data });
+  const sendInput = useCallback((action: string, _data?: any) => {
+    const sent =  sendUDP('input', { action }, false); // không cần reliable
+
     if (!sent) {
       // Input is not critical, no TCP fallback needed
       console.log('📡 [Input] UDP not available, skipping input send');
     }
-  }, [sendViaUDP]);
+  }, [sendUDP]);
 
   /**
    * 🏁 Send topout via UDP with TCP fallback
    */
-  const sendTopout = useCallback((reason?: string) => {
-    const sent = sendViaUDP('topout', { reason });
-    if (!sent && roomId) {
-      // TCP fallback - critical message
-      console.log('📡 [TCP] Sending topout via Socket.IO:', reason);
-      socket.emit('game:topout', roomId, reason);
-    }
-  }, [sendViaUDP, roomId]);
-
-  /**
-   * 🎯 Send full game state via UDP with TCP fallback
-   */
-  const sendGameState = useCallback((gameState: any) => {
-    const sent = sendViaUDP('gamestate', gameState);
-    if (!sent && roomId) {
-      // TCP fallback
-      console.log('📡 [TCP] Sending game state via Socket.IO');
-      socket.emit('game:state', roomId, gameState);
-    }
-  }, [sendViaUDP, roomId]);
-
+ const sendTopout = useCallback(
+    (reason?: string) => {
+      const sent = sendUDP('topout', { reason }, true);
+      if (!sent && roomId) socket.emit('game:topout', roomId, reason);
+    },
+    [sendUDP, roomId]
+  );
   /**
    * 📡 Send board snapshot via UDP (periodic sync)
    */
   const sendSnapshot = useCallback(() => {
-    const now = Date.now();
-    if (now - lastSnapshotRef.current < 500) return; // Max 2 snapshots/sec
-    
-    lastSnapshotRef.current = now;
-    const snapshotData = {
-      matrix: cloneStageForNetwork(stage),
-      hold,
-      nextFour: nextFour.slice(0, 4),
-      combo,
-      b2b,
-      pendingGarbage: pendingGarbageLeft,
+    const snapshot = {
+      matrix: cloneStageForNetwork(oppStage),
+      hold: oppHold,
+      lines: incomingGarbage,
     };
-    
-    const sent = sendViaUDP('snapshot', snapshotData);
+    const sent = sendUDP('snapshot', snapshot, true);
     if (!sent && roomId) {
-      // TCP fallback - use existing game:state
-      console.log('📡 [TCP] Sending snapshot via Socket.IO');
-      socket.emit('game:state', roomId, snapshotData);
+      socket.emit('game:state', roomId, snapshot);
     }
-  }, [sendViaUDP, stage, hold, nextFour, combo, b2b, pendingGarbageLeft, roomId]);
+  }, [cloneStageForNetwork, oppStage, oppHold, incomingGarbage, sendUDP, roomId]);
 
   /**
    * ⚡ Handle incoming UDP messages with comprehensive support
    */
-  const handleUDPMessage = useCallback((data: string) => {
+  const handleUDPMessage = useCallback((raw: string) => {
     try {
-      const msg = JSON.parse(data);
+      const msg = JSON.parse(raw) as UDPMessage;
       udpStatsRef.current.received++;
-      
-      // Log received message for debugging
-      console.log(`⚡ [UDP] Received ${msg.type} from ${msg.from}`);
-      
-      switch (msg.type) {
-        case 'input':
-          // Opponent input received (for predictive rendering)
-          console.log('🎮 [UDP] Opponent input:', msg.action);
-          // Future: Use for predictive rendering
-          break;
-          
-        case 'garbage':
-          // Fast garbage notification via UDP
-          console.log('💣 [UDP] Garbage attack received:', msg.lines);
-          setIncomingGarbage(prev => {
-            const newValue = prev + msg.lines;
-            console.log('💣 [UDP] Updated incoming garbage:', prev, '→', newValue);
-            return newValue;
-          });
-          break;
-          
-        case 'snapshot':
-          // Full board state sync via UDP
-          console.log('📡 [UDP] Board snapshot received:', {
-            hasMatrix: !!msg.matrix,
-            hasHold: msg.hold !== undefined,
-            hasNextFour: !!msg.nextFour,
-            combo: msg.combo,
-            b2b: msg.b2b,
-            pendingGarbage: msg.pendingGarbage
-          });
-          
-          if (msg.matrix) {
-            setOppStage(msg.matrix);
-            console.log('📡 [UDP] ✅ Updated opponent board from UDP snapshot');
-          }
-          if (msg.hold !== undefined) setOppHold(msg.hold);
-          if (msg.nextFour) setOppNextFour(msg.nextFour);
-          if (msg.combo !== undefined || msg.b2b !== undefined) {
-            // Future: Update opponent combo/b2b display
-            console.log('📡 [UDP] Opponent stats - Combo:', msg.combo, 'B2B:', msg.b2b);
-          }
-          if (msg.pendingGarbage !== undefined) {
-            setOpponentIncomingGarbage(msg.pendingGarbage);
-          }
-          break;
-          
-        case 'gamestate':
-          // Full game state (similar to snapshot but more comprehensive)
-          console.log('🎯 [UDP] Game state received');
-          if (msg.matrix) setOppStage(msg.matrix);
-          if (msg.hold !== undefined) setOppHold(msg.hold);
-          if (msg.nextFour) setOppNextFour(msg.nextFour);
-          if (msg.combo !== undefined || msg.b2b !== undefined) {
-            console.log('🎯 [UDP] Opponent game state - Combo:', msg.combo, 'B2B:', msg.b2b);
-          }
-          if (msg.pendingGarbage !== undefined) {
-            setOpponentIncomingGarbage(msg.pendingGarbage);
-          }
-          break;
-          
-        case 'topout':
-          // Opponent topped out via UDP
-          console.log('🏁 [UDP] Opponent topout received:', msg.reason);
-          // Note: Server will also send game:over via TCP for reliability
-          break;
-          
-        default:
-          console.warn('⚠️ [UDP] Unknown message type:', msg.type, msg);
-      }
+      onUDPMessage(msg);
     } catch (err) {
-      console.error('❌ [UDP] Parse error:', err, 'Data:', data);
-      udpStatsRef.current.parseErrors = (udpStatsRef.current.parseErrors || 0) + 1;
+      udpStatsRef.current.parseErrors++;
+      console.error('❌ [UDP] Parse error:', err, 'Data:', raw);
     }
-  }, []);
+  }, [onUDPMessage]);
 
   // ========================================
   // ⚡ WEBRTC CONNECTION SETUP
   // ========================================
 
   const createPeerConnection = useCallback(() => {
-    if (pcRef.current) {
-      return pcRef.current;
-    }
-
-    console.log('[WebRTC] Creating new RTCPeerConnection');
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-      ],
-      iceCandidatePoolSize: 8,
-      bundlePolicy: 'balanced',
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
-
-    pcRef.current = pc;
-
-    pc.onicecandidate = (e) => {
+    pc.onicecandidate = e => {
       if (e.candidate && roomId) {
-        if (!isUdpCandidate(e.candidate)) {
-          console.log('[WebRTC] Skipping non-UDP candidate');
-          return;
-        }
         socket.emit('webrtc:ice', { roomId, candidate: e.candidate });
       }
     };
-
     pc.onconnectionstatechange = () => {
-      console.log('[WebRTC] Connection state:', pc.connectionState);
-      
-      // Only cleanup on permanent failure, not temporary disconnection
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        console.warn('[WebRTC] Connection permanently failed/closed. Cleaning up.');
-        cleanupWebRTC(`state-${pc.connectionState}`);
-      } else if (pc.connectionState === 'disconnected') {
-        console.warn('[WebRTC] Connection disconnected (may reconnect)...');
-        // Don't cleanup immediately, give it time to reconnect
-      } else if (pc.connectionState === 'connected') {
-        console.log('✅ [WebRTC] Peer connection CONNECTED');
-      }
+      console.log('[WebRTC] state:', pc.connectionState);
+      if (pc.connectionState === 'connected') setIsRtcReady(true);
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed')
+        cleanupWebRTC(pc.connectionState);
     };
-
     return pc;
   }, [cleanupWebRTC, roomId]);
   
-  const initWebRTC = useCallback(async (isHost: boolean) => {
-    try {
-      console.log('🚨 [DEBUG] initWebRTC called with isHost:', isHost);
-      console.log('🚨 [DEBUG] Current roomId:', roomId);
-      console.log('🚨 [DEBUG] pcRef.current exists:', !!pcRef.current);
-      console.log('🚨 [DEBUG] closingRef.current:', closingRef.current);
-      
-      if (pcRef.current) {
-        console.log('⚠️ [WebRTC] PeerConnection already exists, skipping re-init');
-        return;
-      }
-      
-      if (closingRef.current) {
-        console.log('⏳ [WebRTC] Cleanup in progress, waiting...');
-        // Wait for cleanup to complete
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-
-      console.log('🚀 [WebRTC] Initializing as', isHost ? 'HOST' : 'PEER');
-
+const initWebRTC = useCallback(
+    async (isHost: boolean) => {
       const pc = createPeerConnection();
+      pcRef.current = pc;
 
       if (isHost) {
-        console.log('🏠 [WebRTC] HOST: Creating data channel...');
-        // Host creates data channel
-        const dc = pc.createDataChannel('tetris', {
-          ordered: false, // Unordered for speed
-          maxRetransmits: 0, // No retransmits for real-time data
-        });
+        const dc = pc.createDataChannel('tetris', { ordered: false, maxRetransmits: 0 });
         dcRef.current = dc;
 
+        dc.onmessage = e => handleUDPMessage(e.data);
         dc.onopen = () => {
-          console.log('✅ [WebRTC] UDP channel OPEN (host)');
+          console.log('✅ [WebRTC] UDP channel open (host)');
           setIsRtcReady(true);
         };
 
-        dc.onclose = () => {
-          console.warn('⚠️ [WebRTC] UDP channel CLOSED (host)');
-          setIsRtcReady(false);
-          // Don't cleanup immediately, may be temporary
-        };
-
-        dc.onerror = (err) => {
-          console.error('❌ [WebRTC] Data channel error (host):', err);
-        };
-
-        dc.onmessage = (e) => handleUDPMessage(e.data);
-
-        // Create offer
-        console.log('📤 [WebRTC] Creating offer...');
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        console.log('📤 [WebRTC] Sending offer to room:', roomId);
         socket.emit('webrtc:offer', { roomId, offer });
-        
       } else {
-        // Peer waits for data channel
-        pc.ondatachannel = (e) => {
-          console.log('[WebRTC] Data channel received (peer)');
-          const dc = e.channel;
-          dcRef.current = dc;
-
-          dc.onopen = () => {
-            console.log('✅ [WebRTC] UDP channel OPEN (peer)');
-            setIsRtcReady(true);
-          };
-
-          dc.onclose = () => {
-            console.warn('⚠️ [WebRTC] UDP channel CLOSED (peer)');
-            setIsRtcReady(false);
-            // Don't cleanup immediately, may be temporary
-          };
-
-          dc.onerror = (err) => {
-            console.error('[WebRTC] Data channel error (peer):', err);
-          };
-
-          dc.onmessage = (e) => handleUDPMessage(e.data);
+        pc.ondatachannel = e => {
+          dcRef.current = e.channel;
+          e.channel.onmessage = ev => handleUDPMessage(ev.data);
+          e.channel.onopen = () => setIsRtcReady(true);
         };
-        
-        console.log('[WebRTC] Waiting for offer from host...');
       }
-      
-    } catch (err) {
-      console.error('[WebRTC] Init failed:', err);
-      setIsRtcReady(false);
-      cleanupWebRTC('init-error');
-    }
-  }, [createPeerConnection, handleUDPMessage, cleanupWebRTC, roomId]);
+    },
+    [createPeerConnection, handleUDPMessage, roomId]
+  );
 
   // ========================================
   // 🎯 WEBRTC SIGNALING EVENT HANDLERS
@@ -815,19 +642,32 @@ const Versus: React.FC = () => {
   // ========================================
   
   useEffect(() => {
-    if (!roomId || gameOver || waiting) return;
-    
     const interval = setInterval(() => {
-      sendSnapshot();
-    }, 500); // Send snapshot every 500ms via UDP
-
+      if (isRtcReady) sendSnapshot();
+    }, 500);
     return () => clearInterval(interval);
-  }, [roomId, gameOver, waiting, sendSnapshot]);
+  }, [isRtcReady, sendSnapshot]);
 
   // ========================================
   // 🎯 END OF WEBRTC SETUP
   // ========================================
 
+  // ========================================
+  // 🎬 FILL WHITE ANIMATION (Game Over Effect)
+  // ========================================
+  // (Removed old startFillWhiteAnimation; animations are orchestrated inline in onGameOver.)
+
+  // Cleanup animation on unmount
+  useEffect(() => {
+    return () => {
+      if (myFillWhiteAnimationRef.current) cancelAnimationFrame(myFillWhiteAnimationRef.current);
+      if (oppFillWhiteAnimationRef.current) cancelAnimationFrame(oppFillWhiteAnimationRef.current);
+    };
+  }, []);
+
+  // ========================================
+  // ⏱️ LOCK DELAY TIMERS
+  // ========================================
   // --- Lock Delay & Movement Helpers ---
   const clearInactivity = useCallback(() => {
     if (inactivityTimeoutRef.current) {
@@ -1092,9 +932,11 @@ const Versus: React.FC = () => {
 
     // This listener now fires reliably for both ranked and custom games
     const onGameStart = (payload?: any) => {
+      console.log('🎮 [Versus] game:start event received!', { payload, waiting, roomId });
       stopMatchmaking();
       // Shield: Only start countdown if we are actually waiting for one.
       if (waiting) {
+        console.log('✅ [Versus] Starting countdown - setting countdown to 3');
         if (payload?.roomId) setRoomId(payload.roomId);
         if (payload?.opponent) setOpponentId(payload.opponent);
         if (payload?.next && Array.isArray(payload.next)) {
@@ -1104,6 +946,8 @@ const Versus: React.FC = () => {
         setNetOppStage(null);
         setWaiting(false);
         setCountdown(3);
+      } else {
+        console.log('⚠️ [Versus] Ignoring game:start because waiting is false');
       }
     };
     socket.on('game:start', onGameStart);
@@ -1116,7 +960,7 @@ const Versus: React.FC = () => {
     };
     socket.on('game:next', onGameNext);
 
-    const onGameOver = (data: any) => {
+  const onGameOver = (data: any) => {
       const winner = data?.winner ?? null;
       const reason = data?.reason;
       
@@ -1139,19 +983,45 @@ const Versus: React.FC = () => {
       }
       setDisconnectCountdown(null);
       
+      // ✅ CẬP NHẬT STATS trước khi hiển thị kết quả
+      setMyStats({ rows, level, score: rows * 100 }); // Score tạm tính = rows * 100
+      
+      // 🎬 FILL-WHITE chỉ cho các ô đã rơi (merged) và đợi hoàn tất mới hiện overlay
+      const promises: Promise<void>[] = [];
+      const runAnim = (target: 'me' | 'opp') => new Promise<void>((resolve) => {
+        const setter = target === 'me' ? setMyFillWhiteProgress : setOppFillWhiteProgress;
+        setter(0);
+        const start = Date.now();
+        const dur = 1000;
+        const step = () => {
+          const p = Math.min(((Date.now() - start) / dur) * 100, 100);
+          setter(p);
+          if (p < 100) {
+            requestAnimationFrame(step);
+          } else {
+            resolve();
+          }
+        };
+        requestAnimationFrame(step);
+      });
+
       if (winner === socket.id) {
         console.log('✅ YOU WIN! Reason:', reason);
         setOppGameOver(true);
-        setMatchResult({ outcome: 'win', reason });
+        promises.push(runAnim('opp'));
+        Promise.all(promises).then(() => setMatchResult({ outcome: 'win', reason }));
       } else if (winner) {
         console.log('❌ YOU LOSE! Reason:', reason);
         setGameOver(true);
-        setMatchResult({ outcome: 'lose', reason });
+        promises.push(runAnim('me'));
+        Promise.all(promises).then(() => setMatchResult({ outcome: 'lose', reason }));
       } else {
         console.log('🤝 DRAW! Reason:', reason);
         setGameOver(true);
         setOppGameOver(true);
-        setMatchResult({ outcome: 'draw', reason });
+        promises.push(runAnim('me'));
+        promises.push(runAnim('opp'));
+        Promise.all(promises).then(() => setMatchResult({ outcome: 'draw', reason }));
       }
       
       // 🕐 Start 1-minute auto-exit countdown
@@ -1460,15 +1330,26 @@ const Versus: React.FC = () => {
   const pieceCountRef = useRef(0);
 
   const movePlayer = useCallback((dir: number) => {
-    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return false;
+    // Cho phép di chuyển trong lúc apply garbage
+    if (gameOver || countdown !== null || matchResult !== null) return false;
     if (!checkCollision(player, stage, { x: dir, y: 0 })) {
       updatePlayerPos({ x: dir, y: 0, collided: false });
       return true;
     }
     return false;
-  }, [gameOver, countdown, matchResult, isApplyingGarbage, player, stage, updatePlayerPos]);
+  }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos]);
+
+  const movePlayerToSide = useCallback((dir: number) => {
+    if (gameOver || countdown !== null || matchResult !== null) return;
+    let distance = 0;
+    while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) distance += 1;
+    if (distance > 0) {
+      updatePlayerPos({ x: dir * distance, y: 0, collided: false });
+    }
+  }, [gameOver, countdown, matchResult, player, stage, updatePlayerPos]);
 
   const hardDrop = () => {
+    // Giữ check isApplyingGarbage cho hard drop vì nó nguy hiểm
     if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     let dropDistance = 0;
     while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
@@ -1480,7 +1361,8 @@ const Versus: React.FC = () => {
   // 🎮 SRS ROTATION WITH WALL KICK
   // ========================================
   const playerRotateSRS = useCallback((direction: 1 | -1 | 2) => {
-    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
+    // Cho phép xoay trong lúc apply garbage
+    if (gameOver || countdown !== null || matchResult !== null) return;
     if (player.type === 'O') return; // O doesn't rotate
 
     // Try rotation with SRS wall kick + floor kick
@@ -1506,11 +1388,15 @@ const Versus: React.FC = () => {
     } else {
       console.log(`❌ Rotation blocked (no valid kick position)`);
     }
-  }, [player, stage, rotationState, gameOver, countdown, matchResult, isApplyingGarbage, setPlayer, setRotationState]);
+  }, [player, stage, rotationState, gameOver, countdown, matchResult, setPlayer, setRotationState]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
-    if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) e.preventDefault();
+    // Cho phép input trong lúc apply garbage (xoay, di chuyển)
+    if (gameOver || countdown !== null || matchResult !== null) return;
+    if ([32, 37, 38, 39, 40, 16, 67].includes(e.keyCode)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     
     // Reset AFK timer on any key press
     resetAFKTimer();
@@ -1518,45 +1404,72 @@ const Versus: React.FC = () => {
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) { // Left / Right
       const dir = keyCode === 37 ? -1 : 1;
-      if (e.repeat) return;
-      
-      // Send input via UDP for predictive rendering
-      sendInput('move', { direction: dir });
-      
-      // Start DAS intent
-      setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
-      
-      // Immediate first move - only update ground action if actually moved AND grounded
-      const moved = movePlayer(dir);
-      if (moved && isGrounded) {
-        onGroundAction();
+      // Chỉ set moveIntent nếu chưa có hoặc khác direction (giống Tetris.tsx)
+      if (!moveIntent || moveIntent.dir !== dir) {
+        // Send input via UDP for predictive rendering
+        sendInput('move', { direction: dir });
+        
+        // Immediate first move
+        const moved = movePlayer(dir);
+        
+        // Start DAS intent
+        setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
+        
+        // Only update ground action if actually moved AND grounded
+        if (moved && isGrounded) {
+          onGroundAction();
+        }
       }
     } else if (keyCode === 40) { // Down
-      if (!e.repeat) {
-        sendInput('soft_drop');
-        setDropTime(MOVE_INTERVAL);
+      if (!checkCollision(player, stage, { x: 0, y: 1 })) {
+        updatePlayerPos({ x: 0, y: 1, collided: false });
+      } else {
+        // Soft drop nhưng đã chạm đất → áp dụng timers, không khóa ngay
+        startGroundTimers();
       }
     } else if (keyCode === 38 || keyCode === 88) { // Up arrow or X (Rotate CW)
-      sendInput('rotate', { direction: 1 });
-      playerRotateSRS(1);
-      if (isGrounded) {
-        onGroundAction();
+      if (!locking) {
+        sendInput('rotate', { direction: 1 });
+        playerRotateSRS(1);
+        // nếu vẫn chạm đất sau xoay → coi như 1 thao tác trên đất
+        if (checkCollision(player, stage, { x: 0, y: 1 })) {
+          onGroundAction();
+        }
       }
     } else if (keyCode === 90 || keyCode === 17) { // Z or Ctrl (Rotate CCW)
-      sendInput('rotate', { direction: -1 });
-      playerRotateSRS(-1);
-      if (isGrounded) {
-        onGroundAction();
+      if (!locking) {
+        sendInput('rotate', { direction: -1 });
+        playerRotateSRS(-1);
+        // nếu vẫn chạm đất sau xoay → coi như 1 thao tác trên đất
+        if (checkCollision(player, stage, { x: 0, y: 1 })) {
+          onGroundAction();
+        }
       }
     } else if (ENABLE_180_ROTATION && keyCode === 65) { // A (Rotate 180°)
-      sendInput('rotate', { direction: 2 });
-      playerRotateSRS(2);
-      if (isGrounded) {
-        onGroundAction();
+      if (!locking) {
+        sendInput('rotate', { direction: 2 });
+        playerRotateSRS(2);
+        // nếu vẫn chạm đất sau xoay → coi như 1 thao tác trên đất
+        if (checkCollision(player, stage, { x: 0, y: 1 })) {
+          onGroundAction();
+        }
       }
     } else if (keyCode === 32) { // Space (Hard Drop)
-      sendInput('hard_drop');
-      hardDrop();
+      if (!e.repeat) {
+        // First press - immediate hard drop
+        sendInput('hard_drop');
+        hardDrop();
+        lastHardDropTimeRef.current = Date.now();
+        setIsSpaceHeld(true);
+      } else {
+        // Holding space - spam hard drop with delay
+        const now = Date.now();
+        if (now - lastHardDropTimeRef.current >= HARD_DROP_SPAM_INTERVAL) {
+          sendInput('hard_drop');
+          hardDrop();
+          lastHardDropTimeRef.current = now;
+        }
+      }
     } else if (keyCode === 67) { // C (Hold)
       if (!hasHeld && canHold) {
         sendInput('hold');
@@ -1568,18 +1481,19 @@ const Versus: React.FC = () => {
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (gameOver || countdown !== null || matchResult !== null) return;
     const { keyCode } = e;
     if (keyCode === 37 || keyCode === 39) { // Left / Right
-      const dir = keyCode === 37 ? -1 : 1;
-      if (moveIntent?.dir === dir) {
-        setMoveIntent(null);
-      }
+      setMoveIntent(null);
     } else if (keyCode === 40) { // Down
-      setDropTime(getFallSpeed(level));
+      setDropTime(isGrounded ? null : getFallSpeed(level));
+    } else if (keyCode === 32) { // Space release
+      setIsSpaceHeld(false);
     }
   };
 
   useInterval(() => { // Gravity
+    // Giữ check isApplyingGarbage cho gravity để tránh conflict với garbage push
     if (gameOver || locking || countdown !== null || matchResult !== null || isApplyingGarbage) return;
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
@@ -1590,21 +1504,25 @@ const Versus: React.FC = () => {
 
   // DAS Charging
   useInterval(() => {
-    if (!moveIntent || moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
-    const elapsed = Date.now() - moveIntent.startTime;
-    if (elapsed >= DAS_DELAY) {
+    // Cho phép DAS charging trong lúc garbage
+    if (!moveIntent || locking || gameOver || countdown !== null || matchResult !== null) return;
+    const { dir, startTime, dasCharged } = moveIntent;
+    const now = Date.now();
+    if (now - startTime > DAS_DELAY && !dasCharged) {
+      if (MOVE_INTERVAL === 0) movePlayerToSide(dir);
       setMoveIntent(prev => prev ? { ...prev, dasCharged: true } : null);
     }
-  }, moveIntent && !moveIntent.dasCharged ? 16 : null);
+  }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : 16);
 
-  // ARR Movement
+  // ARR Movement (only if ARR > 0)
   useInterval(() => {
-    if (!moveIntent || !moveIntent.dasCharged || gameOver || countdown !== null || matchResult !== null || isApplyingGarbage) return;
+    // Cho phép ARR movement trong lúc garbage
+    if (!moveIntent || !moveIntent.dasCharged || MOVE_INTERVAL === 0 || locking || gameOver || countdown !== null || matchResult !== null) return;
     const moved = movePlayer(moveIntent.dir);
     if (moved && isGrounded) {
       onGroundAction();
     }
-  }, moveIntent?.dasCharged ? MOVE_INTERVAL : null);
+  }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : null);
 
 
   useEffect(() => {
@@ -1808,6 +1726,7 @@ const Versus: React.FC = () => {
   }, [timerOn]);
 
   return (
+    
     <div
       ref={wrapperRef}
       tabIndex={0}
@@ -1976,7 +1895,7 @@ const Versus: React.FC = () => {
                 padding: '4px',
                 background: 'transparent'
               }}>
-                <Stage stage={stage} />
+                <Stage stage={stage} fillWhiteProgress={myFillWhiteProgress} />
               </div>
               
               {/* Garbage Queue Bar - using the new component */}
@@ -2034,7 +1953,7 @@ const Versus: React.FC = () => {
                 padding: '4px',
                 background: 'transparent'
               }}>
-                <Stage stage={(netOppStage as any) ?? oppStage} />
+                <Stage stage={(netOppStage as any) ?? oppStage} fillWhiteProgress={oppFillWhiteProgress} />
               </div>
               
               {/* Opponent's Garbage Queue Bar */}
@@ -2060,16 +1979,167 @@ const Versus: React.FC = () => {
           </div>
         </div>
       )}
-      {matchResult && (
-        <div style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.55)', color: '#fff', textAlign: 'center', zIndex: 998 }}>
-          <div style={{ background: 'rgba(20,20,22,0.8)', padding: '32px 48px', borderRadius: 16, boxShadow: '0 12px 32px rgba(0,0,0,0.45)', minWidth: 320 }}>
-            <div style={{ fontSize: 42, fontWeight: 800, marginBottom: 12 }}>
-              {matchResult.outcome === 'win' ? '🎉 Bạn đã thắng!' : matchResult.outcome === 'lose' ? '😢 Bạn đã thua' : '🤝 Hòa trận'}
+      {/* TEMPORARILY DISABLED OVERLAY FOR TESTING FILL WHITE ANIMATION */}
+      {false && matchResult && (() => {
+        const result = matchResult!; // Non-null assertion since we checked above
+        return (
+        <div style={{ 
+          position: 'fixed', 
+          inset: 0, 
+          display: 'grid', 
+          placeItems: 'center', 
+          background: 'rgba(0,0,0,0.75)', 
+          color: '#fff', 
+          textAlign: 'center', 
+          zIndex: 998,
+          backdropFilter: 'blur(8px)'
+        }}>
+          <div style={{ 
+            background: 'linear-gradient(135deg, rgba(20,20,22,0.95) 0%, rgba(30,30,35,0.95) 100%)', 
+            padding: '40px 56px', 
+            borderRadius: 24, 
+            boxShadow: '0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)', 
+            minWidth: 480,
+            maxWidth: 600,
+            border: result.outcome === 'win' 
+              ? '2px solid rgba(76, 175, 80, 0.5)' 
+              : result.outcome === 'lose' 
+                ? '2px solid rgba(244, 67, 54, 0.5)' 
+                : '2px solid rgba(255, 152, 0, 0.5)'
+          }}>
+            {/* Result Title */}
+            <div style={{ 
+              fontSize: 52, 
+              fontWeight: 900, 
+              marginBottom: 8,
+              background: result.outcome === 'win'
+                ? 'linear-gradient(135deg, #4CAF50 0%, #81C784 100%)'
+                : result.outcome === 'lose'
+                  ? 'linear-gradient(135deg, #F44336 0%, #E57373 100%)'
+                  : 'linear-gradient(135deg, #FF9800 0%, #FFB74D 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              textShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              letterSpacing: '2px'
+            }}>
+              {result.outcome === 'win' ? '🎉 CHIẾN THẮNG!' : result.outcome === 'lose' ? '😢 THẤT BẠI' : '🤝 HÒA TRẬN'}
             </div>
-            {matchResult.reason && (
-              <div style={{ fontSize: 14, opacity: 0.75, marginBottom: 16 }}>Lý do: {matchResult.reason}</div>
+
+            {/* Reason */}
+            {result.reason && (
+              <div style={{ 
+                fontSize: 15, 
+                opacity: 0.8, 
+                marginBottom: 32,
+                padding: '8px 16px',
+                background: 'rgba(255,255,255,0.05)',
+                borderRadius: 8,
+                fontStyle: 'italic'
+              }}>
+                💬 {result.reason}
+              </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
+
+            {/* Stats Comparison */}
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: '1fr auto 1fr', 
+              gap: 24, 
+              marginBottom: 32,
+              padding: '24px',
+              background: 'rgba(0,0,0,0.2)',
+              borderRadius: 16
+            }}>
+              {/* Your Stats */}
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ 
+                  fontSize: 14, 
+                  opacity: 0.6, 
+                  marginBottom: 12,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px'
+                }}>
+                  🎮 BẠN
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ opacity: 0.7, fontSize: 13 }}>Dòng</span>
+                    <span style={{ fontWeight: 700, fontSize: 20, color: '#4CAF50' }}>{myStats.rows}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ opacity: 0.7, fontSize: 13 }}>Level</span>
+                    <span style={{ fontWeight: 700, fontSize: 20, color: '#2196F3' }}>{myStats.level}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ opacity: 0.7, fontSize: 13 }}>Điểm</span>
+                    <span style={{ fontWeight: 700, fontSize: 20, color: '#FF9800' }}>{myStats.score.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* VS Divider */}
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                fontSize: 28, 
+                fontWeight: 900,
+                opacity: 0.3,
+                padding: '0 16px'
+              }}>
+                VS
+              </div>
+
+              {/* Opponent Stats */}
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ 
+                  fontSize: 14, 
+                  opacity: 0.6, 
+                  marginBottom: 12,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px'
+                }}>
+                  👾 ĐỐI THỦ
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 700, fontSize: 20, color: '#4CAF50' }}>{oppStats.rows}</span>
+                    <span style={{ opacity: 0.7, fontSize: 13 }}>Dòng</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 700, fontSize: 20, color: '#2196F3' }}>{oppStats.level}</span>
+                    <span style={{ opacity: 0.7, fontSize: 13 }}>Level</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 700, fontSize: 20, color: '#FF9800' }}>{oppStats.score.toLocaleString()}</span>
+                    <span style={{ opacity: 0.7, fontSize: 13 }}>Điểm</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Time Stats */}
+            <div style={{ 
+              marginBottom: 24,
+              fontSize: 14,
+              opacity: 0.7,
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 24
+            }}>
+              <div>
+                ⏱️ Thời gian: <strong>{Math.floor(elapsedMs / 1000 / 60)}:{String(Math.floor(elapsedMs / 1000) % 60).padStart(2, '0')}</strong>
+              </div>
+              {myPing !== null && (
+                <div>
+                  📡 Ping: <strong>{myPing}ms</strong>
+                </div>
+              )}
+            </div>
+
+            {/* Action Button */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
               <button
                 onClick={() => {
                   if (meId) socket.emit('ranked:leave', meId);
@@ -2080,14 +2150,48 @@ const Versus: React.FC = () => {
                   cleanupWebRTC('manual-exit');
                   navigate('/');
                 }}
-                style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                style={{ 
+                  padding: '14px 32px', 
+                  borderRadius: 12, 
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+                  color: '#fff', 
+                  cursor: 'pointer', 
+                  fontWeight: 700,
+                  fontSize: 15,
+                  letterSpacing: '0.5px',
+                  boxShadow: '0 4px 16px rgba(102, 126, 234, 0.4)',
+                  transition: 'all 0.3s ease',
+                  textTransform: 'uppercase'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 16px rgba(102, 126, 234, 0.4)';
+                }}
               >
-                Trở về menu
+                🏠 Về Menu
               </button>
             </div>
+
+            {/* Auto Exit Countdown */}
+            {autoExitCountdown !== null && (
+              <div style={{ 
+                marginTop: 20, 
+                fontSize: 12, 
+                opacity: 0.5,
+                fontStyle: 'italic'
+              }}>
+                Tự động thoát sau {autoExitCountdown}s...
+              </div>
+            )}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

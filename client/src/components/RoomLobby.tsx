@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import socket from '../socket';
-import { SERVER_URL } from '../socket';
 import { getApiBaseUrl } from '../services/apiConfig';
 
 type Player = {
@@ -79,7 +78,7 @@ const RoomLobby: React.FC = () => {
       }
 
       try {
-        const res = await fetch(`${SERVER_URL}/whoami`);
+        const res = await fetch(`${getApiBaseUrl()}/whoami`);
         if (res.ok) {
           const data = await res.json();
           if (data?.ip) {

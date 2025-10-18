@@ -40,6 +40,7 @@ const HomeMenu: React.FC = () => {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showDebug, setShowDebug] = useState(false); // Debug panel
   const [showProfile, setShowProfile] = useState(false); // Profile modal
+  const [showHelp, setShowHelp] = useState(false); // Gameplay help modal
   const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
 
   // Background music
@@ -113,19 +114,33 @@ const HomeMenu: React.FC = () => {
       const result: AuthResponse = await authService.login(loginForm.email, loginForm.password);
       
       if (result.success && result.user) {
+        // Ensure accountId is a number
+        const accountId = typeof result.user.accountId === 'string' 
+          ? parseInt(result.user.accountId, 10) 
+          : result.user.accountId;
+          
         const user: User = {
           username: result.user.username,
           email: result.user.email,
           isGuest: false,
-          accountId: result.user.accountId,
+          accountId: accountId,
         };
         setCurrentUser(user);
+        
+        // Save to localStorage for auto-authentication
+        try { 
+          localStorage.setItem('tetris:user', JSON.stringify(user));
+          console.log('💾 [Login] User saved to localStorage:', { accountId, type: typeof accountId });
+        } catch (err) {
+          console.error('❌ [Login] Failed to save user to localStorage:', err);
+        }
+        
         setShowGameModes(true);
         setLoginForm({ email: "", password: "" });
 
         // [THÊM MỚI] Gửi authentication đến server để track online status
-        console.log('🔐 [Login] Authenticating socket with accountId:', result.user.accountId);
-        socket.emit('user:authenticate', result.user.accountId);
+        console.log('🔐 [Login] Authenticating socket with accountId:', accountId, typeof accountId);
+        socket.emit('user:authenticate', accountId);
       } else {
         setError(result.message || "Đăng nhập thất bại!");
       }
@@ -174,19 +189,33 @@ const HomeMenu: React.FC = () => {
       const result: AuthResponse = await authService.register(username, email, password);
       
       if (result.success && result.user) {
+        // Ensure accountId is a number
+        const accountId = typeof result.user.accountId === 'string' 
+          ? parseInt(result.user.accountId, 10) 
+          : result.user.accountId;
+          
         const user: User = {
           username: result.user.username,
           email: result.user.email,
           isGuest: false,
-          accountId: result.user.accountId,
+          accountId: accountId,
         };
         setCurrentUser(user);
+        
+        // Save to localStorage for auto-authentication
+        try { 
+          localStorage.setItem('tetris:user', JSON.stringify(user));
+          console.log('💾 [Register] User saved to localStorage:', { accountId, type: typeof accountId });
+        } catch (err) {
+          console.error('❌ [Register] Failed to save user to localStorage:', err);
+        }
+        
         setShowGameModes(true);
         setRegisterForm({ username: "", email: "", password: "", confirmPassword: "" });
 
         // [THÊM MỚI] Gửi authentication đến server để track online status
-        console.log('🔐 [Register] Authenticating socket with accountId:', result.user.accountId);
-        socket.emit('user:authenticate', result.user.accountId);
+        console.log('🔐 [Register] Authenticating socket with accountId:', accountId, typeof accountId);
+        socket.emit('user:authenticate', accountId);
       } else {
         setError(result.message || "Đăng ký thất bại!");
       }
@@ -1500,6 +1529,38 @@ const HomeMenu: React.FC = () => {
         </div>
       </div>
 
+      {/* Floating Help Button (bottom-right) */}
+      <button
+        onClick={() => setShowHelp(true)}
+        title="Hướng dẫn chơi"
+        style={{
+          position: 'fixed',
+          right: 24,
+          bottom: 24,
+          zIndex: 1100,
+          background: 'rgba(78, 205, 196, 0.18)',
+          border: '1px solid rgba(78, 205, 196, 0.4)',
+          color: '#4ecdc4',
+          padding: '12px 16px',
+          borderRadius: 12,
+          cursor: 'pointer',
+          fontSize: '0.95rem',
+          fontWeight: 700,
+          boxShadow: '0 10px 20px rgba(0,0,0,0.25)',
+          backdropFilter: 'blur(6px)'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(78, 205, 196, 0.28)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'rgba(78, 205, 196, 0.18)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+      >
+        ❓ Hướng dẫn
+      </button>
+
       {/* Settings Modal/Page */}
       {showSettings && (
         <div
@@ -1779,6 +1840,92 @@ const HomeMenu: React.FC = () => {
                     </div>
                   );
                 })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gameplay Help Modal */}
+      {showHelp && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.88)',
+            backdropFilter: 'blur(6px)',
+            zIndex: 1600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #111 0%, #1b1f24 100%)',
+              color: '#fff',
+              borderRadius: 16,
+              width: 'min(720px, 92vw)',
+              maxHeight: '82vh',
+              overflow: 'auto',
+              padding: '24px',
+              border: '1px solid rgba(78, 205, 196, 0.25)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.6)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#4ecdc4' }}>📘 Hướng dẫn chơi</h2>
+              <button
+                onClick={() => setShowHelp(false)}
+                style={{
+                  background: 'rgba(244, 67, 54, 0.2)',
+                  border: '1px solid rgba(244, 67, 54, 0.5)',
+                  color: '#ff6b6b',
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(244, 67, 54, 0.35)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)'; }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: 16 }}>
+              <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: 16 }}>
+                <h3 style={{ marginTop: 0, color: '#ffc107' }}>Phím điều khiển cơ bản</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: '#ddd' }}>
+                  <li>Mũi tên Trái/Phải: Di chuyển trái/phải</li>
+                  <li>Mũi tên Xuống: Rơi nhanh (Soft Drop)</li>
+                  <li>Space: Thả ngay (Hard Drop)</li>
+                  <li>X hoặc Mũi tên Lên: Xoay theo chiều kim đồng hồ</li>
+                  <li>Z: Xoay ngược chiều kim đồng hồ</li>
+                  <li>A hoặc Shift: Xoay 180° (nếu bật)</li>
+                  <li>C hoặc Shift: Giữ/Đổi khối (Hold)</li>
+                  <li>P: Tạm dừng</li>
+                </ul>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: 16 }}>
+                <h3 style={{ marginTop: 0, color: '#4ecdc4' }}>Mẹo chơi</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: '#ddd' }}>
+                  <li>DAS/ARR giúp giữ phím để di chuyển liên tục (ARR=0 sẽ trượt tức thì).</li>
+                  <li>Giữ khối (Hold) thông minh để tạo T-Spin hoặc Tetris.</li>
+                  <li>Combo và B2B sẽ gửi rác mạnh hơn cho đối thủ.</li>
+                  <li>3 hàng trên cùng là Buffer – đừng để khối merged lọt vào đó!</li>
+                </ul>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: 16 }}>
+                <h3 style={{ marginTop: 0, color: '#ba68c8' }}>Mạng & hiệu năng</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: '#ddd' }}>
+                  <li>Ưu tiên UDP/WebRTC để giảm trễ; hệ thống sẽ fallback TCP khi cần.</li>
+                  <li>Các sự kiện quan trọng (Topout, Attack) luôn có log & TCP dự phòng.</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>

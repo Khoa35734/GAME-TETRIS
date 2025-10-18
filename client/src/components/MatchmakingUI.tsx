@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import socket from '../socket';
+import socket, { waitForAuthentication } from '../socket';
 
-type MatchmakingStatus = 'searching' | 'found' | 'timeout' | 'penalty';
+type MatchmakingStatus = 'searching' | 'found' | 'waiting' | 'timeout' | 'penalty';
 
 interface MatchmakingUIProps {
   mode: 'casual' | 'ranked';
@@ -39,9 +39,9 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
     return () => clearInterval(interval);
   }, [status]);
 
-  // Timer đếm ngược confirm (10s)
+  // Timer đếm ngược confirm (10s) - Chạy cho cả 'found' và 'waiting'
   useEffect(() => {
-    if (status !== 'found') return;
+    if (status !== 'found' && status !== 'waiting') return;
 
     const interval = setInterval(() => {
       setConfirmTimeout(prev => {
@@ -62,20 +62,29 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
   useEffect(() => {
     // Tìm thấy đối thủ
     socket.on('matchmaking:found', (data: any) => {
-      console.log('Match found:', data);
+      console.log('✅ [Matchmaking] Match found:', data);
       setStatus('found');
       setMatchData(data);
-      setConfirmTimeout(10);
+      setConfirmTimeout(data.timeout || 10);
+    });
+
+    // Đang chờ đối thủ chấp nhận
+    socket.on('matchmaking:waiting', (data: any) => {
+      console.log('⏳ [Matchmaking] Waiting for opponent:', data.message);
+      setStatus('waiting');
     });
 
     // Trận đấu bắt đầu (cả 2 đều confirm)
     socket.on('matchmaking:start', (data: any) => {
-      console.log('Match starting:', data);
-      navigate(`/room/${data.roomId}`);
+      console.log('🎮 [Matchmaking] Match starting:', data);
+      console.log('🎮 [Matchmaking] Navigate directly to game (versus)');
+      // ✅ Matchmaking đi TRỰC TIẾP vào game, KHÔNG qua RoomLobby
+      navigate(`/versus/${data.roomId}`);
     });
 
     // Đối thủ từ chối hoặc timeout
     socket.on('matchmaking:opponent-declined', () => {
+      console.log('❌ [Matchmaking] Opponent declined, returning to queue...');
       setStatus('searching');
       setElapsedTime(0);
       setMatchData(null);
@@ -83,7 +92,7 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
 
     // Bị penalty
     socket.on('matchmaking:penalty', (data: { duration: number }) => {
-      console.log('Penalty received:', data);
+      console.log('⏱️ [Matchmaking] Penalty received:', data);
       setStatus('penalty');
       setPenaltyTime(data.duration);
       setTimeout(() => {
@@ -91,25 +100,54 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
       }, data.duration * 1000);
     });
 
+    // Error handling
+    socket.on('matchmaking:error', (data: { error: string }) => {
+      console.error('❌ [Matchmaking] Error:', data.error);
+      if (data.error === 'Not authenticated') {
+        alert('Vui lòng đăng nhập lại để tham gia matchmaking');
+        onCancel();
+      }
+    });
+
     return () => {
       socket.off('matchmaking:found');
+      socket.off('matchmaking:waiting');
       socket.off('matchmaking:start');
       socket.off('matchmaking:opponent-declined');
       socket.off('matchmaking:penalty');
+      socket.off('matchmaking:error');
     };
   }, [navigate, onCancel]);
 
   // Bắt đầu tìm kiếm
   useEffect(() => {
-    socket.emit('matchmaking:join', { mode });
+    const joinQueue = async () => {
+      console.log(`🔍 [Matchmaking] Waiting for authentication...`);
+      
+      // Wait for authentication to complete
+      const authenticated = await waitForAuthentication();
+      
+      if (!authenticated) {
+        console.error('❌ [Matchmaking] Not authenticated, cannot join queue');
+        alert('Vui lòng đăng nhập để tham gia matchmaking');
+        onCancel();
+        return;
+      }
+      
+      console.log(`🔍 [Matchmaking] Authenticated! Joining ${mode} queue...`);
+      socket.emit('matchmaking:join', { mode });
+    };
+    
+    joinQueue();
     
     return () => {
       // Cleanup khi unmount
       if (status === 'searching') {
+        console.log('🚫 [Matchmaking] Cancelling search...');
         socket.emit('matchmaking:cancel');
       }
     };
-  }, [mode]);
+  }, [mode, onCancel, status]);
 
   const handleCancel = () => {
     socket.emit('matchmaking:cancel');
@@ -117,7 +155,9 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
   };
 
   const handleConfirm = () => {
+    console.log('✅ [Matchmaking] User confirmed match');
     socket.emit('matchmaking:confirm-accept', { matchId: matchData?.matchId });
+    // Status will be set by 'matchmaking:waiting' event from server
   };
 
   const handleDecline = () => {
@@ -207,7 +247,7 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
                 boxShadow: '0 4px 12px rgba(0,208,132,0.3)',
               }}
             >
-              ✓ Xác Nhận
+              ✓ Chấp Nhận
             </button>
             <button
               onClick={handleDecline}
@@ -222,8 +262,90 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
                 cursor: 'pointer',
               }}
             >
-              ✗ Huỷ
+              ✗ Từ Chối
             </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (status === 'waiting') {
+      return (
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ 
+            fontSize: 28, 
+            fontWeight: 700, 
+            color: '#00d084', 
+            marginBottom: 24,
+            textShadow: '0 0 20px rgba(0,208,132,0.5)'
+          }}>
+            ✅ ĐÃ XÁC NHẬN
+          </div>
+          
+          {/* Loading Spinner */}
+          <div style={{ 
+            width: 80, 
+            height: 80, 
+            border: '6px solid rgba(0,208,132,0.1)',
+            borderTop: '6px solid #00d084',
+            borderRadius: '50%',
+            margin: '0 auto 30px',
+          }} className="spinner" />
+          
+          {/* Main Message */}
+          <div style={{ 
+            fontSize: 20, 
+            color: '#fff', 
+            marginBottom: 16,
+            fontWeight: 600,
+            background: 'linear-gradient(135deg, #00d084 0%, #00a86b 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text'
+          }}>
+            🕐 ĐANG CHỜ ĐỐI THỦ XÁC NHẬN...
+          </div>
+          
+          {/* Opponent Info */}
+          <div style={{ 
+            fontSize: 16, 
+            color: '#ccc',
+            marginBottom: 24,
+            padding: '12px 24px',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: 12,
+            display: 'inline-block'
+          }}>
+            Đối thủ: <span style={{ color: '#00d084', fontWeight: 700 }}>
+              {matchData?.opponent?.username || 'Unknown'}
+            </span>
+          </div>
+          
+          {/* Countdown */}
+          <div style={{ 
+            fontSize: 14, 
+            color: '#ffaa00', 
+            marginTop: 20,
+            padding: '10px 20px',
+            background: 'rgba(255,170,0,0.1)',
+            border: '1px solid rgba(255,170,0,0.3)',
+            borderRadius: 8,
+            display: 'inline-block',
+            fontWeight: 600
+          }}>
+            ⏱️ Thời gian còn lại: <span style={{ fontSize: 18, color: '#ff8800' }}>
+              {confirmTimeout}s
+            </span>
+          </div>
+          
+          {/* Helper Text */}
+          <div style={{ 
+            fontSize: 12, 
+            color: '#888', 
+            marginTop: 24,
+            fontStyle: 'italic'
+          }}>
+            Nếu đối thủ không xác nhận trong {confirmTimeout}s, bạn sẽ quay lại hàng đợi
           </div>
         </div>
       );
@@ -302,6 +424,13 @@ const MatchmakingUI: React.FC<MatchmakingUIProps> = ({ mode, onCancel }) => {
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-20px); }
             to { opacity: 1; transform: translateY(0); }
+          }
+          .spinner {
+            animation: spin 1s linear infinite;
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
           }
         `}
       </style>

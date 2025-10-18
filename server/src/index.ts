@@ -6,7 +6,7 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
-import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch } from './redisStore';
+import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch, storeSocketUser, removeSocketUser, getSocketUserInfo } from './redisStore';
 import { initPostgres } from './postgres';
 import authRouter from './routes/auth';
 import settingsRouter from './routes/settings';
@@ -412,24 +412,42 @@ io.on('connection', (socket) => {
   });
 
   // [THÊM MỚI] User authentication - Client gửi userId sau khi login
-  socket.on('user:authenticate', (userId: number) => {
-    if (userId && typeof userId === 'number') {
-      onlineUsers.set(userId, socket.id);
+  socket.on('user:authenticate', async (userId: any) => {
+    console.log(`📥 [Auth] Received authentication request:`, { userId, type: typeof userId });
+    
+    // Convert to number if needed
+    const accountId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    if (accountId && typeof accountId === 'number' && !isNaN(accountId)) {
+      onlineUsers.set(accountId, socket.id);
       
-      // Store accountId and username in socket for matchmaking
-      (socket as any).accountId = userId;
-      // TODO: Fetch username from database, for now use placeholder
-      (socket as any).username = `User${userId}`;
+      // Store in Redis for persistence across reconnects
+      const username = `User${accountId}`; // TODO: Fetch from database
+      await storeSocketUser(socket.id, accountId, username);
       
-      console.log(`🟢 [Online] User ${userId} connected (socket: ${socket.id})`);
+      // Also store in socket as backup (but Redis is source of truth)
+      (socket as any).accountId = accountId;
+      (socket as any).username = username;
+      
+      console.log(`🟢 [Online] User ${accountId} connected (socket: ${socket.id})`);
+      console.log(`   💾 [Redis] User auth stored in Redis`);
       console.log(`   📊 Total online users: ${onlineUsers.size}`);
       console.log(`   👥 Online user IDs:`, Array.from(onlineUsers.keys()));
       
+      // Send confirmation back to client
+      socket.emit('user:authenticated', { accountId, username });
+      console.log(`   ✅ [Auth] Confirmation sent to client`);
+      
       // Broadcast user online to all connected clients
-      io.emit('user:online', userId);
-      console.log(`   📡 Broadcasted user:online event for userId: ${userId}`);
+      io.emit('user:online', accountId);
+      console.log(`   📡 Broadcasted user:online event for userId: ${accountId}`);
     } else {
-      console.warn(`⚠️ [Auth] Invalid userId received:`, userId);
+      console.warn(`⚠️ [Auth] Invalid userId received:`, { 
+        received: userId, 
+        type: typeof userId, 
+        converted: accountId,
+        isNaN: isNaN(accountId)
+      });
     }
   });
   
@@ -1521,6 +1539,10 @@ io.on('connection', (socket) => {
           break;
         }
       }
+      
+      // Remove from Redis
+      await removeSocketUser(socket.id);
+      console.log(`   💾 [Redis] User auth removed from Redis`);
       
       // Remove ping tracking
       playerPings.delete(socket.id);
