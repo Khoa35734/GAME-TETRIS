@@ -1,5 +1,7 @@
 // Authentication Service - Kết nối với backend API
-const API_URL = 'http://localhost:4000/api/auth';
+import { getApiBaseUrl } from './apiConfig';
+
+const getApiUrl = () => `${getApiBaseUrl()}/auth`;
 
 export interface AuthResponse {
   success: boolean;
@@ -19,7 +21,7 @@ export const authService = {
    */
   async register(username: string, email: string, password: string): Promise<AuthResponse> {
     try {
-      const response = await fetch(`${API_URL}/register`, {
+      const response = await fetch(`${getApiUrl()}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email, password })
@@ -54,7 +56,7 @@ export const authService = {
    */
   async login(email: string, password: string): Promise<AuthResponse> {
     try {
-      const response = await fetch(`${API_URL}/login`, {
+      const response = await fetch(`${getApiUrl()}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -92,7 +94,7 @@ export const authService = {
     if (!token) return null;
 
     try {
-      const response = await fetch(`${API_URL}/verify`, {
+      const response = await fetch(`${getApiUrl()}/verify`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -138,3 +140,13 @@ export const authService = {
     return localStorage.getItem('tetris:token');
   }
 };
+
+// Export helper function for getting user data
+export function getUserData() {
+  try {
+    const userStr = localStorage.getItem('tetris:user');
+    return userStr ? JSON.parse(userStr) : null;
+  } catch {
+    return null;
+  }
+}

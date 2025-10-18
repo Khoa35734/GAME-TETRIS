@@ -1,5 +1,6 @@
 import React from "react";
 import { StyledDisplay } from "./styles/StyledDisplay";
+import { getTetrominoTexture } from "./textureUtils";
 
 interface HoldDisplayProps {
   tetromino: any;
@@ -25,19 +26,28 @@ const HoldDisplay: React.FC<HoldDisplayProps> = ({ tetromino }) => {
           <div style={{ display: "inline-block" }}>
             {tetromino.map((row: any, y: number) => (
               <div key={y} style={{ display: "flex" }}>
-                {row.map((cell: any, x: number) => (
-                  <div
-                    key={x}
-                    style={{
-                      width: 4,
-                      height: 4,
-                      background: cell !== 0 ? getTetrominoColor(cell) : "transparent",
-                      border: cell !== 0 ? "1px solid #fff" : "none",
-                      margin: 0.5,
-                      boxShadow: cell !== 0 ? "0 1px 2px #222" : "none"
-                    }}
-                  />
-                ))}
+                {row.map((cell: any, x: number) => {
+                  const texture = cell !== 0 ? getTetrominoTexture(cell) : null;
+                  return (
+                    <div
+                      key={x}
+                      style={{
+                        width: 4,
+                        height: 4,
+                        background: cell !== 0 
+                          ? texture 
+                            ? `url(${texture})`
+                            : getTetrominoColorFallback(cell)
+                          : "transparent",
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        border: cell !== 0 ? "1px solid rgba(0,0,0,0.4)" : "none",
+                        margin: 0.5,
+                        boxShadow: cell !== 0 ? "inset 0 0 4px rgba(0,0,0,0.3), 0 1px 2px #222" : "none"
+                      }}
+                    />
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -49,8 +59,8 @@ const HoldDisplay: React.FC<HoldDisplayProps> = ({ tetromino }) => {
   );
 };
 
-// Hàm lấy màu tetromino từ tên khối
-function getTetrominoColor(cell: any) {
+// Hàm lấy màu tetromino từ tên khối (fallback)
+function getTetrominoColorFallback(cell: any) {
   switch (cell) {
     case "I": return "#50e3e6";
     case "J": return "#245fdf";

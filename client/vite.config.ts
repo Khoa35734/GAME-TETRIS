@@ -9,4 +9,9 @@ export default defineConfig({
   optimizeDeps: {
     force: true,
   },
+  server: {
+    host: '0.0.0.0', // Allow network access
+    port: 5173,
+    strictPort: false,
+  },
 })

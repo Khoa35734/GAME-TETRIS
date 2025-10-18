@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService, type AuthResponse } from "../services/authService";
+import SettingsPage from './SettingsPage';
+import FriendsManager from './FriendsManager';
+import ConnectionDebug from './ConnectionDebug'; // Debug tool
+import ProfileModal from './ProfileModal'; // Profile modal
+import socket from '../socket'; // Import socket để gửi authentication
 
 interface User {
   username: string;
@@ -32,8 +37,16 @@ const HomeMenu: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState("");
   const [showGameModes, setShowGameModes] = useState<boolean>(() => !!localStorage.getItem('tetris:user'));
   const [showSettings, setShowSettings] = useState(false);
+  const [showFriends, setShowFriends] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showDebug, setShowDebug] = useState(false); // Debug panel
+  const [showProfile, setShowProfile] = useState(false); // Profile modal
+  const [showHelp, setShowHelp] = useState(false); // Gameplay help modal
   const [leaderboardSort, setLeaderboardSort] = useState<'level' | 'stars'>('level');
+
+  // Background music
+  const bgMusicRef = useRef<HTMLAudioElement | null>(null);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
 
   // Player stats (mặc định)
   const [playerStats] = useState(() => {
@@ -102,23 +115,33 @@ const HomeMenu: React.FC = () => {
       const result: AuthResponse = await authService.login(loginForm.email, loginForm.password);
       
       if (result.success && result.user) {
+        // Ensure accountId is a number
+        const accountId = typeof result.user.accountId === 'string' 
+          ? parseInt(result.user.accountId, 10) 
+          : result.user.accountId;
+          
         const user: User = {
           username: result.user.username,
           email: result.user.email,
           isGuest: false,
-          accountId: result.user.accountId,
-          role: result.user.role || 'player',
+          accountId: accountId,
         };
         setCurrentUser(user);
         
-        // ✅ Phân quyền: Admin -> AdminDashboard, Player -> Game Modes
-        if (user.role === 'admin') {
-          navigate('/admin');
-        } else {
-          setShowGameModes(true);
+        // Save to localStorage for auto-authentication
+        try { 
+          localStorage.setItem('tetris:user', JSON.stringify(user));
+          console.log('💾 [Login] User saved to localStorage:', { accountId, type: typeof accountId });
+        } catch (err) {
+          console.error('❌ [Login] Failed to save user to localStorage:', err);
         }
         
+        setShowGameModes(true);
         setLoginForm({ email: "", password: "" });
+
+        // [THÊM MỚI] Gửi authentication đến server để track online status
+        console.log('🔐 [Login] Authenticating socket with accountId:', accountId, typeof accountId);
+        socket.emit('user:authenticate', accountId);
       } else {
         setError(result.message || "Đăng nhập thất bại!");
       }
@@ -167,15 +190,33 @@ const HomeMenu: React.FC = () => {
       const result: AuthResponse = await authService.register(username, email, password);
       
       if (result.success && result.user) {
+        // Ensure accountId is a number
+        const accountId = typeof result.user.accountId === 'string' 
+          ? parseInt(result.user.accountId, 10) 
+          : result.user.accountId;
+          
         const user: User = {
           username: result.user.username,
           email: result.user.email,
           isGuest: false,
-          accountId: result.user.accountId,
+          accountId: accountId,
         };
         setCurrentUser(user);
+        
+        // Save to localStorage for auto-authentication
+        try { 
+          localStorage.setItem('tetris:user', JSON.stringify(user));
+          console.log('💾 [Register] User saved to localStorage:', { accountId, type: typeof accountId });
+        } catch (err) {
+          console.error('❌ [Register] Failed to save user to localStorage:', err);
+        }
+        
         setShowGameModes(true);
         setRegisterForm({ username: "", email: "", password: "", confirmPassword: "" });
+
+        // [THÊM MỚI] Gửi authentication đến server để track online status
+        console.log('🔐 [Register] Authenticating socket with accountId:', accountId, typeof accountId);
+        socket.emit('user:authenticate', accountId);
       } else {
         setError(result.message || "Đăng ký thất bại!");
       }
@@ -222,7 +263,7 @@ const HomeMenu: React.FC = () => {
           currentUser.isGuest ? "Khách" : "Đã đăng nhập"
         }`
       );
-      navigate("/single");
+      navigate("/single/settings");
     }
   };
 
@@ -255,11 +296,71 @@ const HomeMenu: React.FC = () => {
       if (e.key === "Escape" && currentUser) {
         logout();
       }
+      // Toggle debug panel with Ctrl+D
+      if (e.ctrlKey && e.key === "d") {
+        e.preventDefault();
+        setShowDebug((prev) => !prev);
+      }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [currentUser, activeTab, loading]);
+
+  // Background music effect
+  useEffect(() => {
+    // Initialize audio
+    if (!bgMusicRef.current) {
+      const audio = new Audio('/sound/bg.mp3');
+      audio.loop = true;
+      audio.volume = 0.3; // Set volume to 30%
+      bgMusicRef.current = audio;
+    }
+
+    // Auto-play music on mount (with user interaction fallback)
+    const playMusic = async () => {
+      try {
+        await bgMusicRef.current?.play();
+        setIsMusicPlaying(true);
+      } catch (error) {
+        console.log('Autoplay prevented, waiting for user interaction');
+        // Add click listener to start music on first user interaction
+        const startMusic = async () => {
+          try {
+            await bgMusicRef.current?.play();
+            setIsMusicPlaying(true);
+            document.removeEventListener('click', startMusic);
+          } catch (e) {
+            console.error('Failed to play music:', e);
+          }
+        };
+        document.addEventListener('click', startMusic, { once: true });
+      }
+    };
+
+    playMusic();
+
+    // Cleanup: pause music when component unmounts
+    return () => {
+      if (bgMusicRef.current) {
+        bgMusicRef.current.pause();
+        bgMusicRef.current.currentTime = 0;
+      }
+    };
+  }, []);
+
+  // Toggle music function
+  const toggleMusic = () => {
+    if (bgMusicRef.current) {
+      if (isMusicPlaying) {
+        bgMusicRef.current.pause();
+        setIsMusicPlaying(false);
+      } else {
+        bgMusicRef.current.play();
+        setIsMusicPlaying(true);
+      }
+    }
+  };
 
   // Game Mode Component
   const GameModeCard: React.FC<GameModeProps> = ({ icon, title, description, locked, lockedReason, onClick }) => (
@@ -377,6 +478,7 @@ const HomeMenu: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
             {/* Avatar */}
             <div
+              onClick={() => setShowProfile(true)}
               style={{
                 width: 50, height: 50,
                 borderRadius: '50%',
@@ -386,7 +488,17 @@ const HomeMenu: React.FC = () => {
                 fontWeight: 'bold',
                 color: '#fff',
                 border: '2px solid #4ecdc4',
-                boxShadow: '0 0 15px rgba(78, 205, 196, 0.5)'
+                boxShadow: '0 0 15px rgba(78, 205, 196, 0.5)',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.1)';
+                e.currentTarget.style.boxShadow = '0 0 25px rgba(78, 205, 196, 0.8)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = '0 0 15px rgba(78, 205, 196, 0.5)';
               }}
             >
               {currentUser.username.charAt(0).toUpperCase()}
@@ -473,8 +585,83 @@ const HomeMenu: React.FC = () => {
             </div>
           </div>
 
-          {/* Right side - Leaderboard, Settings & Logout */}
+          {/* Right side - Music, Leaderboard, Settings & Logout */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Music Toggle Button */}
+            <button
+              onClick={toggleMusic}
+              style={{
+                background: isMusicPlaying 
+                  ? 'rgba(78, 205, 196, 0.15)' 
+                  : 'rgba(255, 107, 107, 0.15)',
+                border: isMusicPlaying
+                  ? '1px solid rgba(78, 205, 196, 0.4)'
+                  : '1px solid rgba(255, 107, 107, 0.4)',
+                color: isMusicPlaying ? '#4ecdc4' : '#ff6b6b',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                if (isMusicPlaying) {
+                  e.currentTarget.style.background = 'rgba(78, 205, 196, 0.25)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(78, 205, 196, 0.4)';
+                } else {
+                  e.currentTarget.style.background = 'rgba(255, 107, 107, 0.25)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 107, 107, 0.4)';
+                }
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={(e) => {
+                if (isMusicPlaying) {
+                  e.currentTarget.style.background = 'rgba(78, 205, 196, 0.15)';
+                } else {
+                  e.currentTarget.style.background = 'rgba(255, 107, 107, 0.15)';
+                }
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              {isMusicPlaying ? '🎵 Nhạc' : '🔇 Nhạc'}
+            </button>
+
+            {/* Friends Button */}
+            <button
+              onClick={() => setShowFriends(true)}
+              style={{
+                background: 'rgba(156, 39, 176, 0.15)',
+                border: '1px solid rgba(156, 39, 176, 0.4)',
+                color: '#ba68c8',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(156, 39, 176, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(156, 39, 176, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(156, 39, 176, 0.15)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              👥 Bạn bè
+            </button>
+
             {/* Leaderboard Button */}
             <button
               onClick={() => setShowLeaderboard(true)}
@@ -1282,15 +1469,15 @@ const HomeMenu: React.FC = () => {
               <div>
                 <h1
                   style={{
-                    fontSize: "2rem",
+                    fontSize: "3rem",
                     fontWeight: "bold",
                     marginBottom: "30px",
                     textTransform: "uppercase",
-                    letterSpacing: "1px",
+                    letterSpacing: "2px",
                     textAlign: "center",
-                    fontFamily: "'Press Start 2P', cursive",
+                    fontFamily: "'SVN-Determination Sans', 'Press Start 2P', cursive",
                     color: "#eb2614ff",
-                    textShadow: "0 0 10px #c91e0fff, 0 0 20px #ff6b6b",
+                    textShadow: "0 0 15px #c91e0fff, 0 0 30px #ff6b6b",
                     animation: "pulse 2s infinite",
                   }}
                 >
@@ -1315,7 +1502,7 @@ const HomeMenu: React.FC = () => {
                     description="Chơi 1v1 với người chơi khác trực tuyến"
                     locked={isGuest}
                     lockedReason={guestLockReason}
-                    onClick={() => navigate('/online/ranked')}
+                    onClick={() => navigate('/online/casual')}
                   />
                   <GameModeCard
                     icon="👥"
@@ -1343,311 +1530,56 @@ const HomeMenu: React.FC = () => {
         </div>
       </div>
 
-      {/* Settings Modal */}
+      {/* Floating Help Button (bottom-right) */}
+      <button
+        onClick={() => setShowHelp(true)}
+        title="Hướng dẫn chơi"
+        style={{
+          position: 'fixed',
+          right: 24,
+          bottom: 24,
+          zIndex: 1100,
+          background: 'rgba(78, 205, 196, 0.18)',
+          border: '1px solid rgba(78, 205, 196, 0.4)',
+          color: '#4ecdc4',
+          padding: '12px 16px',
+          borderRadius: 12,
+          cursor: 'pointer',
+          fontSize: '0.95rem',
+          fontWeight: 700,
+          boxShadow: '0 10px 20px rgba(0,0,0,0.25)',
+          backdropFilter: 'blur(6px)'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(78, 205, 196, 0.28)';
+          e.currentTarget.style.transform = 'translateY(-2px)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'rgba(78, 205, 196, 0.18)';
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+      >
+        ❓ Hướng dẫn
+      </button>
+
+      {/* Settings Modal/Page */}
       {showSettings && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.85)',
-            backdropFilter: 'blur(8px)',
+            background: 'rgba(0, 0, 0, 0.9)',
+            backdropFilter: 'blur(10px)',
             zIndex: 2000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px'
+            overflowY: 'auto'
           }}
-          onClick={() => setShowSettings(false)}
         >
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(30, 30, 50, 0.95))',
-              border: '2px solid rgba(78, 205, 196, 0.3)',
-              borderRadius: '20px',
-              padding: '40px',
-              maxWidth: '600px',
-              width: '100%',
-              maxHeight: '80vh',
-              overflowY: 'auto',
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(78, 205, 196, 0.2)',
-              animation: 'slideUp 0.3s ease-out'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginBottom: '30px',
-              paddingBottom: '20px',
-              borderBottom: '2px solid rgba(78, 205, 196, 0.2)'
-            }}>
-              <h2 style={{ 
-                fontSize: '1.8rem', 
-                fontWeight: 'bold',
-                color: '#4ecdc4',
-                textShadow: '0 0 10px rgba(78, 205, 196, 0.5)',
-                margin: 0
-              }}>
-                ⚙️ Cài Đặt
-              </h2>
-              <button
-                onClick={() => setShowSettings(false)}
-                style={{
-                  background: 'rgba(244, 67, 54, 0.2)',
-                  border: '1px solid rgba(244, 67, 54, 0.5)',
-                  color: '#ff6b6b',
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  cursor: 'pointer',
-                  fontSize: '1.2rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.3s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(244, 67, 54, 0.4)';
-                  e.currentTarget.style.transform = 'rotate(90deg)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)';
-                  e.currentTarget.style.transform = 'rotate(0deg)';
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Settings Content */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
-              {/* Account Section */}
-              <div>
-                <h3 style={{ 
-                  fontSize: '1.2rem', 
-                  color: '#fff', 
-                  marginBottom: '15px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px'
-                }}>
-                  👤 Tài Khoản
-                </h3>
-                <div style={{ 
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  border: '1px solid rgba(255, 255, 255, 0.1)'
-                }}>
-                  <div style={{ marginBottom: '12px' }}>
-                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Tên người chơi:</span>
-                    <div style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
-                      {currentUser?.username}
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: '12px' }}>
-                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Email:</span>
-                    <div style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
-                      {currentUser?.email || 'Chưa cập nhật'}
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: '12px' }}>
-                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Loại tài khoản:</span>
-                    <div style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 600, marginTop: '4px' }}>
-                      {currentUser?.isGuest ? '🔓 Khách' : '🔐 Đã đăng ký'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Stats Section */}
-              <div>
-                <h3 style={{ 
-                  fontSize: '1.2rem', 
-                  color: '#fff', 
-                  marginBottom: '15px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px'
-                }}>
-                  📊 Thống Kê
-                </h3>
-                <div style={{ 
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '15px'
-                }}>
-                  <div style={{ textAlign: 'center', padding: '15px', background: 'rgba(78, 205, 196, 0.1)', borderRadius: '8px', border: '1px solid rgba(78, 205, 196, 0.3)' }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🎮</div>
-                    <div style={{ color: '#4ecdc4', fontSize: '1.5rem', fontWeight: 'bold' }}>
-                      {playerStats.level}
-                    </div>
-                    <div style={{ color: '#888', fontSize: '0.85rem', marginTop: '4px' }}>Level</div>
-                  </div>
-                  <div style={{ textAlign: 'center', padding: '15px', background: 'rgba(255, 193, 7, 0.1)', borderRadius: '8px', border: '1px solid rgba(255, 193, 7, 0.3)' }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>⭐</div>
-                    <div style={{ color: '#ffc107', fontSize: '1.5rem', fontWeight: 'bold' }}>
-                      {playerStats.stars}
-                    </div>
-                    <div style={{ color: '#888', fontSize: '0.85rem', marginTop: '4px' }}>Stars</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Game Settings Section */}
-              <div>
-                <h3 style={{ 
-                  fontSize: '1.2rem', 
-                  color: '#fff', 
-                  marginBottom: '15px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px'
-                }}>
-                  🎮 Cài Đặt Trò Chơi
-                </h3>
-                <div style={{ 
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '15px'
-                }}>
-                  {/* Volume Setting */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>🔊 Âm lượng</span>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="100" 
-                      defaultValue="70"
-                      style={{ width: '200px' }}
-                    />
-                  </div>
-
-                  {/* Music Setting */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>🎵 Nhạc nền</span>
-                    <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
-                      <input type="checkbox" defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
-                      <span style={{
-                        position: 'absolute',
-                        cursor: 'pointer',
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        background: '#4ecdc4',
-                        borderRadius: '24px',
-                        transition: '0.3s'
-                      }}></span>
-                    </label>
-                  </div>
-
-                  {/* Sound Effects Setting */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>🔔 Hiệu ứng âm thanh</span>
-                    <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
-                      <input type="checkbox" defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
-                      <span style={{
-                        position: 'absolute',
-                        cursor: 'pointer',
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        background: '#4ecdc4',
-                        borderRadius: '24px',
-                        transition: '0.3s'
-                      }}></span>
-                    </label>
-                  </div>
-
-                  {/* Ghost Piece Setting */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#ccc', fontSize: '0.95rem' }}>👻 Hiển thị khối ma</span>
-                    <label style={{ position: 'relative', display: 'inline-block', width: '50px', height: '24px' }}>
-                      <input type="checkbox" defaultChecked style={{ opacity: 0, width: 0, height: 0 }} />
-                      <span style={{
-                        position: 'absolute',
-                        cursor: 'pointer',
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        background: '#4ecdc4',
-                        borderRadius: '24px',
-                        transition: '0.3s'
-                      }}></span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div style={{ 
-                display: 'flex', 
-                gap: '12px',
-                marginTop: '10px'
-              }}>
-                <button
-                  onClick={() => {
-                    if (window.confirm('Bạn có chắc muốn đặt lại tất cả cài đặt về mặc định?')) {
-                      alert('Đã đặt lại cài đặt về mặc định!');
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    background: 'rgba(255, 255, 255, 0.1)',
-                    border: '1px solid rgba(255, 255, 255, 0.3)',
-                    color: '#fff',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                    transition: 'all 0.3s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
-                >
-                  🔄 Đặt lại
-                </button>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    background: 'linear-gradient(45deg, #4ecdc4, #667eea)',
-                    border: 'none',
-                    color: '#fff',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                    transition: 'all 0.3s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 8px 20px rgba(78, 205, 196, 0.4)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  ✓ Lưu thay đổi
-                </button>
-              </div>
-            </div>
-          </div>
+          <SettingsPage onBack={() => setShowSettings(false)} />
         </div>
       )}
+
+      {/* Friends Sidebar - Slides from right */}
+      {showFriends && <FriendsManager onBack={() => setShowFriends(false)} />}
 
       {/* Leaderboard Modal */}
       {showLeaderboard && (
@@ -1914,9 +1846,102 @@ const HomeMenu: React.FC = () => {
         </div>
       )}
 
+      {/* Gameplay Help Modal */}
+      {showHelp && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.88)',
+            backdropFilter: 'blur(6px)',
+            zIndex: 1600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #111 0%, #1b1f24 100%)',
+              color: '#fff',
+              borderRadius: 16,
+              width: 'min(720px, 92vw)',
+              maxHeight: '82vh',
+              overflow: 'auto',
+              padding: '24px',
+              border: '1px solid rgba(78, 205, 196, 0.25)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.6)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#4ecdc4' }}>📘 Hướng dẫn chơi</h2>
+              <button
+                onClick={() => setShowHelp(false)}
+                style={{
+                  background: 'rgba(244, 67, 54, 0.2)',
+                  border: '1px solid rgba(244, 67, 54, 0.5)',
+                  color: '#ff6b6b',
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(244, 67, 54, 0.35)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(244, 67, 54, 0.2)'; }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: 16 }}>
+              <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: 16 }}>
+                <h3 style={{ marginTop: 0, color: '#ffc107' }}>Phím điều khiển cơ bản</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: '#ddd' }}>
+                  <li>Mũi tên Trái/Phải: Di chuyển trái/phải</li>
+                  <li>Mũi tên Xuống: Rơi nhanh (Soft Drop)</li>
+                  <li>Space: Thả ngay (Hard Drop)</li>
+                  <li>X hoặc Mũi tên Lên: Xoay theo chiều kim đồng hồ</li>
+                  <li>Z: Xoay ngược chiều kim đồng hồ</li>
+                  <li>A hoặc Shift: Xoay 180° (nếu bật)</li>
+                  <li>C hoặc Shift: Giữ/Đổi khối (Hold)</li>
+                  <li>P: Tạm dừng</li>
+                </ul>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: 16 }}>
+                <h3 style={{ marginTop: 0, color: '#4ecdc4' }}>Mẹo chơi</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: '#ddd' }}>
+                  <li>DAS/ARR giúp giữ phím để di chuyển liên tục (ARR=0 sẽ trượt tức thì).</li>
+                  <li>Giữ khối (Hold) thông minh để tạo T-Spin hoặc Tetris.</li>
+                  <li>Combo và B2B sẽ gửi rác mạnh hơn cho đối thủ.</li>
+                  <li>3 hàng trên cùng là Buffer – đừng để khối merged lọt vào đó!</li>
+                </ul>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: 16 }}>
+                <h3 style={{ marginTop: 0, color: '#ba68c8' }}>Mạng & hiệu năng</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: '#ddd' }}>
+                  <li>Ưu tiên UDP/WebRTC để giảm trễ; hệ thống sẽ fallback TCP khi cần.</li>
+                  <li>Các sự kiện quan trọng (Topout, Attack) luôn có log & TCP dự phòng.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CSS Animation Styles */}
       <style>
         {`
+          @font-face {
+            font-family: 'SVN-Determination Sans';
+            src: url('/Font/SVN-Determination-Sans.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+          }
+          
           @keyframes gridMove {
             0% { transform: translate(0, 0); }
             100% { transform: translate(50px, 50px); }
@@ -1994,6 +2019,12 @@ const HomeMenu: React.FC = () => {
         href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
         rel="stylesheet"
       />
+
+      {/* Debug Panel (Ctrl+D to toggle) */}
+      {showDebug && <ConnectionDebug onClose={() => setShowDebug(false)} />}
+      
+      {/* Profile Modal */}
+      <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
     </div>
   );
 };

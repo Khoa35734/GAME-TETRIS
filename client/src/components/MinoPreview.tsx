@@ -1,4 +1,5 @@
 import { TETROMINOES } from "./tetrominos";
+import { getTetrominoTexture } from "./textureUtils";
 
 type Props = { type: keyof typeof TETROMINOES | null; size?: number };
 
@@ -7,6 +8,7 @@ export default function MinoPreview({ type, size = 16 }: Props) {
     return <div style={{ width: size * 4, height: size * 4 }} />;
   }
   const { shape, color } = TETROMINOES[type];
+  const texture = getTetrominoTexture(type);
 
   return (
     <div
@@ -30,7 +32,13 @@ export default function MinoPreview({ type, size = 16 }: Props) {
             style={{
               width: size,
               height: size,
-              background: filled ? `rgb(${color})` : "transparent",
+              background: filled 
+                ? texture 
+                  ? `url(${texture})`
+                  : `rgb(${color})`
+                : "transparent",
+              backgroundSize: "cover",
+              backgroundPosition: "center",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: 3,
               boxShadow: filled ? "inset 0 0 6px rgba(0,0,0,.5)" : undefined,

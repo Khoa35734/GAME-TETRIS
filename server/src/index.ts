@@ -6,15 +6,16 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
-import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch } from './redisStore';
-import { initPostgres, sequelize } from './postgres';
+import { initRedis, redis, saveRoom, deleteRoom, addToRankedQueue, removeFromRankedQueue, popBestMatch, storeSocketUser, removeSocketUser, getSocketUserInfo } from './redisStore';
+import { initPostgres } from './postgres';
 import authRouter from './routes/auth';
-import feedbacksRouter from './routes/feedbacks';
-import reportsRouter from './routes/reports';
-import broadcastsRouter from './routes/broadcasts';
-import adminRoutes from './routes/admin'; // THÊM DÒNG NÀY
+import settingsRouter from './routes/settings';
+import friendsRouter from './routes/friends';
+import matchesRouter from './routes/matches';
 import { matchManager, MatchData, PlayerMatchState } from './matchManager';
-import { QueryTypes } from 'sequelize';
+import { setupFriendshipAssociations } from './models/Friendship';
+import MatchmakingSystem from './matchmaking';
+import BO3MatchManager from './bo3MatchManager';
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0'; // bind all interfaces for LAN access
@@ -208,11 +209,146 @@ app.get('/api/players', async (_req, res) => {
   }
 });
 app.use('/api/auth', authRouter); // Mount auth routes
-app.use('/api/feedbacks', feedbacksRouter); // Mount feedback routes
-app.use('/api/reports', reportsRouter); // Mount report routes
-app.use('/api/broadcast', broadcastsRouter); // Mount broadcast routes
-app.use('/api/admin', adminRoutes); 
+app.use('/api/settings', settingsRouter); // Mount settings routes
+app.use('/api/friends', friendsRouter); // Mount friends routes
+app.use('/api/matches', matchesRouter); // Mount matches routes
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/matchmaking/stats', (_req, res) => {
+  if (matchmakingSystem) {
+    res.json(matchmakingSystem.getQueueStats());
+  } else {
+    res.status(503).json({ error: 'Matchmaking system not initialized' });
+  }
+});
+app.get('/test-connection', (req, res) => {
+  const clientIp = normalizeIp((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip);
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Connection Test</title>
+      <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+        .success { color: #00ff00; }
+        .error { color: #ff0000; }
+        .info { color: #00ffff; }
+        .test { margin: 10px 0; padding: 10px; background: #16213e; border-radius: 5px; }
+        button { background: #4ecdc4; color: #000; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; border-radius: 5px; }
+        button:hover { background: #45b7aa; }
+      </style>
+    </head>
+    <body>
+      <h2>🔌 Server Connection Test</h2>
+      <div class="test">
+        <div><strong>Your IP:</strong> <span class="info">${clientIp}</span></div>
+        <div><strong>Server IP:</strong> <span class="info">${req.headers.host}</span></div>
+        <div><strong>Time:</strong> <span class="info">${new Date().toISOString()}</span></div>
+      </div>
+
+      <div class="test">
+        <h3>✅ HTTP Connection: <span class="success">OK</span></h3>
+        <p>You successfully connected to the HTTP server!</p>
+      </div>
+
+      <div class="test">
+        <h3>🔌 Socket.IO Connection Test</h3>
+        <div id="socket-status">⏳ Testing...</div>
+        <button onclick="reconnect()">🔄 Reconnect</button>
+      </div>
+
+      <div class="test">
+        <h3>📋 Connection Logs</h3>
+        <div id="logs" style="max-height: 300px; overflow-y: auto; background: #0a0a0a; padding: 10px; border-radius: 5px;"></div>
+      </div>
+
+      <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+      <script>
+        let socket;
+        const logsEl = document.getElementById('logs');
+        const statusEl = document.getElementById('socket-status');
+
+        function log(msg, color = '#eee') {
+          const time = new Date().toLocaleTimeString();
+          logsEl.innerHTML += \`<div style="color: \${color}">[\${time}] \${msg}</div>\`;
+          logsEl.scrollTop = logsEl.scrollHeight;
+        }
+
+        function connect() {
+          const url = location.origin;
+          log('🔌 Connecting to: ' + url, '#00ffff');
+          
+          socket = io(url, {
+            transports: ['websocket', 'polling'],
+            reconnection: true
+          });
+
+          socket.on('connect', () => {
+            log('✅ Socket.IO Connected! ID: ' + socket.id, '#00ff00');
+            statusEl.innerHTML = '<span class="success">✅ Connected (ID: ' + socket.id + ')</span>';
+          });
+
+          socket.on('connect_error', (err) => {
+            log('❌ Connection Error: ' + err.message, '#ff0000');
+            statusEl.innerHTML = '<span class="error">❌ Connection Failed: ' + err.message + '</span>';
+          });
+
+          socket.on('disconnect', (reason) => {
+            log('⚠️ Disconnected: ' + reason, '#ffff00');
+            statusEl.innerHTML = '<span class="error">⚠️ Disconnected: ' + reason + '</span>';
+          });
+
+          socket.on('reconnect_attempt', () => {
+            log('🔄 Attempting to reconnect...', '#ffff00');
+          });
+        }
+
+        function reconnect() {
+          if (socket) socket.disconnect();
+          logsEl.innerHTML = '';
+          connect();
+        }
+
+        connect();
+      </script>
+    </body>
+    </html>
+  `);
+});
+app.get('/api/server-info', (_req, res) => {
+  // Get server's LAN IP addresses
+  const os = require('os');
+  const interfaces = os.networkInterfaces();
+  const addresses: string[] = [];
+  
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      // Skip internal (loopback) and non-IPv4 addresses
+      if (iface.family === 'IPv4' && !iface.internal) {
+        addresses.push(iface.address);
+      }
+    }
+  }
+  
+  res.json({ 
+    ok: true, 
+    serverIPs: addresses,
+    port: PORT,
+    apiBaseUrl: addresses.length > 0 ? `http://${addresses[0]}:${PORT}/api` : `http://localhost:${PORT}/api`
+  });
+});
+app.get('/api/debug/online-users', (_req, res) => {
+  // Debug endpoint to check online users
+  res.json({
+    ok: true,
+    onlineUsers: Array.from(onlineUsers.entries()).map(([userId, socketId]) => ({
+      userId,
+      socketId,
+    })),
+    totalOnline: onlineUsers.size,
+  });
+});
 app.get('/whoami', (req, res) => {
   // Express req.ip returns remote address (e.g., ::ffff:192.168.1.10)
   const raw = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
@@ -253,7 +389,31 @@ app.get('/ws-test', (_req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET','POST'] }
+  cors: { 
+    origin: '*', 
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000
+});
+
+// Log all incoming connections
+io.engine.on('connection', (rawSocket) => {
+  const transport = rawSocket.transport.name; // polling or websocket
+  const remoteAddress = rawSocket.request.socket.remoteAddress;
+  console.log(`🔌 [Socket.IO Engine] New connection from ${remoteAddress} via ${transport}`);
+  
+  rawSocket.on('upgrade', () => {
+    console.log(`⬆️ [Socket.IO Engine] Connection upgraded to websocket from ${remoteAddress}`);
+  });
+  
+  rawSocket.on('close', () => {
+    console.log(`❌ [Socket.IO Engine] Connection closed from ${remoteAddress}`);
+  });
 });
 
 type TType = 'I'|'J'|'L'|'O'|'S'|'T'|'Z';
@@ -346,6 +506,9 @@ const accountToSocket = new Map<string, string>();
 // Track IP to live socket ids (can be multiple tabs) - DEPRECATED, giữ lại cho legacy
 const ipToSockets = new Map<string, Set<string>>();
 
+// [THÊM MỚI] Map để theo dõi userId online (từ authentication)
+const onlineUsers = new Map<number, string>(); // userId -> socketId
+
 // [THÊM MỚI] Map để theo dõi những người chơi đã sẵn sàng cho trận đấu
 const playersReadyForGame = new Map<string, Set<string>>();
 
@@ -357,8 +520,18 @@ const matchGenerators = new Map<string, Generator<TType, any, any>>();
 // Key: socketId, Value: { ping: number, lastUpdate: number }
 const playerPings = new Map<string, { ping: number; lastUpdate: number }>();
 
+// [MATCHMAKING SYSTEM] Initialize matchmaking
+let matchmakingSystem: MatchmakingSystem;
+let bo3MatchManager: BO3MatchManager;
+
 initRedis().catch(err => console.error('[redis] init failed', err));
-initPostgres().catch(err => console.error('[postgres] init skipped/failed', err));
+initPostgres()
+  .then(() => {
+    // Setup Sequelize associations after models are loaded
+    setupFriendshipAssociations();
+    console.log('[postgres] Friendship associations setup complete');
+  })
+  .catch(err => console.error('[postgres] init skipped/failed', err));
 
 io.on('connection', (socket) => {
   // Map this socket to client IP
@@ -410,6 +583,46 @@ io.on('connection', (socket) => {
   // Client reports their measured ping
   socket.on('client:ping', (ping: number) => {
     playerPings.set(socket.id, { ping, lastUpdate: Date.now() });
+  });
+
+  // [THÊM MỚI] User authentication - Client gửi userId sau khi login
+  socket.on('user:authenticate', async (userId: any) => {
+    console.log(`📥 [Auth] Received authentication request:`, { userId, type: typeof userId });
+    
+    // Convert to number if needed
+    const accountId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    
+    if (accountId && typeof accountId === 'number' && !isNaN(accountId)) {
+      onlineUsers.set(accountId, socket.id);
+      
+      // Store in Redis for persistence across reconnects
+      const username = `User${accountId}`; // TODO: Fetch from database
+      await storeSocketUser(socket.id, accountId, username);
+      
+      // Also store in socket as backup (but Redis is source of truth)
+      (socket as any).accountId = accountId;
+      (socket as any).username = username;
+      
+      console.log(`🟢 [Online] User ${accountId} connected (socket: ${socket.id})`);
+      console.log(`   💾 [Redis] User auth stored in Redis`);
+      console.log(`   📊 Total online users: ${onlineUsers.size}`);
+      console.log(`   👥 Online user IDs:`, Array.from(onlineUsers.keys()));
+      
+      // Send confirmation back to client
+      socket.emit('user:authenticated', { accountId, username });
+      console.log(`   ✅ [Auth] Confirmation sent to client`);
+      
+      // Broadcast user online to all connected clients
+      io.emit('user:online', accountId);
+      console.log(`   📡 Broadcasted user:online event for userId: ${accountId}`);
+    } else {
+      console.warn(`⚠️ [Auth] Invalid userId received:`, { 
+        received: userId, 
+        type: typeof userId, 
+        converted: accountId,
+        isNaN: isNaN(accountId)
+      });
+    }
   });
   
   // Broadcast chat for quick manual test
@@ -627,6 +840,91 @@ io.on('connection', (socket) => {
 
     } catch (err) {
       console.error('[room:ready] Error:', err);
+    }
+  });
+
+  // [MỚI] room:invite - Mời bạn bè vào phòng
+  socket.on('room:invite', async (data: {
+    roomId: string;
+    friendId: number;
+    friendUsername: string;
+    inviterName: string;
+  }, cb?: (result: any) => void) => {
+    try {
+      const { roomId, friendId, friendUsername, inviterName } = data;
+
+      // 1. Validate input
+      if (!roomId || !friendId || !friendUsername) {
+        console.error('[room:invite] ❌ Missing required fields');
+        cb?.({ ok: false, error: 'Thiếu thông tin cần thiết' });
+        return;
+      }
+
+      // 2. Get match from Redis
+      const match = await matchManager.getMatch(roomId);
+      if (!match) {
+        console.error('[room:invite] ❌ Match not found:', roomId);
+        cb?.({ ok: false, error: 'Phòng không tồn tại' });
+        return;
+      }
+
+      // 3. Check if sender is host
+      const inviter = findPlayerInMatch(match, socket.id);
+      if (!inviter || inviter.playerId !== match.hostPlayerId) {
+        console.error('[room:invite] ❌ Only host can invite');
+        cb?.({ ok: false, error: 'Chỉ chủ phòng mới có thể mời bạn bè' });
+        return;
+      }
+
+      // 4. Check if room has space
+      if (match.players.length >= match.maxPlayers) {
+        console.error('[room:invite] ❌ Room is full');
+        cb?.({ ok: false, error: 'Phòng đã đầy' });
+        return;
+      }
+
+      // 5. Check if friend is online
+      const friendSocketId = onlineUsers.get(friendId);
+      if (!friendSocketId) {
+        console.error('[room:invite] ❌ Friend is offline:', friendId);
+        cb?.({ ok: false, error: `${friendUsername} hiện đang offline` });
+        return;
+      }
+
+      // 6. Check if friend is already in the room
+      const friendInRoom = match.players.some(p => {
+        // Extract userId from playerId (format: "userId_timestamp" or just "userId")
+        const userIdStr = p.playerId.split('_')[0];
+        return parseInt(userIdStr) === friendId;
+      });
+
+      if (friendInRoom) {
+        console.error('[room:invite] ❌ Friend already in room');
+        cb?.({ ok: false, error: `${friendUsername} đã ở trong phòng` });
+        return;
+      }
+
+      // 7. Send notification to friend
+      io.to(friendSocketId).emit('room:invitation', {
+        roomId,
+        roomName: match.matchId, // Using matchId as room name
+        inviterName: inviterName || inviter.playerId, // Use playerId if displayName not provided
+        maxPlayers: match.maxPlayers,
+        currentPlayers: match.players.length,
+        timestamp: Date.now()
+      });
+
+      console.log(`[room:invite] ✅ Invitation sent from ${inviterName || inviter.playerId} to ${friendUsername} (${friendId}) for room ${roomId.slice(0, 8)}`);
+
+      // 8. Success response
+      cb?.({ 
+        ok: true, 
+        message: `Đã gửi lời mời đến ${friendUsername}` 
+      });
+
+    } catch (err) {
+      console.error('[room:invite] Error:', err);
+      cb?.({ ok: false, error: 'Lỗi khi gửi lời mời' });
     }
   });
 
@@ -1400,6 +1698,25 @@ io.on('connection', (socket) => {
           accountToSocket.delete(accountId);
         }
       }
+
+      // [THÊM MỚI] Remove user from online tracking và broadcast offline
+      for (const [userId, sockId] of onlineUsers.entries()) {
+        if (sockId === socket.id) {
+          onlineUsers.delete(userId);
+          console.log(`⚪ [Offline] User ${userId} disconnected (socket: ${socket.id})`);
+          console.log(`   📊 Total online users: ${onlineUsers.size}`);
+          console.log(`   👥 Remaining online user IDs:`, Array.from(onlineUsers.keys()));
+          
+          // Broadcast user offline to all connected clients
+          io.emit('user:offline', userId);
+          console.log(`   📡 Broadcasted user:offline event for userId: ${userId}`);
+          break;
+        }
+      }
+      
+      // Remove from Redis
+      await removeSocketUser(socket.id);
+      console.log(`   💾 [Redis] User auth removed from Redis`);
       
       // Remove ping tracking
       playerPings.delete(socket.id);
@@ -1456,6 +1773,23 @@ function roomSnapshot(roomId: string) {
   };
 }
 
+// [THÊM MỚI] Export function để check user online status
+export function isUserOnline(userId: number): boolean {
+  return onlineUsers.has(userId);
+}
+
+export function getOnlineUsers(): number[] {
+  return Array.from(onlineUsers.keys());
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`Versus server listening on http://${HOST}:${PORT}`);
+  
+  // Initialize matchmaking system after server starts
+  matchmakingSystem = new MatchmakingSystem(io);
+  console.log('[Matchmaking] System initialized ✅');
+  
+  // Initialize BO3 match manager
+  bo3MatchManager = new BO3MatchManager(io);
+  console.log('[BO3] Match Manager initialized ✅');
 });
