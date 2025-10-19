@@ -6,6 +6,14 @@ import { getSocketUserInfo, storeSocketUser } from './stores/redisStore';
 import { matchManager } from './managers/matchManager';
 import BO3MatchManager from './managers/bo3MatchManager';
 
+const normalizeBestOf = (value: number): number => {
+  const cleaned = Math.max(1, Math.floor(value));
+  return cleaned % 2 === 0 ? cleaned + 1 : cleaned;
+};
+
+const DEFAULT_SERIES_BEST_OF = normalizeBestOf(Number(process.env.MATCH_SERIES_BEST_OF ?? 3));
+const DEFAULT_SERIES_WINS_REQUIRED = Math.floor(DEFAULT_SERIES_BEST_OF / 2) + 1;
+
 interface Player {
   socketId: string;
   accountId: number;
@@ -89,15 +97,41 @@ class MatchmakingSystem {
   private handleJoinQueue(socket: Socket, data: { mode: 'casual' | 'ranked' }) {
     const { mode } = data;
     
-    // Get player info from Redis instead of socket properties
-    getSocketUserInfo(socket.id).then(userInfo => {
-      if (!userInfo) {
+    // Get player info from Redis (with socket fallback)
+    getSocketUserInfo(socket.id).then(async (userInfo) => {
+      let accountId = userInfo?.accountId;
+      let username = userInfo?.username;
+
+      if (!accountId) {
+        const socketAccount = (socket as any).accountId;
+        if (typeof socketAccount === 'number' && !isNaN(socketAccount)) {
+          accountId = socketAccount;
+        }
+      }
+
+      if (!username) {
+        const socketUsername = (socket as any).username;
+        if (typeof socketUsername === 'string') {
+          username = socketUsername;
+        } else if (accountId) {
+          username = `User${accountId}`;
+        }
+      }
+
+      if (!accountId) {
         console.warn(`[Matchmaking] Socket ${socket.id} not authenticated`);
         socket.emit('matchmaking:error', { error: 'Not authenticated' });
         return;
       }
 
-      const { accountId, username } = userInfo;
+      // Attempt to backfill Redis if missing
+      if (!userInfo && username) {
+        try {
+          await storeSocketUser(socket.id, accountId, username);
+        } catch (error) {
+          console.error('[Matchmaking] Failed to backfill socket user in Redis:', error);
+        }
+      }
 
       // Check if player has active penalty
       const penalty = this.penalties.get(accountId);
@@ -113,7 +147,7 @@ class MatchmakingSystem {
       const player: Player = {
         socketId: socket.id,
         accountId,
-        username,
+        username: username || `User${accountId}`,
         mode,
         searchStartTime: Date.now(),
       };
@@ -304,7 +338,8 @@ class MatchmakingSystem {
 
     this.activeMatches.set(matchId, match);
 
-    console.log(`\n🎮 [Matchmaking] ĐÃ TÌM THẤY TRẬN ĐẤU!`);
+    console.log(`
+🎮 [Matchmaking] ĐÃ TÌM THẤY TRẬN ĐẤU!`);
     console.log(`   Match ID: ${matchId}`);
     console.log(`   Player 1: ${player1.username} (${player1.accountId})`);
     console.log(`   Player 2: ${player2.username} (${player2.accountId})`);
@@ -458,20 +493,48 @@ class MatchmakingSystem {
         matchType: 'bo3',
         mode: match.mode,
         autoStart: true, // ✅ Auto start game, không cần lobby
+        playerRole: 'player1',
+        player: {
+          username: match.player1.username,
+          accountId: match.player1.accountId,
+        },
         opponent: {
           username: match.player2.username,
-          accountId: match.player2.accountId
-        }
+          accountId: match.player2.accountId,
+        },
+        series: {
+          bestOf: seriesBestOf,
+          winsRequired: seriesWinsRequired,
+          currentGame: bo3Match.currentGame,
+          score: {
+            player: bo3Match.score.player1Wins,
+            opponent: bo3Match.score.player2Wins,
+          },
+        },
       });
       this.io.to(match.player2.socketId).emit('matchmaking:start', { 
         roomId,
         matchType: 'bo3',
         mode: match.mode,
         autoStart: true, // ✅ Auto start game, không cần lobby
+        playerRole: 'player2',
+        player: {
+          username: match.player2.username,
+          accountId: match.player2.accountId,
+        },
         opponent: {
           username: match.player1.username,
-          accountId: match.player1.accountId
-        }
+          accountId: match.player1.accountId,
+        },
+        series: {
+          bestOf: seriesBestOf,
+          winsRequired: seriesWinsRequired,
+          currentGame: bo3Match.currentGame,
+          score: {
+            player: bo3Match.score.player2Wins,
+            opponent: bo3Match.score.player1Wins,
+          },
+        },
       });
 
       // ⏳ ĐỢI 1 GIÂY để client navigate và setup listeners xong
@@ -479,7 +542,8 @@ class MatchmakingSystem {
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       // 8. ✅ EMIT game:start riêng cho từng player với opponent socketId để setup WebRTC
-      console.log(`\n[Matchmaking] 🎮 EMITTING game:start events...`);
+      console.log(`
+[Matchmaking] 🎮 EMITTING game:start events...`);
       
       // Player 1 nhận opponent là player 2
       const payload1 = {
@@ -487,7 +551,16 @@ class MatchmakingSystem {
         countdown: 3,
         matchType: 'bo3',
         mode: match.mode,
-        opponent: match.player2.socketId // ← WebRTC cần opponent socket.id
+        opponent: match.player2.socketId, // ← WebRTC cần opponent socket.id
+        series: {
+          bestOf: seriesBestOf,
+          winsRequired: seriesWinsRequired,
+          currentGame: bo3Match.currentGame,
+          score: {
+            player: bo3Match.score.player1Wins,
+            opponent: bo3Match.score.player2Wins,
+          },
+        },
       };
       console.log(`   📤 Sending to Player 1 (${match.player1.socketId}):`, payload1);
       this.io.to(match.player1.socketId).emit('game:start', payload1);
@@ -498,15 +571,24 @@ class MatchmakingSystem {
         countdown: 3,
         matchType: 'bo3',
         mode: match.mode,
-        opponent: match.player1.socketId // ← WebRTC cần opponent socket.id
+        opponent: match.player1.socketId, // ← WebRTC cần opponent socket.id
+        series: {
+          bestOf: seriesBestOf,
+          winsRequired: seriesWinsRequired,
+          currentGame: bo3Match.currentGame,
+          score: {
+            player: bo3Match.score.player2Wins,
+            opponent: bo3Match.score.player1Wins,
+          },
+        },
       };
       console.log(`   📤 Sending to Player 2 (${match.player2.socketId}):`, payload2);
       this.io.to(match.player2.socketId).emit('game:start', payload2);
 
-      console.log(`[Matchmaking] ✅ Game start events emitted - Check if clients receive them!\n`);
+      console.log(`[Matchmaking] ✅ Game start events emitted - Check if clients receive them!
+`);
 
-      this.activeMatches.delete(match.matchId);
-      console.log(`[Matchmaking] ✅ Match ${match.matchId} started successfully (BO3)`);
+      console.log(`[Matchmaking] ✅ Match ${match.matchId} started successfully (Best of ${seriesBestOf})`);
       
     } catch (error) {
       console.error(`[Matchmaking] ❌ Error creating BO3 match:`, error);

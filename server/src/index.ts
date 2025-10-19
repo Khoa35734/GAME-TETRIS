@@ -15,7 +15,7 @@ import { initPostgres } from './stores/postgres';
 import { setupFriendshipAssociations } from './models/Friendship';
 import MatchmakingSystem from './matchmaking';
 import { startCleanupJob } from './jobs/cleanup';
-import { onlineUsers } from './core/state';
+import { onlineUsers, userPresence, type Presence } from './core/state';
 import messagesRouter from './routes/messages';
 
 
@@ -60,4 +60,7 @@ export function isUserOnline(accountId: number): boolean {
 
 export function getOnlineUsers(): number[] {
   return Array.from(onlineUsers.keys());
+}
+export function getUserPresence(accountId: number): Presence | undefined {
+  return userPresence.get(accountId);
 }

@@ -3,6 +3,10 @@
 
 import { Server, Socket } from 'socket.io';
 
+const DEFAULT_BEST_OF = 3;
+
+const calculateWinsRequired = (bestOf: number): number => Math.floor(bestOf / 2) + 1;
+
 interface GameStats {
   lines: number;
   pps: number;
@@ -36,6 +40,8 @@ interface BO3Match {
   };
   mode: 'casual' | 'ranked';
   currentGame: number; // 1, 2, or 3
+  bestOf: number;
+  winsRequired: number;
   score: {
     player1Wins: number;
     player2Wins: number;
@@ -86,8 +92,12 @@ class BO3MatchManager {
     roomId: string,
     player1: { socketId: string; accountId: number; username: string },
     player2: { socketId: string; accountId: number; username: string },
-    mode: 'casual' | 'ranked'
+    mode: 'casual' | 'ranked',
+    bestOf: number = DEFAULT_BEST_OF
   ): BO3Match {
+    const normalizedBestOf = Math.max(1, bestOf % 2 === 0 ? bestOf + 1 : bestOf);
+    const winsRequired = calculateWinsRequired(normalizedBestOf);
+
     const match: BO3Match = {
       matchId,
       roomId,
@@ -95,6 +105,8 @@ class BO3MatchManager {
       player2,
       mode,
       currentGame: 1,
+      bestOf: normalizedBestOf,
+      winsRequired,
       score: {
         player1Wins: 0,
         player2Wins: 0
@@ -111,7 +123,19 @@ class BO3MatchManager {
       matchId,
       mode,
       currentGame: 1,
-      score: match.score
+      score: match.score,
+      bestOf: normalizedBestOf,
+      winsRequired,
+      player1: {
+        socketId: player1.socketId,
+        accountId: player1.accountId,
+        username: player1.username,
+      },
+      player2: {
+        socketId: player2.socketId,
+        accountId: player2.accountId,
+        username: player2.username,
+      },
     });
 
     console.log(`[BO3] Match created: ${matchId} (${player1.username} vs ${player2.username})`);
@@ -156,25 +180,33 @@ class BO3MatchManager {
     console.log(`[BO3] Game ${match.currentGame} finished in ${data.roomId}: ${data.winner} wins`);
     console.log(`[BO3] Score: ${match.score.player1Wins}-${match.score.player2Wins}`);
 
-    // Check if match is over (someone won 2 games)
-    if (match.score.player1Wins === 2 || match.score.player2Wins === 2) {
+    // Check if match is over (someone reached required wins)
+    if (
+      match.score.player1Wins >= match.winsRequired ||
+      match.score.player2Wins >= match.winsRequired ||
+      match.currentGame >= match.bestOf
+    ) {
       this.finishMatch(match);
     } else {
       // Prepare for next game
-      match.currentGame++;
+      match.currentGame = Math.min(match.currentGame + 1, match.bestOf);
       
       this.io.to(data.roomId).emit('bo3:game-result', {
         gameNumber: gameResult.gameNumber,
         winner: data.winner,
         score: match.score,
-        nextGame: match.currentGame
+        nextGame: match.currentGame,
+        bestOf: match.bestOf,
+        winsRequired: match.winsRequired,
       });
 
       // Start countdown for next game (e.g., 5 seconds)
       setTimeout(() => {
         this.io.to(data.roomId).emit('bo3:next-game-start', {
           gameNumber: match.currentGame,
-          score: match.score
+          score: match.score,
+          bestOf: match.bestOf,
+          winsRequired: match.winsRequired,
         });
       }, 5000);
     }
@@ -193,7 +225,9 @@ class BO3MatchManager {
       winner: overallWinner,
       score: match.score,
       finalScore,
-      games: match.games
+      games: match.games,
+      bestOf: match.bestOf,
+      winsRequired: match.winsRequired,
     });
 
     // Save match history to database

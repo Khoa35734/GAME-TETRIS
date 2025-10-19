@@ -9,6 +9,9 @@ export interface Friend {
   email: string;
   createdAt: string;
   isOnline?: boolean; // Online status
+  presenceStatus?: 'online' | 'offline' | 'in_game';
+  gameMode?: 'single' | 'multi';
+  inGameSince?: number;
 }
 
 export interface FriendRequest {

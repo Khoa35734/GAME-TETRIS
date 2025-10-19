@@ -1,0 +1,81 @@
+@font-face {
+  font-family: 'SVN-Determination Sans';
+  src: url('/Font/SVN-Determination-Sans.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@keyframes gridMove {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(50px, 50px); }
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+input::placeholder {
+  color: #666666;
+}
+
+@media (max-width: 768px) {
+  div[style*="justifyContent: space-around"] {
+    flex-direction: column !important;
+    gap: 30px !important;
+    padding: 20px 0 !important;
+  }
+  
+  div[style*="justifyContent: space-around"] > div > div:first-child {
+    font-size: 2rem !important;
+  }
+  
+  div[style*="maxWidth: 600px"] {
+    padding: 30px 20px !important;
+    margin: 20px !important;
+  }
+  
+  h1[style*="fontSize: 2rem"] {
+    font-size: 1.5rem !important;
+  }
+  
+  div[style*="gridTemplateColumns: repeat(auto-fit, minmax(200px, 1fr))"] {
+    grid-template-columns: 1fr !important;
+  }
+  
+  div[style*="top: 20px; right: 20px"] {
+    position: fixed !important;
+    top: 10px !important;
+    right: 10px !important;
+    font-size: 0.8rem !important;
+    padding: 8px 15px !important;
+  }
+}

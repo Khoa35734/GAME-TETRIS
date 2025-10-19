@@ -340,46 +340,44 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
     }
   }, [activeTab]);
 
-  // [THÊM MỚI] Listen cho online/offline events
+  // Presence tracking via socket events
   useEffect(() => {
     const handleUserOnline = (userId: number) => {
-      console.log('🟢 [FriendsManager] User came online:', userId);
-      setFriends((prev) => {
-        const updated = prev.map((f) => {
-          if (f.userId === userId) {
-            console.log('   ✅ Matched friend:', f.username, '(userId:', f.userId, ')');
-            return { ...f, isOnline: true };
-          }
-          return f;
-        });
-        console.log('   📋 Updated friends:', updated.map(f => ({ id: f.userId, name: f.username, online: f.isOnline })));
-        return updated;
-      });
+      setFriends((prev) => prev.map((f) => f.userId === userId
+        ? { ...f, isOnline: true, presenceStatus: 'online', gameMode: undefined, inGameSince: undefined }
+        : f));
     };
 
     const handleUserOffline = (userId: number) => {
-      console.log('⚪ [FriendsManager] User went offline:', userId);
-      setFriends((prev) => {
-        const updated = prev.map((f) => {
-          if (f.userId === userId) {
-            console.log('   ✅ Matched friend:', f.username, '(userId:', f.userId, ')');
-            return { ...f, isOnline: false };
-          }
-          return f;
-        });
-        console.log('   📋 Updated friends:', updated.map(f => ({ id: f.userId, name: f.username, online: f.isOnline })));
-        return updated;
-      });
+      setFriends((prev) => prev.map((f) => f.userId === userId
+        ? { ...f, isOnline: false, presenceStatus: 'offline', gameMode: undefined, inGameSince: undefined }
+        : f));
     };
 
-    console.log('👂 [FriendsManager] Registering socket listeners for online/offline events');
+    const handlePresenceUpdate = (payload: any) => {
+      const { userId, status, mode, since } = payload || {};
+      if (typeof userId !== "number") return;
+      setFriends((prev) => prev.map((f) => f.userId === userId
+        ? {
+            ...f,
+            isOnline: status === 'offline' ? false : true,
+            presenceStatus: status,
+            gameMode: mode,
+            inGameSince: since,
+          }
+        : f));
+    };
+
+    console.log('👂 [FriendsManager] Registering presence listeners');
     socket.on('user:online', handleUserOnline);
     socket.on('user:offline', handleUserOffline);
+    socket.on('presence:update', handlePresenceUpdate);
 
     return () => {
-      console.log('🔇 [FriendsManager] Cleaning up socket listeners');
+      console.log('🔇 [FriendsManager] Cleaning up presence listeners');
       socket.off('user:online', handleUserOnline);
       socket.off('user:offline', handleUserOffline);
+      socket.off('presence:update', handlePresenceUpdate);
     };
   }, []);
 
@@ -565,8 +563,19 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
                   </UserHeader>
                   <UserDetail>User ID: #{friend.userId}</UserDetail>
                   <UserDetail>{friend.email}</UserDetail>
-                  <UserDetail style={{ color: friend.isOnline ? '#4ecdc4' : '#666', fontSize: '0.85rem' }}>
-                    {friend.isOnline ? '🟢 Online' : '⚪ Offline'}
+                  <UserDetail
+                    style={{
+                      color: friend.presenceStatus === 'in_game' ? '#ffc107' : friend.isOnline ? '#4ecdc4' : '#666',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    {friend.presenceStatus === 'in_game'
+                      ? (() => {
+                          const minutes = friend.inGameSince ? Math.max(0, Math.floor((Date.now() - friend.inGameSince) / 60000)) : 0;
+                          const modeLabel = friend.gameMode === 'multi' ? 'multi' : 'single';
+                          return `Đang trong trận (${modeLabel}) • ${minutes} phút`;
+                        })()
+                      : friend.isOnline ? '🟢 Online' : '⚪ Offline'}
                   </UserDetail>
                 </UserInfo>
                 <Button variant="danger" onClick={() => handleRemoveFriend(friend.userId)}>

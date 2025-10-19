@@ -1,0 +1,5 @@
+  // [THÊM MỚI] Listen cho online/offline events
+      console.log('⚪ [FriendsManager] User went offline:', userId);
+    console.log('👂 [FriendsManager] Registering socket listeners for online/offline events');
+    socket.on('user:offline', handleUserOffline);
+      socket.off('user:offline', handleUserOffline);

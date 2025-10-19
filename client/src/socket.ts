@@ -31,60 +31,62 @@ const socket = io(SERVER_URL, {
 
 // Auto-authenticate on connect/reconnect if user is logged in
 socket.on('connect', () => {
-  console.log('✅ [Socket.IO] Connected! Socket ID:', socket.id);
-  
+  console.log('? [Socket.IO] Connected! Socket ID:', socket.id);
+
   // Reset authentication status
   isAuthenticated = false;
-  
-  // Auto-authenticate if user data exists in localStorage
+
   const userDataStr = localStorage.getItem('tetris:user');
-  if (userDataStr) {
-    try {
-      const userData = JSON.parse(userDataStr);
-      if (userData && userData.accountId) {
-        // Ensure accountId is a number
-        const accountId = typeof userData.accountId === 'string' 
-          ? parseInt(userData.accountId, 10) 
-          : userData.accountId;
-          
-        console.log(`🔐 [Socket.IO] Auto-authenticating user ${accountId}...`);
-        
-        // Create authentication promise
-        authenticationPromise = new Promise<void>((resolve) => {
-          // Listen for authentication confirmation
-          const authConfirmed = () => {
-            isAuthenticated = true;
-            console.log(`✅ [Socket.IO] Authentication confirmed for user ${accountId}`);
-            socket.off('user:authenticated', authConfirmed);
-            resolve();
-          };
-          
-          socket.once('user:authenticated', authConfirmed);
-          
-          // Delay a bit to ensure server is ready, then send auth
-          setTimeout(() => {
-            socket.emit('user:authenticate', accountId);
-            console.log(`📤 [Socket.IO] Authentication request sent for user ${accountId} (type: ${typeof accountId})`);
-            
-            // Fallback: assume authenticated after 1 second if no response
-            setTimeout(() => {
-              if (!isAuthenticated) {
-                console.log(`⚠️ [Socket.IO] No auth response, assuming authenticated`);
-                isAuthenticated = true;
-                resolve();
-              }
-            }, 1000);
-          }, 200);
-        });
-      }
-    } catch (error) {
-      console.error('❌ [Socket.IO] Failed to parse user data:', error);
+  if (!userDataStr) {
+    console.log('?? [Socket.IO] No user data found, skipping authentication');
+    return;
+  }
+
+  try {
+    const userData = JSON.parse(userDataStr);
+    if (!userData || !userData.accountId) {
+      console.log('?? [Socket.IO] Missing accountId in stored user data');
+      return;
     }
-  } else {
-    console.log('ℹ️ [Socket.IO] No user data found, skipping authentication');
+
+    const accountId = typeof userData.accountId === 'string'
+      ? parseInt(userData.accountId, 10)
+      : userData.accountId;
+
+    if (!accountId || Number.isNaN(accountId)) {
+      console.log('?? [Socket.IO] Invalid accountId in stored user data');
+      return;
+    }
+
+    console.log(`?? [Socket.IO] Auto-authenticating user ${accountId}...`);
+
+    authenticationPromise = new Promise<void>((resolve) => {
+      const authConfirmed = () => {
+        isAuthenticated = true;
+        console.log(`? [Socket.IO] Authentication confirmed for user ${accountId}`);
+        socket.off('user:authenticated', authConfirmed);
+        resolve();
+      };
+
+      socket.once('user:authenticated', authConfirmed);
+
+      setTimeout(() => {
+        socket.emit('user:authenticate', { accountId, username: userData.username });
+        console.log(`?? [Socket.IO] Authentication request sent for user ${accountId} (type: ${typeof accountId})`);
+
+        setTimeout(() => {
+          if (!isAuthenticated) {
+            console.log('?? [Socket.IO] No auth response, assuming authenticated');
+            isAuthenticated = true;
+            resolve();
+          }
+        }, 1000);
+      }, 200);
+    });
+  } catch (error) {
+    console.error('? [Socket.IO] Failed to parse user data:', error);
   }
 });
-
 socket.on('disconnect', (reason) => {
   console.warn('⚠️ [Socket.IO] Disconnected:', reason);
   isAuthenticated = false;
@@ -110,6 +112,15 @@ socket.on('matchmaking:error', (data: { error: string }) => {
     alert('❌ Lỗi matchmaking: ' + data.error);
   }
 });
+
+export const authenticateUser = (accountId: number, username?: string) => {
+  if (!accountId || Number.isNaN(accountId)) {
+    console.warn('[Socket.IO] Cannot authenticate without a valid accountId');
+    return;
+  }
+  socket.emit('user:authenticate', { accountId, username });
+};
+
 
 // Export function to check if authenticated
 export const waitForAuthentication = async (): Promise<boolean> => {

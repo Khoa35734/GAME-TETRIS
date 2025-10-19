@@ -18,6 +18,11 @@ export const playerPings = new Map<string, { ping: number; lastUpdate: number }>
 
 // Online users (userId -> socketId)
 export const onlineUsers = new Map<number, string>();
+// Presence tracking
+export type PresenceStatus = 'online' | 'offline' | 'in_game';
+export type Presence = { status: PresenceStatus; mode?: 'single' | 'multi'; since: number };
+export const userPresence = new Map<number, Presence>();
+
 
 // Players ready for game start
 export const playersReadyForGame = new Map<string, Set<string>>();

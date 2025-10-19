@@ -92,6 +92,13 @@ const isPerfectClearBoard = (stage: StageType): boolean =>
     value === 0 || value === '0' || (typeof value === 'string' && value.startsWith('ghost'))
   ));
 
+const normalizeBestOf = (value: number): number => {
+  const cleaned = Math.max(1, Math.floor(value));
+  return cleaned % 2 === 0 ? cleaned + 1 : cleaned;
+};
+
+const getWinsRequired = (bestOf: number): number => Math.floor(normalizeBestOf(bestOf) / 2) + 1;
+
 // Calculate garbage lines from clear action
 const calculateGarbageLines = (
   lines: number, 
@@ -174,6 +181,57 @@ const Versus: React.FC = () => {
   const [timerOn, setTimerOn] = useState(false);
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+
+  const [playerName, setPlayerName] = useState<string>('Bạn');
+  const [opponentName, setOpponentName] = useState<string | null>(null);
+  const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
+  const [seriesBestOf, setSeriesBestOf] = useState<number>(3);
+  const [seriesWinsRequired, setSeriesWinsRequired] = useState<number>(getWinsRequired(3));
+  const [seriesScore, setSeriesScore] = useState<{ me: number; opponent: number }>({ me: 0, opponent: 0 });
+  const [seriesCurrentGame, setSeriesCurrentGame] = useState<number>(1);
+  const seriesBestOfRef = useRef(seriesBestOf);
+  const seriesWinsRequiredRef = useRef(seriesWinsRequired);
+  const playerRoleRef = useRef<'player1' | 'player2' | null>(playerRole);
+  const seriesCurrentGameRef = useRef(seriesCurrentGame);
+  useEffect(() => {
+    seriesBestOfRef.current = seriesBestOf;
+    setSeriesWinsRequired(prev => {
+      const computed = getWinsRequired(seriesBestOf);
+      return prev === computed ? prev : computed;
+    });
+  }, [seriesBestOf]);
+  useEffect(() => {
+    seriesWinsRequiredRef.current = seriesWinsRequired;
+  }, [seriesWinsRequired]);
+  useEffect(() => {
+    playerRoleRef.current = playerRole;
+  }, [playerRole]);
+  useEffect(() => {
+    seriesCurrentGameRef.current = seriesCurrentGame;
+  }, [seriesCurrentGame]);
+  const applySeriesScore = useCallback((score: any) => {
+    if (!score) {
+      setSeriesScore({ me: 0, opponent: 0 });
+      return;
+    }
+    if (typeof score.player === 'number' || typeof score.opponent === 'number') {
+      setSeriesScore({
+        me: Number(score.player) || 0,
+        opponent: Number(score.opponent) || 0,
+      });
+      return;
+    }
+    const player1Wins = Number(score.player1Wins ?? score.player1 ?? 0) || 0;
+    const player2Wins = Number(score.player2Wins ?? score.player2 ?? 0) || 0;
+    const role = playerRoleRef.current;
+    if (role === 'player2') {
+      setSeriesScore({ me: player2Wins, opponent: player1Wins });
+    } else if (role === 'player1') {
+      setSeriesScore({ me: player1Wins, opponent: player2Wins });
+    } else {
+      setSeriesScore({ me: player1Wins, opponent: player2Wins });
+    }
+  }, []);
   
   // Game over animation state (separate for me and opponent)
   const [myFillWhiteProgress, setMyFillWhiteProgress] = useState(0); // 0-100%
@@ -881,12 +939,21 @@ const initWebRTC = useCallback(
           const userStr = localStorage.getItem('tetris:user');
           if (userStr) {
             const user = JSON.parse(userStr);
-            setMeId(user.accountId?.toString() || socket.id || 'unknown');
+            const resolvedId = user.accountId?.toString() || socket.id || 'unknown';
+            const resolvedName = typeof user.username === 'string' && user.username.trim().length > 0
+              ? user.username.trim()
+              : resolvedId;
+            setMeId(resolvedId);
+            setPlayerName(resolvedName);
           } else {
-            setMeId(socket.id || 'unknown');
+            const fallbackId = socket.id || 'unknown';
+            setMeId(fallbackId);
+            setPlayerName(fallbackId);
           }
         } catch (err) {
-          setMeId(socket.id || 'unknown');
+          const fallbackId = socket.id || 'unknown';
+          setMeId(fallbackId);
+          setPlayerName(fallbackId);
         }
         return;
       }
@@ -903,9 +970,13 @@ const initWebRTC = useCallback(
         
         const user = JSON.parse(userStr);
         const accountId = user.accountId?.toString() || socket.id;
+        const resolvedName = typeof user.username === 'string' && user.username.trim().length > 0
+          ? user.username.trim()
+          : accountId;
         
         setMeId(accountId);
-        setDebugInfo(prev => [...prev, `Account ID: ${accountId} (${user.username})`]);
+        setPlayerName(resolvedName);
+        setDebugInfo(prev => [...prev, `Account ID: ${accountId} (${resolvedName})`]);
         
         const elo = 1000;
         socket.emit('ranked:enter', accountId, elo);
@@ -927,6 +998,13 @@ const initWebRTC = useCallback(
       stopMatchmaking();
       setRoomId(payload.roomId);
       setOpponentId(payload.opponent);
+      if (payload?.opponent?.username) {
+        setOpponentName(String(payload.opponent.username));
+      } else if (typeof payload?.opponentUsername === 'string') {
+        setOpponentName(payload.opponentUsername);
+      } else if (payload?.opponent) {
+        setOpponentName(String(payload.opponent));
+      }
     };
     socket.on('ranked:found', onFound);
 
@@ -1272,6 +1350,147 @@ const initWebRTC = useCallback(
     setIncomingGarbage,
     cleanupWebRTC
   ]);
+
+  useEffect(() => {
+    const handleMatchmakingStart = (payload: any) => {
+      if (!payload) return;
+
+      if (payload.playerRole === 'player1' || payload.playerRole === 'player2') {
+        setPlayerRole(payload.playerRole);
+      }
+
+      if (payload.player?.username) {
+        setPlayerName(String(payload.player.username));
+      }
+
+      if (payload.opponent?.username) {
+        setOpponentName(String(payload.opponent.username));
+      } else if (typeof payload.opponent?.accountId === 'number') {
+        setOpponentName(`User${payload.opponent.accountId}`);
+      } else if (typeof payload.opponent === 'string') {
+        setOpponentName(payload.opponent);
+      }
+
+      if (payload.roomId) {
+        setRoomId(prev => prev ?? payload.roomId);
+      }
+
+      const bestOfRaw = typeof payload?.series?.bestOf === 'number'
+        ? payload.series.bestOf
+        : seriesBestOfRef.current;
+      const normalizedBestOf = normalizeBestOf(bestOfRaw);
+      setSeriesBestOf(normalizedBestOf);
+
+      const winsRequired = typeof payload?.series?.winsRequired === 'number'
+        ? payload.series.winsRequired
+        : getWinsRequired(normalizedBestOf);
+      setSeriesWinsRequired(winsRequired);
+
+      if (typeof payload?.series?.currentGame === 'number') {
+        setSeriesCurrentGame(payload.series.currentGame);
+      } else {
+        setSeriesCurrentGame(1);
+      }
+
+      if (payload?.series?.score) {
+        applySeriesScore(payload.series.score);
+      } else {
+        setSeriesScore({ me: 0, opponent: 0 });
+      }
+    };
+
+    socket.on('matchmaking:start', handleMatchmakingStart);
+    return () => {
+      socket.off('matchmaking:start', handleMatchmakingStart);
+    };
+  }, [applySeriesScore, setRoomId]);
+
+  useEffect(() => {
+    const resolveBestOf = (raw?: number) => normalizeBestOf(typeof raw === 'number' ? raw : seriesBestOfRef.current);
+
+    const handleMatchStart = (payload: any) => {
+      if (!payload) return;
+
+      if (payload.player1?.socketId && payload.player2?.socketId) {
+        if (socket.id === payload.player1.socketId) {
+          setPlayerRole('player1');
+          if (payload.player1.username) setPlayerName(String(payload.player1.username));
+          if (payload.player2.username) setOpponentName(String(payload.player2.username));
+        } else if (socket.id === payload.player2.socketId) {
+          setPlayerRole('player2');
+          if (payload.player2.username) setPlayerName(String(payload.player2.username));
+          if (payload.player1.username) setOpponentName(String(payload.player1.username));
+        } else {
+          if (payload.player1.username) setPlayerName(String(payload.player1.username));
+          if (payload.player2.username) setOpponentName(String(payload.player2.username));
+        }
+      }
+
+      const normalizedBestOf = resolveBestOf(payload.bestOf);
+      setSeriesBestOf(normalizedBestOf);
+
+      const winsRequired = typeof payload?.winsRequired === 'number'
+        ? payload.winsRequired
+        : getWinsRequired(normalizedBestOf);
+      setSeriesWinsRequired(winsRequired);
+
+      setSeriesCurrentGame(typeof payload?.currentGame === 'number' ? payload.currentGame : 1);
+      if (payload?.score) {
+        applySeriesScore(payload.score);
+      } else {
+        setSeriesScore({ me: 0, opponent: 0 });
+      }
+    };
+
+    const handleGameResult = (payload: any) => {
+      if (payload?.score) {
+        applySeriesScore(payload.score);
+      }
+      if (typeof payload?.nextGame === 'number') {
+        setSeriesCurrentGame(payload.nextGame);
+      }
+    };
+
+    const handleNextGameStart = (payload: any) => {
+      if (payload?.score) {
+        applySeriesScore(payload.score);
+      }
+      if (typeof payload?.gameNumber === 'number') {
+        setSeriesCurrentGame(payload.gameNumber);
+      }
+    };
+
+    const handleMatchEnd = (payload: any) => {
+      if (payload?.score) {
+        applySeriesScore(payload.score);
+      }
+      if (typeof payload?.games === 'object' && Array.isArray(payload.games)) {
+        setSeriesCurrentGame(payload.games.length);
+      }
+      if (payload?.winner === 'player1' || payload?.winner === 'player2') {
+        const role = playerRoleRef.current;
+        if (role) {
+          if (payload.winner === role) {
+            setMatchResult(prev => prev ?? { outcome: 'win' });
+          } else {
+            setMatchResult(prev => prev ?? { outcome: 'lose' });
+          }
+        }
+      }
+    };
+
+    socket.on('bo3:match-start', handleMatchStart);
+    socket.on('bo3:game-result', handleGameResult);
+    socket.on('bo3:next-game-start', handleNextGameStart);
+    socket.on('bo3:match-end', handleMatchEnd);
+
+    return () => {
+      socket.off('bo3:match-start', handleMatchStart);
+      socket.off('bo3:game-result', handleGameResult);
+      socket.off('bo3:next-game-start', handleNextGameStart);
+      socket.off('bo3:match-end', handleMatchEnd);
+    };
+  }, [applySeriesScore]);
 
   // Unmount cleanup
   useEffect(() => {
@@ -1832,7 +2051,8 @@ const initWebRTC = useCallback(
           <div style={{ fontSize: 12, marginTop: 10, opacity: 0.7 }}>
             <div>SERVER_URL: {SERVER_URL}</div>
             <div>Socket connected: {socket.connected ? '✅ Yes' : '❌ No'}</div>
-            <div>Me ID: {meId || 'Loading...'}</div>
+            <div>Tên: {playerName || 'Đang tải...'}</div>
+            <div>ID: {meId || 'Loading...'}</div>
             {debugInfo.length > 0 && debugInfo.map((info, i) => (
               <div key={i}>• {info}</div>
             ))}
@@ -1845,7 +2065,7 @@ const initWebRTC = useCallback(
         <div style={{ color: '#fff', fontSize: 20, textAlign: 'center', padding: 20 }}>
           <div>🎮 Đã tìm thấy trận!</div>
           <div style={{ fontSize: 14, marginTop: 10, color: '#aaa' }}>
-            Đang chuẩn bị trận đấu với {opponentId}...
+            Đang chuẩn bị trận đấu với {opponentName || opponentId || 'đối thủ'}...
           </div>
         </div>
       ) : countdown !== null ? (
@@ -1879,10 +2099,37 @@ const initWebRTC = useCallback(
             </div>
           )}
 
+
+          <div style={{ gridColumn: '1 / -1', marginBottom: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32, color: '#fff' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 18, fontWeight: 600, opacity: 0.8 }}>
+                  {playerName || meId || 'Bạn'}
+                </div>
+                <div style={{ fontSize: 36, fontWeight: 800, lineHeight: 1 }}>
+                  {seriesScore.me}
+                </div>
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', opacity: 0.7 }}>
+                VS
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontSize: 18, fontWeight: 600, opacity: 0.8 }}>
+                  {opponentName || opponentId || 'Đối thủ'}
+                </div>
+                <div style={{ fontSize: 36, fontWeight: 800, lineHeight: 1 }}>
+                  {seriesScore.opponent}
+                </div>
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', marginTop: 8, fontSize: 13, color: '#bbb' }}>
+              Best of {seriesBestOf} · First to {seriesWinsRequired} · Game {seriesCurrentGame}
+            </div>
+          </div>
           {/* Left side: YOU (ĐÃ ĐỔI - Board của bạn bên TRÁI với viền xanh lá) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
             <div style={{ gridColumn: '1 / -1', color: '#4ecdc4', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
-              {meId ? `🎮 Bạn: ${meId}` : '🎮 Bạn'}
+              {(playerName || meId) ? `🎮 Bạn: ${playerName || meId}` : '🎮 Bạn'}
             </div>
             <HoldPanel hold={hold as any} />
             
@@ -1940,7 +2187,7 @@ const initWebRTC = useCallback(
           {/* Right side: OPPONENT (ĐÃ ĐỔI - Board đối thủ bên PHẢI với viền đỏ) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
             <div style={{ gridColumn: '1 / -1', color: '#ff6b6b', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
-              {opponentId ? `⚔️ Đối thủ: ${opponentId}` : '⚔️ Đối thủ'}
+              {(opponentName || opponentId) ? `⚔️ Đối thủ: ${opponentName || opponentId}` : '⚔️ Đối thủ'}
             </div>
             <HoldPanel hold={oppHold} />
             

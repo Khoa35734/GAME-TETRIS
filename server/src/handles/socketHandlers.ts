@@ -4,6 +4,7 @@ import { matchManager, MatchData, PlayerMatchState } from '../managers/matchMana
 import MatchmakingSystem from '../matchmaking';
 import BO3MatchManager from '../managers/bo3MatchManager';
 import { bagGenerator, nextPieces, TType } from '../game/pieceGenerator';
+import { onlineUsers as onlineUsersState, userPresence } from '../core/state';
 
 export type PlayerState = {
   id: string;
@@ -63,7 +64,7 @@ export function setupSocketHandlers(io: Server) {
   const ipToSockets = new Map<string, Set<string>>();
   const matchGenerators = new Map<string, Generator<TType, any, any>>();
   const playerPings = new Map<string, { ping: number; lastUpdate: number }>();
-  const onlineUsers = new Map<number, string>();
+  const onlineUsers = onlineUsersState;
 
   io.on('connection', (socket: Socket) => {
     const rawIp = (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || socket.handshake.address;
@@ -81,18 +82,58 @@ export function setupSocketHandlers(io: Server) {
       playerPings.set(socket.id, { ping, lastUpdate: Date.now() });
     });
 
-    socket.on('user:authenticate', async (userId: any) => {
-      const accountId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-      if (accountId && typeof accountId === 'number' && !isNaN(accountId)) {
-        onlineUsers.set(accountId, socket.id);
-        const username = `User${accountId}`;
-        await storeSocketUser(socket.id, accountId, username);
-        (socket as any).accountId = accountId;
-        (socket as any).username = username;
-        socket.emit('user:authenticated', { accountId, username });
-        io.emit('user:online', accountId);
+    socket.on('user:authenticate', async (payload: any) => {
+      let accountId: number | undefined;
+      let username: string | undefined;
+
+      if (payload && typeof payload === 'object') {
+        const rawId = (payload as any).accountId ?? (payload as any).userId;
+        const parsed = typeof rawId === 'string' ? parseInt(rawId, 10) : rawId;
+        if (typeof parsed === 'number' && !isNaN(parsed)) accountId = parsed;
+        if (typeof (payload as any).username === 'string') username = (payload as any).username;
+      } else {
+        const raw = payload;
+        const parsed = typeof raw === 'string' ? parseInt(raw, 10) : raw;
+        if (typeof parsed === 'number' && !isNaN(parsed)) accountId = parsed;
       }
+
+      if (!accountId) return;
+
+      onlineUsers.set(accountId, socket.id);
+      const resolvedUsername = username || `User${accountId}`;
+
+      try {
+        await storeSocketUser(socket.id, accountId, resolvedUsername);
+      } catch (error) {
+        console.error('[Socket] Failed to persist socket user in Redis:', error);
+      }
+
+      (socket as any).accountId = accountId;
+      (socket as any).username = resolvedUsername;
+      socket.emit('user:authenticated', { accountId, username: resolvedUsername });
+
+      const since = Date.now();
+      userPresence.set(accountId, { status: 'online', since });
+      io.emit('user:online', accountId);
+      io.emit('presence:update', { userId: accountId, status: 'online', since });
     });
+
+    socket.on('presence:update', (payload: any) => {
+      const accountId: number | undefined = (socket as any).accountId;
+      if (!accountId) return;
+      const status = payload?.status as 'online' | 'offline' | 'in_game' | undefined;
+      const mode = payload?.mode as 'single' | 'multi' | undefined;
+      if (!status) return;
+      const since = Date.now();
+      if (status === 'offline') {
+        onlineUsers.delete(accountId);
+      }
+      userPresence.set(accountId, { status, mode, since });
+      io.emit('presence:update', { userId: accountId, status, mode, since });
+      if (status === 'online') io.emit('user:online', accountId);
+      if (status === 'offline') io.emit('user:offline', accountId);
+    });
+
 
     // Example room:create, room:join retained (others can be migrated similarly as needed)
     socket.on('room:create', async (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
@@ -117,7 +158,10 @@ export function setupSocketHandlers(io: Server) {
       for (const [userId, sockId] of onlineUsers.entries()) {
         if (sockId === socket.id) {
           onlineUsers.delete(userId);
+          const since = Date.now();
+          userPresence.set(userId, { status: 'offline', since });
           io.emit('user:offline', userId);
+          io.emit('presence:update', { userId, status: 'offline', since });
           break;
         }
       }

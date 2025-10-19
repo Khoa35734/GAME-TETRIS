@@ -1,0 +1,49 @@
+  }, [activeTab]);
+
+  // [THÊM MỚI] Listen cho online/offline events
+  useEffect(() => {
+    const handleUserOnline = (userId: number) => {
+      console.log('🟢 [FriendsManager] User came online:', userId);
+      setFriends((prev) => {
+        const updated = prev.map((f) => {
+          if (f.userId === userId) {
+            console.log('   ✅ Matched friend:', f.username, '(userId:', f.userId, ')');
+            return { ...f, isOnline: true };
+          }
+          return f;
+        });
+        console.log('   📋 Updated friends:', updated.map(f => ({ id: f.userId, name: f.username, online: f.isOnline })));
+        return updated;
+      });
+    };
+
+    const handleUserOffline = (userId: number) => {
+      console.log('⚪ [FriendsManager] User went offline:', userId);
+      setFriends((prev) => {
+        const updated = prev.map((f) => {
+          if (f.userId === userId) {
+            console.log('   ✅ Matched friend:', f.username, '(userId:', f.userId, ')');
+            return { ...f, isOnline: false };
+          }
+          return f;
+        });
+        console.log('   📋 Updated friends:', updated.map(f => ({ id: f.userId, name: f.username, online: f.isOnline })));
+        return updated;
+      });
+    };
+
+    console.log('👂 [FriendsManager] Registering socket listeners for online/offline events');
+    socket.on('user:online', handleUserOnline);
+    socket.on('user:offline', handleUserOffline);
+
+    return () => {
+      console.log('🔇 [FriendsManager] Cleaning up socket listeners');
+      socket.off('user:online', handleUserOnline);
+      socket.off('user:offline', handleUserOffline);
+    };
+  }, []);
+
+  const showMessage = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 3000);
+  };
