@@ -60,11 +60,21 @@ const Button = styled.button`
   }
 `;
 
+type OnlineUser = {
+  socketId: string;
+  userId?: string | number;
+  username?: string;
+};
+
+type OnlineUsersResponse = {
+  onlineUsers?: OnlineUser[];
+};
+
 const ConnectionDebug: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const [socketStatus, setSocketStatus] = useState<'online' | 'offline'>('offline');
   const [apiUrl, setApiUrl] = useState<string>('');
   const [serverUrl, setServerUrl] = useState<string>('');
-  const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [socketId, setSocketId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,8 +98,11 @@ const ConnectionDebug: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
 
   const fetchOnlineUsers = async () => {
     try {
-      const response = await axios.get(`${getApiBaseUrl().replace('/api', '')}/api/debug/online-users`);
-      setOnlineUsers(response.data.onlineUsers || []);
+      const response = await axios.get<OnlineUsersResponse>(
+        `${getApiBaseUrl().replace('/api', '')}/api/debug/online-users`
+      );
+      const data = response.data;
+      setOnlineUsers(data.onlineUsers ?? []);
     } catch (error) {
       console.error('Failed to fetch online users:', error);
       setOnlineUsers([]);

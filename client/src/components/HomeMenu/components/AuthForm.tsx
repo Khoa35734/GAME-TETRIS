@@ -16,8 +16,8 @@ interface Props {
   setLoginForm: (s: { email: string; password: string }) => void;
   registerForm: { username: string; email: string; password: string; confirmPassword: string };
   setRegisterForm: (s: { username: string; email: string; password: string; confirmPassword: string }) => void;
-  handleLogin: (e: React.FormEvent) => void;
-  handleRegister: (e: React.FormEvent) => void;
+  handleLogin: (e: React.FormEvent<HTMLFormElement>) => void;
+  handleRegister: (e: React.FormEvent<HTMLFormElement>) => void;
   playAsGuest: () => void;
   quickLoginUser: QuickLoginUser | null;
   onQuickLogin?: () => void;

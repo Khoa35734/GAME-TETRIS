@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import type { Stage as StageType, Cell as StageCell } from '../../gamehelper';
 import socket from '../../socket';
 
-export const useGarbageSystem = (roomId: string | null, sendUDP: Function, sendTopout: Function) => {
+export const useGarbageSystem = (roomId: string | null, sendUDP: Function, _sendTopout: Function) => {
   const [incomingGarbage, setIncomingGarbage] = useState(0);
   const [opponentIncomingGarbage, setOpponentIncomingGarbage] = useState(0);
 
@@ -11,7 +11,7 @@ export const useGarbageSystem = (roomId: string | null, sendUDP: Function, sendT
     if (!sent && roomId) socket.emit('game:attack', roomId, { lines });
   }, [sendUDP, roomId]);
 
-  const applyGarbageRows = useCallback((setStage: any, player: any, updatePlayerPos: any, count: number) => {
+  const applyGarbageRows = useCallback((setStage: any, _player: any, _updatePlayerPos: any, count: number) => {
     if (count <= 0) return;
     console.log(`[applyGarbageRows] Applying ${count} rows`);
     setStage((prev: StageType) => {

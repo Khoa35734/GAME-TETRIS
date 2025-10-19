@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import { checkCollision } from '../../gamehelper';
-import { tryRotate } from '../../srsRotation';
 
 export const useInputHandler = (player: any, stage: any, updatePlayerPos: any, playerRotateSRS: Function) => {
   const movePlayer = useCallback((dir: number) => {

@@ -261,7 +261,8 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
           };
           setCurrentUser(toUser(storedUser));
           applySession(storedUser, result.token);
-          setShowGameModes(false);
+          // After successful login, show game mode menu
+          setShowGameModes(true);
           authenticateUser(storedUser.accountId, storedUser.username);
           if (storedUser.role === 'admin') navigate('/admin');
         } else {
@@ -312,7 +313,8 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
           };
           setCurrentUser(toUser(storedUser));
           applySession(storedUser, result.token);
-          setShowGameModes(false);
+          // After successful registration, show game mode menu
+          setShowGameModes(true);
           authenticateUser(storedUser.accountId, storedUser.username);
           setRegisterForm({ username: '', email: '', password: '', confirmPassword: '' });
           if (storedUser.role === 'admin') navigate('/admin');

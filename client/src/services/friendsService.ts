@@ -30,6 +30,11 @@ export interface SearchResult {
   isOutgoing: boolean;
 }
 
+type ApiResponse<T extends object = Record<string, unknown>> = {
+  success: boolean;
+  message?: string;
+} & T;
+
 const getAuthToken = (): string | null => {
   return localStorage.getItem('tetris:token');
 };
@@ -41,7 +46,7 @@ export const getFriends = async (): Promise<{ success: boolean; friends?: Friend
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get(`${getApiUrl()}/friends`, {
+    const response = await axios.get<ApiResponse<{ friends?: Friend[] }>>(`${getApiUrl()}/friends`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -67,7 +72,9 @@ export const getFriendRequests = async (): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get(`${getApiUrl()}/friends/requests`, {
+    const response = await axios.get<
+      ApiResponse<{ incoming?: FriendRequest[]; outgoing?: FriendRequest[] }>
+    >(`${getApiUrl()}/friends/requests`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -92,7 +99,7 @@ export const searchUser = async (userId: number): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post(
+    const response = await axios.post<ApiResponse<{ user?: SearchResult }>>(
       `${getApiUrl()}/friends/search`,
       { userId },
       {
@@ -120,7 +127,7 @@ export const sendFriendRequest = async (friendId: number): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post(
+    const response = await axios.post<ApiResponse>(
       `${getApiUrl()}/friends/request`,
       { friendId },
       {
@@ -148,7 +155,7 @@ export const acceptFriendRequest = async (friendId: number): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post(
+    const response = await axios.post<ApiResponse>(
       `${getApiUrl()}/friends/accept`,
       { friendId },
       {
@@ -176,7 +183,7 @@ export const rejectFriendRequest = async (friendId: number): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post(
+    const response = await axios.post<ApiResponse>(
       `${getApiUrl()}/friends/reject`,
       { friendId },
       {
@@ -204,7 +211,7 @@ export const removeFriend = async (friendId: number): Promise<{
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.delete(`${getApiUrl()}/friends/${friendId}`, {
+    const response = await axios.delete<ApiResponse>(`${getApiUrl()}/friends/${friendId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 

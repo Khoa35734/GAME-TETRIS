@@ -471,6 +471,10 @@ class MatchmakingSystem {
         match.mode
       );
 
+      // Ensure series metadata always has sane values even if manager defaults change
+      const seriesBestOf = bo3Match?.bestOf ?? DEFAULT_SERIES_BEST_OF;
+      const seriesWinsRequired = bo3Match?.winsRequired ?? DEFAULT_SERIES_WINS_REQUIRED;
+
       console.log(`[Matchmaking] ✅ BO3 Match created successfully!`);
       console.log(`   Room ID: ${roomId}`);
       console.log(`   Mode: ${match.mode} (Best of 3)`);

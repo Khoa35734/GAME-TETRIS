@@ -1,4 +1,4 @@
-import { sequelize } from '../../stores/postgres';
+import { sequelize } from '../stores/postgres';
 import fs from 'fs';
 import path from 'path';
 

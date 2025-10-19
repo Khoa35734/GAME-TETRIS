@@ -6,8 +6,13 @@ export function useKeyboardShortcuts(params: {
   loading: boolean;
   logout: () => void;
   toggleDebug: () => void;
+  showSettings?: boolean;
+  showFriends?: boolean;
+  showLeaderboard?: boolean;
+  showProfile?: boolean;
+  showHelp?: boolean;
 }) {
-  const { currentUser, activeTab, loading, logout, toggleDebug } = params;
+  const { currentUser, activeTab, loading, logout, toggleDebug, showSettings, showFriends, showLeaderboard, showProfile, showHelp } = params;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -15,8 +20,12 @@ export function useKeyboardShortcuts(params: {
         const form = document.getElementById('loginForm') as HTMLFormElement | null;
         if (form) form.dispatchEvent(new Event('submit', { bubbles: true }));
       }
+      // Only logout on Escape if no modal is open
       if (e.key === 'Escape' && currentUser) {
-        logout();
+        const anyModalOpen = showSettings || showFriends || showLeaderboard || showProfile || showHelp;
+        if (!anyModalOpen) {
+          logout(); // ✅ Only logout when no modal is open
+        }
       }
       if (e.ctrlKey && e.key === 'd') {
         e.preventDefault();
@@ -26,6 +35,6 @@ export function useKeyboardShortcuts(params: {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [currentUser, activeTab, loading, logout, toggleDebug]);
+  }, [currentUser, activeTab, loading, logout, toggleDebug, showSettings, showFriends, showLeaderboard, showProfile, showHelp]);
 }
 

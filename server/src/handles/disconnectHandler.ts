@@ -7,72 +7,84 @@ import {
   playerPings,
   onlineUsers,
 } from '../core/state';
-import matchManager from '../managers/matchManager';
-import { findPlayerInMatch } from '../libs/helpers';
-import redis from '../stores/redisStore';
+import {
+  matchManager,
+  type PlayerMatchState,
+} from '../managers/matchManager';
+import { findPlayerInMatch } from '../game/helper';
+import { redis } from '../stores/redisStore';
+import type { PlayerState } from '../core/types';
 
 export function setupDisconnectHandler(socket: Socket, io: Server) {
   socket.on('disconnect', async () => {
     console.log(`[Disconnect] Socket ${socket.id} disconnected`);
 
-    // 1. Cleanup Redis matches
-    const allMatchIds = await matchManager.getAllMatchIds();
-    for (const matchId of allMatchIds) {
+    // 1. Cleanup Redis-backed matches
+    const activeMatchIds = await matchManager.getActiveMatches();
+    for (const matchId of activeMatchIds) {
       const match = await matchManager.getMatch(matchId);
       if (!match) continue;
 
       const player = findPlayerInMatch(match, socket.id);
-      if (player) {
-        console.log(`[Disconnect] Marking player ${player.accountId} as disconnected in match ${matchId}`);
+      if (!player) continue;
 
-        const updatedPlayers = match.players.map((p) =>
-          p.socketId === socket.id ? { ...p, disconnected: true } : p
+      console.log(
+        `[Disconnect] Marking player ${player.playerId} as disconnected in match ${matchId}`,
+      );
+
+      await matchManager.markDisconnected(matchId, player.playerId);
+
+      const refreshed = await matchManager.getMatch(matchId);
+      if (!refreshed) continue;
+
+      const activePlayers = refreshed.players.filter((p: PlayerMatchState) => p.alive);
+
+      if (activePlayers.length === 0) {
+        console.log(`[Disconnect] Both players disconnected, cleaning up match ${matchId}`);
+        await matchManager.deleteMatch(matchId);
+        const generatorKey = `${matchId}-${player.accountId ?? player.playerId}`;
+        matchGenerators.delete(generatorKey);
+      } else {
+        const opponent = activePlayers.find(
+          (p) => p.playerId !== player.playerId && Boolean(p.socketId),
         );
-
-        await matchManager.updateMatch(matchId, { players: updatedPlayers });
-
-        // Nếu cả 2 đều disconnect → cleanup
-        if (updatedPlayers.every((p) => p.disconnected)) {
-          console.log(`[Disconnect] Both players disconnected, cleaning up match ${matchId}`);
-          await matchManager.deleteMatch(matchId);
-          matchGenerators.delete(`${matchId}-${player.accountId}`);
-        } else {
-          // Đối thủ còn lại thắng
-          const opponent = match.players.find((p) => p.socketId !== socket.id);
-          if (opponent && !opponent.disconnected) {
-            io.to(opponent.socketId).emit('game:opponentDisconnected');
-          }
+        if (opponent?.socketId) {
+          io.to(opponent.socketId).emit('game:opponentDisconnected');
         }
       }
     }
 
-    // 2. Cleanup legacy rooms
+    // 2. Cleanup legacy in-memory rooms (fallback path)
     for (const [roomId, room] of rooms.entries()) {
-      const playerIndex = room.players.findIndex((p) => p.socketId === socket.id);
-      if (playerIndex !== -1) {
-        const player = room.players[playerIndex];
-        console.log(`[Disconnect] Player ${player.username} left room ${roomId}`);
+      if (!room.players.has(socket.id)) continue;
 
-        room.players.splice(playerIndex, 1);
+      const player = room.players.get(socket.id) as PlayerState | undefined;
+      if (!player) continue;
 
-        if (room.players.length === 0) {
-          rooms.delete(roomId);
-          console.log(`[Disconnect] Room ${roomId} deleted (empty)`);
-        } else {
-          // Mark room as dead, trigger game over sau 5s
-          room.status = 'dead';
-          const remaining = room.players[0];
-          io.to(remaining.socketId).emit('game:opponentDisconnected');
+      console.log(`[Disconnect] Player ${player.name ?? socket.id} left room ${roomId}`);
 
-          setTimeout(async () => {
-            const currentRoom = rooms.get(roomId);
-            if (currentRoom && currentRoom.status === 'dead') {
-              io.to(remaining.socketId).emit('game:forceEnd', { reason: 'opponent_disconnect' });
-              rooms.delete(roomId);
-            }
-          }, 5000);
-        }
+      room.players.delete(socket.id);
+
+      if (room.players.size === 0) {
+        rooms.delete(roomId);
+        console.log(`[Disconnect] Room ${roomId} deleted (empty)`);
+        continue;
       }
+
+      const remainingPlayer = Array.from(room.players.values())[0];
+      if (!remainingPlayer) continue;
+
+      io.to(remainingPlayer.id).emit('game:opponentDisconnected');
+
+      setTimeout(() => {
+        const currentRoom = rooms.get(roomId);
+        if (!currentRoom) return;
+        const stillPresent = currentRoom.players.has(remainingPlayer.id);
+        if (stillPresent && currentRoom.players.size === 1) {
+          io.to(remainingPlayer.id).emit('game:forceEnd', { reason: 'opponent_disconnect' });
+          rooms.delete(roomId);
+        }
+      }, 5000);
     }
 
     // 3. Cleanup account mapping
@@ -84,7 +96,7 @@ export function setupDisconnectHandler(socket: Socket, io: Server) {
     }
 
     // 4. Cleanup online presence
-    let disconnectedAccountId: string | null = null;
+    let disconnectedAccountId: number | null = null;
     for (const [accountId, sid] of onlineUsers.entries()) {
       if (sid === socket.id) {
         onlineUsers.delete(accountId);
@@ -94,22 +106,18 @@ export function setupDisconnectHandler(socket: Socket, io: Server) {
       }
     }
 
-    if (disconnectedAccountId) {
+    if (disconnectedAccountId !== null) {
       io.emit('user:offline', { accountId: disconnectedAccountId });
     }
 
     // 5. Cleanup IP tracking
     for (const [ip, sockets] of ipToSockets.entries()) {
-      const idx = sockets.indexOf(socket.id);
-      if (idx !== -1) {
-        sockets.splice(idx, 1);
-        if (sockets.length === 0) {
-          ipToSockets.delete(ip);
-        }
+      if (sockets.delete(socket.id) && sockets.size === 0) {
+        ipToSockets.delete(ip);
       }
     }
 
-    // 6. Cleanup Redis user auth
+    // 6. Cleanup Redis user auth mapping
     try {
       const userKey = await redis.get(`socket:${socket.id}:user`);
       if (userKey) {
@@ -123,3 +131,4 @@ export function setupDisconnectHandler(socket: Socket, io: Server) {
     playerPings.delete(socket.id);
   });
 }
+

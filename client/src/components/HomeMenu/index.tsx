@@ -36,7 +36,6 @@ const HomeMenu: React.FC = () => {
     loading,
     loadingMessage,
     showGameModes,
-    setShowGameModes,
     loginForm,
     setLoginForm,
     registerForm,
@@ -47,8 +46,6 @@ const HomeMenu: React.FC = () => {
     handleRegister,
     playAsGuest,
     logout,
-    pendingSession,
-    continuePendingSession,
     discardPendingSession,
     lastUserHint,
   } = useAuth({ setCurrentUser, navigate });
@@ -69,6 +66,11 @@ const HomeMenu: React.FC = () => {
     loading,
     logout,
     toggleDebug: () => setShowDebug((v) => !v),
+    showSettings,
+    showFriends,
+    showLeaderboard,
+    showProfile,
+    showHelp,
   });
 
   const playerStats = useMemo(() => {
@@ -82,7 +84,6 @@ const HomeMenu: React.FC = () => {
 
   const isGuest = currentUser?.isGuest ?? false;
   const guestLockReason = isGuest ? 'Vui lòng đăng nhập tài khoản để vào chế độ này' : undefined;
-  const showWelcomeCard = !showGameModes && !!currentUser;
 
   const startSinglePlayer = () => {
     if (currentUser) {

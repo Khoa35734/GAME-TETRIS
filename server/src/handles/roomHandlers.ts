@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { matchManager } from '../managers/matchManager';
-import { matchToRoomSnapshot, findPlayerInMatch } from '../libs/helpers';
+import { matchToRoomSnapshot, findPlayerInMatch } from '../game/helper';
 import { RoomAck } from '../core/types';
 import { playersReadyForGame, onlineUsers } from '../core/state';
 

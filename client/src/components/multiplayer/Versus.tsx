@@ -13,7 +13,7 @@ const Versus: React.FC = () => {
 
   // Gọi các hook con
   const { isRtcReady, sendUDP } = useWebRTC(roomId || null, msg => console.log(msg));
-  const { sendGarbage, incomingGarbage } = useGarbageSystem(roomId || null, sendUDP, () => {});
+  const { incomingGarbage } = useGarbageSystem(roomId || null, sendUDP, () => {});
   const { countdown, matchResult } = useGameLifecycle(navigate, () => {});
   
   // Presence: mark as in-game (multi) while in Versus component
