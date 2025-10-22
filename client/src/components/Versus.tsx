@@ -281,7 +281,7 @@ const Versus: React.FC = () => {
   // AFK Detection (30 seconds) - TEMPORARILY DISABLED FOR TESTING
   const afkTimeoutRef = useRef<number | null>(null);
   const AFK_TIMEOUT_MS = 300000; // 300 seconds (5 minutes) - effectively disabled for testing
-  const AFK_ENABLED = false; // Set to true to re-enable AFK detection
+  const AFK_ENABLED = true; // Enable AFK detection
   
   // Disconnect/Reconnect tracking
   const [disconnectCountdown, setDisconnectCountdown] = useState<number | null>(null);
@@ -306,15 +306,9 @@ const Versus: React.FC = () => {
   const pendingGarbageRef = useRef(0);
   const pendingLockRef = useRef(false);
   useEffect(() => { pendingGarbageRef.current = pendingGarbageLeft; }, [pendingGarbageLeft]);
-
+  const readyEmittedRef = useRef(false);
   // [THÊM MỚI] useEffect để báo cho server là client đã sẵn sàng
-  useEffect(() => {
-    // Chỉ chạy khi vào phòng từ lobby (có roomId từ URL)
-    if (urlRoomId) {
-        console.log(`[Client] Component mounted for room ${urlRoomId}. Emitting game:im_ready.`);
-        socket.emit('game:im_ready', urlRoomId);
-    }
-  }, [urlRoomId]); // Chỉ chạy 1 lần khi urlRoomId tồn tại
+   // Chỉ chạy 1 lần khi urlRoomId tồn tại
 
    const cleanupWebRTC = useCallback((reason = 'manual') => {
     console.log(`[WebRTC] Cleanup: ${reason}`);
@@ -417,12 +411,17 @@ const onUDPMessage = useCallback((msg: UDPMessage) => {
         break;
 
       case 'snapshot':
-        if (msg.payload?.matrix) setOppStage(msg.payload.matrix);
+        if (msg.payload?.matrix) {
+          setOppStage(msg.payload.matrix);
+          setNetOppStage(msg.payload.matrix); // Always update network stage for rendering
+        }
         if (msg.payload?.hold) setOppHold(msg.payload.hold);
         break;
 
       case 'topout':
         console.log('🏁 Opponent topout:', msg.payload?.reason);
+        setOppGameOver(true);
+        setMatchResult({ outcome: 'win', reason: msg.payload?.reason || 'Opponent topout' });
         break;
 
       default:
@@ -432,7 +431,7 @@ const onUDPMessage = useCallback((msg: UDPMessage) => {
   }, []);
 
   const { sendUDP } = useReliableUDP({
-    dcRef,
+    dc: dcRef.current,
     onMessage: onUDPMessage,
     resendLimit: 3,
     resendInterval: 200,
@@ -470,25 +469,28 @@ const onUDPMessage = useCallback((msg: UDPMessage) => {
    */
  const sendTopout = useCallback(
     (reason?: string) => {
-      const sent = sendUDP('topout', { reason }, true);
-      if (!sent && roomId) socket.emit('game:topout', roomId, reason);
+  const sent = sendUDP('topout', { reason }, true);
+  if (!sent && roomId) socket.emit('game:topout', roomId, reason);
+  setGameOver(true);
+  setMatchResult({ outcome: 'lose', reason: reason || 'Topout' });
     },
     [sendUDP, roomId]
   );
   /**
    * 📡 Send board snapshot via UDP (periodic sync)
    */
-  const sendSnapshot = useCallback(() => {
-    const snapshot = {
-      matrix: cloneStageForNetwork(oppStage),
-      hold: oppHold,
-      lines: incomingGarbage,
-    };
-    const sent = sendUDP('snapshot', snapshot, true);
-    if (!sent && roomId) {
-      socket.emit('game:state', roomId, snapshot);
-    }
-  }, [cloneStageForNetwork, oppStage, oppHold, incomingGarbage, sendUDP, roomId]);
+const sendSnapshot = useCallback(() => {
+  const snapshot = {
+    matrix: cloneStageForNetwork(stage), // SỬA: từ oppStage -> stage
+    hold: hold, // SỬA: từ oppHold -> hold
+    lines: incomingGarbage, 
+    // Gửi hàng rác CỦA BẠN cho đối thủ thấy
+  };
+  const sent = sendUDP('snapshot', snapshot, true);
+  if (!sent && roomId) {
+    socket.emit('game:state', roomId, snapshot);
+  }
+}, [cloneStageForNetwork, stage, hold, incomingGarbage, sendUDP, roomId]);
 
   /**
    * ⚡ Handle incoming UDP messages with comprehensive support
@@ -1086,6 +1088,7 @@ const initWebRTC = useCallback(
       if (winner === socket.id) {
         console.log('✅ YOU WIN! Reason:', reason);
         setOppGameOver(true);
+        setNetOppStage(null); // Clear opponent board
         promises.push(runAnim('opp'));
         Promise.all(promises).then(() => setMatchResult({ outcome: 'win', reason }));
       } else if (winner) {
@@ -1097,6 +1100,7 @@ const initWebRTC = useCallback(
         console.log('🤝 DRAW! Reason:', reason);
         setGameOver(true);
         setOppGameOver(true);
+        setNetOppStage(null);
         promises.push(runAnim('me'));
         promises.push(runAnim('opp'));
         Promise.all(promises).then(() => setMatchResult({ outcome: 'draw', reason }));
@@ -1308,6 +1312,8 @@ const initWebRTC = useCallback(
           disconnectTimerRef.current = null;
         }
         setDisconnectCountdown(null);
+        setOppGameOver(true);
+        setMatchResult({ outcome: 'win', reason: 'Opponent disconnected' });
       }
     };
     socket.on('player:reconnect', onPlayerReconnect);
@@ -1319,11 +1325,17 @@ const initWebRTC = useCallback(
         }
     };
     socket.on('game:attack_sent', onAttackSent);
+    // Always emit game:im_ready after room assignment, regardless of join method
+    if (roomId && !readyEmittedRef.current) {
+      console.log(`[Client] Emitting game:im_ready for room ${roomId} (urlRoomId: ${urlRoomId})`);
+      socket.emit('game:im_ready', roomId);
+      readyEmittedRef.current = true;
+    }
 
-
-    return () => {
-      stopMatchmaking();
-      socket.off('ranked:found', onFound);
+    return () => {
+      stopMatchmaking();
+      socket.off('game:im_ready', onGameReady);
+      socket.off('ranked:found', onFound);
       socket.off('game:start', onGameStart);
       socket.off('game:next', onGameNext);
       socket.off('game:over', onGameOver);
@@ -1471,9 +1483,11 @@ const initWebRTC = useCallback(
         const role = playerRoleRef.current;
         if (role) {
           if (payload.winner === role) {
-            setMatchResult(prev => prev ?? { outcome: 'win' });
+            setMatchResult(prev => prev ?? { outcome: 'win', reason: 'Match end' });
+            setOppGameOver(true);
           } else {
-            setMatchResult(prev => prev ?? { outcome: 'lose' });
+            setMatchResult(prev => prev ?? { outcome: 'lose', reason: 'Match end' });
+            setGameOver(true);
           }
         }
       }
@@ -1889,7 +1903,27 @@ const initWebRTC = useCallback(
         socket.emit('game:requestNext', roomId, 7);
     }
 }, [lastPlacement, stage, roomId, level, combo, b2b, rowsCleared, resetPlayer, player]);
-
+useEffect(() => {
+  // Chỉ kiểm tra khi player vừa được reset (y=0) và không phải lúc bắt đầu (countdown)
+  if (
+    player.pos.y === 0 &&
+    !player.collided &&
+    !locking &&
+    countdown === null &&
+    !gameOver
+  ) {
+    if (checkCollision(player, stage, { x: 0, y: 0 })) {
+      console.log('💀 Spawn block-out detected! Sending topout...');
+      setGameOver(true);
+      setDropTime(null);
+      setTimerOn(false);
+      if (roomId) {
+        console.log('📤 Sending topout (spawn blockout) via UDP/TCP');
+        sendTopout('spawn_blockout');
+      }
+    }
+  }
+}, [player, stage, locking, countdown, gameOver, roomId, sendTopout]);
 
   // Send your state to opponent
   const lastSyncTime = useRef<number>(0);
@@ -2227,7 +2261,7 @@ const initWebRTC = useCallback(
         </div>
       )}
       {/* TEMPORARILY DISABLED OVERLAY FOR TESTING FILL WHITE ANIMATION */}
-      {false && matchResult && (() => {
+      { matchResult && (() => {
         const result = matchResult!; // Non-null assertion since we checked above
         return (
         <div style={{ 
@@ -2444,3 +2478,7 @@ const initWebRTC = useCallback(
 };
 
 export default Versus;
+function onGameReady(...args: any[]): void {
+  throw new Error('Function not implemented.');
+}
+

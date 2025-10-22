@@ -58,121 +58,213 @@ function findPlayerInMatch(match: MatchData | null, socketId: string): PlayerMat
   return match.players.find((p) => p.socketId === socketId);
 }
 
-export function setupSocketHandlers(io: Server) {
-  const rooms = new Map<string, Room>();
-  const accountToSocket = new Map<string, string>();
-  const ipToSockets = new Map<string, Set<string>>();
-  const matchGenerators = new Map<string, Generator<TType, any, any>>();
-  const playerPings = new Map<string, { ping: number; lastUpdate: number }>();
-  const onlineUsers = onlineUsersState;
+export function setupSocketHandlers(io: Server, matchmaking: MatchmakingSystem) {
+  console.log('[SocketHandlers] Setting up socket event handlers...');
 
-  io.on('connection', (socket: Socket) => {
-    const rawIp = (socket.handshake.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || socket.handshake.address;
-    const ip = normalizeIp(typeof rawIp === 'string' ? rawIp : '');
-    if (ip) {
-      const set = ipToSockets.get(ip) ?? new Set<string>();
-      set.add(socket.id);
-      ipToSockets.set(ip, set);
+  io.on('connection', async (socket: Socket) => {
+    const accountId = (socket as any).accountId;
+    const username = (socket as any).username;
+
+    console.log(`\n[Socket] ✅ User connected: ${username} (ID: ${accountId}, Socket: ${socket.id})`);
+
+    // Store socket user info in Redis
+    try {
+      await storeSocketUser(socket.id, accountId, username);
+      console.log(`[Socket] 💾 Stored socket user in Redis: ${username} (${accountId})`);
+    } catch (error) {
+      console.error('[Socket] ❌ Failed to store socket user in Redis:', error);
     }
 
-    // Minimal handlers moved here. For brevity, please keep business logic in matchManager/redisStore.
-    socket.on('ping', (timestamp?: number) => socket.emit('pong', timestamp));
-
-    socket.on('client:ping', (ping: number) => {
-      playerPings.set(socket.id, { ping, lastUpdate: Date.now() });
+    // Update online users
+    onlineUsersState.set(accountId, socket.id);
+    userPresence.set(accountId, {
+      status: 'online',
+      since: Date.now(),
     });
 
-    socket.on('user:authenticate', async (payload: any) => {
-      let accountId: number | undefined;
-      let username: string | undefined;
+    // Notify matchmaking system
+    matchmaking.handleSocketConnected(socket);
 
-      if (payload && typeof payload === 'object') {
-        const rawId = (payload as any).accountId ?? (payload as any).userId;
-        const parsed = typeof rawId === 'string' ? parseInt(rawId, 10) : rawId;
-        if (typeof parsed === 'number' && !isNaN(parsed)) accountId = parsed;
-        if (typeof (payload as any).username === 'string') username = (payload as any).username;
-      } else {
-        const raw = payload;
-        const parsed = typeof raw === 'string' ? parseInt(raw, 10) : raw;
-        if (typeof parsed === 'number' && !isNaN(parsed)) accountId = parsed;
+    // ==========================================
+    // MATCHMAKING & GAME EVENTS
+    // ==========================================
+
+    // [ĐÃ SỬA] Xử lý khi client tải xong màn hình game và báo sẵn sàng
+    socket.on('game:im_ready', async (roomId: string) => {
+      if (!roomId) {
+        console.warn(`[Socket] ⚠️ ${username} sent 'game:im_ready' with no roomId`);
+        return;
       }
 
-      if (!accountId) return;
+      console.log(`[Socket] 🙋 ${username} (${accountId}) is READY in room ${roomId}`);
 
-      onlineUsers.set(accountId, socket.id);
-      const resolvedUsername = username || `User${accountId}`;
+      let match: MatchData | null = null;
 
       try {
-        await storeSocketUser(socket.id, accountId, resolvedUsername);
-      } catch (error) {
-        console.error('[Socket] Failed to persist socket user in Redis:', error);
-      }
-
-      (socket as any).accountId = accountId;
-      (socket as any).username = resolvedUsername;
-      socket.emit('user:authenticated', { accountId, username: resolvedUsername });
-
-      const since = Date.now();
-      userPresence.set(accountId, { status: 'online', since });
-      io.emit('user:online', accountId);
-      io.emit('presence:update', { userId: accountId, status: 'online', since });
-    });
-
-    socket.on('presence:update', (payload: any) => {
-      const accountId: number | undefined = (socket as any).accountId;
-      if (!accountId) return;
-      const status = payload?.status as 'online' | 'offline' | 'in_game' | undefined;
-      const mode = payload?.mode as 'single' | 'multi' | undefined;
-      if (!status) return;
-      const since = Date.now();
-      if (status === 'offline') {
-        onlineUsers.delete(accountId);
-      }
-      userPresence.set(accountId, { status, mode, since });
-      io.emit('presence:update', { userId: accountId, status, mode, since });
-      if (status === 'online') io.emit('user:online', accountId);
-      if (status === 'offline') io.emit('user:offline', accountId);
-    });
-
-
-    // Example room:create, room:join retained (others can be migrated similarly as needed)
-    socket.on('room:create', async (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
-      let options: { maxPlayers?: number; name?: string } | undefined;
-      let cb: ((result: { ok: boolean; error?: string; roomId?: string }) => void) | undefined;
-      if (typeof optsOrCb === 'function') cb = optsOrCb; else { options = optsOrCb; if (typeof cbMaybe === 'function') cb = cbMaybe; }
-      try {
-        const existing = await matchManager.getMatch(roomId);
-        if (existing) return cb?.({ ok: false, error: 'exists' });
-        const maxPlayers = Math.max(2, Math.min(Number(options?.maxPlayers) || 2, 6));
-        const displayName = typeof options?.name === 'string' ? options.name : undefined;
-        const match = await matchManager.createMatch({ matchId: roomId, hostPlayerId: socket.id, hostSocketId: socket.id, mode: 'custom', maxPlayers, roomId, hostAccountId: displayName });
-        await socket.join(roomId);
-        cb?.({ ok: true, roomId });
-        io.to(roomId).emit('room:update', matchToRoomSnapshot(match));
-      } catch {
-        cb?.({ ok: false, error: 'unknown' });
-      }
-    });
-
-    socket.on('disconnect', async () => {
-      for (const [userId, sockId] of onlineUsers.entries()) {
-        if (sockId === socket.id) {
-          onlineUsers.delete(userId);
-          const since = Date.now();
-          userPresence.set(userId, { status: 'offline', since });
-          io.emit('user:offline', userId);
-          io.emit('presence:update', { userId, status: 'offline', since });
-          break;
+        // Step 1: Set player as ready
+        // (Lưu ý: Đảm bảo playerId của bạn trong matchManager là socket.id)
+        match = await matchManager.setPlayerReady(roomId, socket.id, true);
+        if (!match) {
+          throw new Error(`Match not found (roomId: ${roomId})`);
         }
-      }
-      await removeSocketUser(socket.id);
-      playerPings.delete(socket.id);
-      if (ip) {
-        const set = ipToSockets.get(ip);
-        if (set) { set.delete(socket.id); if (set.size === 0) ipToSockets.delete(ip); }
+
+        // Step 2: Check if all players are ready and match is full
+        const allPlayersReady = match.players.length >= match.maxPlayers &&
+                                match.players.every(p => p.ready);
+
+        if (allPlayersReady && match.status === 'waiting') {
+          console.log(`[Socket] 🏁 All players ready in ${roomId}. Attempting to start match...`);
+
+          // Step 3: Update match status to 'in_progress'
+          const startedMatch = await matchManager.startMatch(roomId);
+          if (!startedMatch) {
+            throw new Error('Failed to start match in matchManager');
+          }
+          
+          console.log(`[Socket] 🚀 Match ${roomId} started! Emitting 'game:start' to clients...`);
+
+          // Step 4: EMIT 'game:start' to ALL players in the room
+          const firstPieces = nextPieces(bagGenerator(startedMatch.seed), 7);
+          
+          for (const player of startedMatch.players) {
+            const opponent = startedMatch.players.find(p => p.socketId !== player.socketId);
+            
+            io.to(player.socketId).emit('game:start', {
+              roomId: startedMatch.roomId || startedMatch.matchId,
+              opponent: opponent ? opponent.socketId : null,
+              next: firstPieces,
+            });
+          }
+        } else if (match.status !== 'waiting') {
+           console.log(`[Socket] ⏳ Player ${username} is ready, but match ${roomId} is already ${match.status}.`);
+        } else {
+           console.log(`[Socket] ⏳ Player ${username} is ready. Waiting for other players in ${roomId}...`);
+        }
+
+      } catch (error) {
+        console.error(`[Socket] ❌ Error processing 'game:im_ready' for ${username} in room ${roomId}:`, error);
+        socket.emit('matchmaking:error', { error: 'Failed to set ready status or start match' });
       }
     });
+    
+    socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
+      console.log(`[Socket] 🔍 ${username} joining ${data?.mode || 'casual'} queue`);
+      try {
+        await matchmaking.handleJoinQueue(socket, data);
+      } catch (error) {
+        console.error('[Socket] ❌ Error joining queue:', error);
+        socket.emit('matchmaking:error', { error: 'Failed to join queue' });
+      }
+    });
+
+    socket.on('matchmaking:cancel', () => {
+      console.log(`[Socket] 🚫 ${username} cancelled matchmaking`);
+      try {
+        matchmaking.handleCancelQueue(socket);
+      } catch (error) {
+        console.error('[Socket] ❌ Error cancelling queue:', error);
+      }
+    });
+
+    socket.on('matchmaking:confirm-accept', (data: { matchId: string }) => {
+      console.log(`[Socket] ✅ ${username} accepted match ${data.matchId}`);
+      try {
+        matchmaking.handleConfirmAccept(socket, data.matchId);
+      } catch (error) {
+        console.error('[Socket] ❌ Error confirming match:', error);
+        socket.emit('matchmaking:error', { error: 'Failed to confirm match' });
+      }
+    });
+
+    socket.on('matchmaking:confirm-decline', (data: { matchId: string }) => {
+      console.log(`[Socket] ❌ ${username} declined match ${data.matchId}`);
+      try {
+        matchmaking.handleConfirmDecline(socket, data.matchId);
+      } catch (error) {
+        console.error('[Socket] ❌ Error declining match:', error);
+      }
+    });
+
+    // Thêm event nhận trạng thái từ client và broadcast cho đối thủ
+    socket.on('player:update', (data) => {
+      if (!data?.roomId) return;
+      // Broadcast cho đối thủ trong room (trừ chính player)
+      socket.to(data.roomId).emit('opponent:update', {
+        playerId: socket.id,
+        board: data.board,
+        hold: data.hold,
+        next: data.next,
+        garbage: data.garbage,
+        score: data.score,
+      });
+    });
+
+    // Khi một bên game over, broadcast kết thúc trận đấu cho cả room
+    socket.on('player:topout', (data) => {
+      if (!data?.roomId) return;
+      io.in(data.roomId).emit('match:end', {
+        winner: data.winner || null,
+        loser: socket.id,
+        reason: data.reason,
+      });
+    });
+
+    // ==========================================
+    // DISCONNECT HANDLER
+    // ==========================================
+    
+    socket.on('disconnect', async (reason) => {
+      console.log(`\n[Socket] ⛔ User disconnected: ${username} (${accountId})`);
+      console.log(`[Socket] Reason: ${reason}`);
+
+      // Handle matchmaking disconnect
+      try {
+        matchmaking.handleDisconnect(socket);
+      } catch (error) {
+        console.error('[Socket] ❌ Error handling matchmaking disconnect:', error);
+      }
+
+      // Clean up Redis
+      try {
+        await removeSocketUser(socket.id);
+        console.log(`[Socket] 🗑️ Removed socket user from Redis: ${username}`);
+      } catch (error) {
+        console.error('[Socket] ❌ Failed to remove socket user from Redis:', error);
+      }
+
+      // Update online status
+      onlineUsersState.delete(accountId);
+      userPresence.set(accountId, {
+        status: 'offline',
+        since: Date.now(),
+      });
+
+      console.log(`[Socket] Current online users: ${onlineUsersState.size}`);
+    });
+
+    // ==========================================
+    // ERROR HANDLER
+    // ==========================================
+    
+    socket.on('error', (error) => {
+      console.error(`[Socket] ⚠️ Socket error for ${username}:`, error);
+    });
+
+    // Send connection confirmation
+    socket.emit('user:authenticated', {
+      accountId,
+      username,
+      socketId: socket.id,
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log(`[Socket] 📡 Connection setup complete for ${username}\n`);
   });
 
-  return { rooms, accountToSocket, ipToSockets, matchGenerators, playerPings, onlineUsers };
+  // Global error handler
+  io.engine.on('connection_error', (err: any) => {
+    console.error('[Socket.IO] Connection error:', err);
+  });
+
+  console.log('[SocketHandlers] ✅ Socket handlers setup complete\n');
 }

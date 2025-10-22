@@ -1,3 +1,4 @@
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -13,11 +14,9 @@ import { server, io } from './server';
 import { initRedis } from './stores/redisStore';
 import { initPostgres } from './stores/postgres';
 import { setupFriendshipAssociations } from './models/Friendship';
-import MatchmakingSystem from './matchmaking';
 import { startCleanupJob } from './jobs/cleanup';
 import { onlineUsers, userPresence, type Presence } from './core/state';
 import messagesRouter from './routes/messages';
-
 
 const PORT = process.env.PORT || 4000;
 
@@ -38,12 +37,12 @@ async function bootstrap() {
 
     // Start server
     server.listen(PORT, () => {
+
       console.log(`\n🚀 Server is running on port ${PORT}`);
       console.log(`📡 WebSocket server ready`);
-      console.log(`🎮 Matchmaking system initializing...`);
 
-      // Initialize matchmaking system (sets up handlers and timers internally)
-      new MatchmakingSystem(io);
+      console.log(`?? Matchmaking system initializing...`);
+      // Matchmaking system is initialized in server.ts
     });
   } catch (error) {
     console.error('[Bootstrap] Fatal error during startup:', error);
@@ -64,3 +63,10 @@ export function getOnlineUsers(): number[] {
 export function getUserPresence(accountId: number): Presence | undefined {
   return userPresence.get(accountId);
 }
+
+
+
+
+
+
+

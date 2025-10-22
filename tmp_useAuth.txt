@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { authService, type AuthResponse } from '../../../services/authService';
-import { authenticateUser } from '../../../socket';
+import authenticateUser from '../../../socket';
 import type { User } from '../types';
 
 interface UseAuthArgs {
@@ -177,7 +177,7 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
     setCurrentUser(model);
     applySession(storedUser, token);
     setShowGameModes(false);
-    authenticateUser();
+    authenticateUser.emit?.('authenticate', { accountId: model.accountId, username: model.username });
     return model;
   }, [applySession, setCurrentUser]);
 
@@ -213,7 +213,7 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
         setCurrentUser(model);
         applySession(session.user, session.token);
         setShowGameModes(false);
-        authenticateUser();
+        authenticateUser.emit('authenticate', { accountId: model.accountId, username: model.username });
         if (model.role === 'admin') navigate('/admin');
       } else {
         const model = syncFromStorage();
@@ -263,7 +263,7 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
           applySession(storedUser, result.token);
           // After successful login, show game mode menu
           setShowGameModes(true);
-          authenticateUser();
+          authenticateUser.emit?.('authenticate', { accountId: storedUser.accountId, username: storedUser.username });
           if (storedUser.role === 'admin') navigate('/admin');
         } else {
           setError(result.message || 'Login failed');
@@ -315,7 +315,7 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
           applySession(storedUser, result.token);
           // After successful registration, show game mode menu
           setShowGameModes(true);
-          authenticateUser();
+          authenticateUser.emit?.('authenticate', { accountId: storedUser.accountId, username: storedUser.username });
           setRegisterForm({ username: '', email: '', password: '', confirmPassword: '' });
           if (storedUser.role === 'admin') navigate('/admin');
         } else {
@@ -350,7 +350,7 @@ export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
 
     const model = toUser(session.user);
     setCurrentUser(model);
-    authenticateUser();
+    authenticateUser.emit?.('authenticate', { accountId: model.accountId, username: model.username });
     setShowGameModes(true);
   }, [pendingSession, setCurrentUser]);
 

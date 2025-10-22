@@ -34,8 +34,7 @@ export function setupRoomHandlers(socket: Socket, io: Server) {
         mode: 'custom',
         maxPlayers: maxPlayers,
         roomId: roomId,
-        hostAccountId: displayName,
-      });
+hostAccountId: (socket as any).username || displayName || (socket as any).accountId.toString(),      });
 
       await socket.join(roomId);
 
@@ -91,10 +90,10 @@ export function setupRoomHandlers(socket: Socket, io: Server) {
 
       if (!existingPlayer) {
         await matchManager.addPlayer(roomId, {
-          playerId: socket.id,
-          socketId: socket.id,
-          accountId: displayName,
-        });
+  playerId: socket.id,
+  socketId: socket.id,
+  accountId: (socket as any).username || displayName || (socket as any).accountId.toString(),
+});
         console.log(`[room:join] ✅ ${socket.id} joined match ${roomId}`);
       } else {
         console.log(`[room:join] ✅ ${socket.id} reconnected to match ${roomId}`);

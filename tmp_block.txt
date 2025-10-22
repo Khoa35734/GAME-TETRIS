@@ -1,0 +1,4 @@
+  const [hasHeld, setHasHeld] = useState(false);
+  const [rotationState, setRotationState] = useState<0 | 1 | 2 | 3>(0);
+
+  // ==========================================
