@@ -185,29 +185,86 @@ export function setupSocketHandlers(io: Server, matchmaking: MatchmakingSystem) 
       }
     });
 
-    // Thêm event nhận trạng thái từ client và broadcast cho đối thủ
-    socket.on('player:update', (data) => {
-      if (!data?.roomId) return;
-      // Broadcast cho đối thủ trong room (trừ chính player)
-      socket.to(data.roomId).emit('opponent:update', {
-        playerId: socket.id,
-        board: data.board,
-        hold: data.hold,
-        next: data.next,
-        garbage: data.garbage,
-        score: data.score,
-      });
+    // ====================================================================
+    // [START] SỬA LỖI ĐỒNG BỘ BOARD
+    // ====================================================================
+    // Client 'Versus.tsx' gửi sự kiện 'game:state', không phải 'player:update'.
+    // Client cũng lắng nghe 'game:state' để nhận board của đối thủ.
+    socket.on('game:state', (roomId: string, payload: any) => {
+      if (!roomId || !payload) {
+        return;
+      }
+      // Gửi (relay) trạng thái này cho tất cả người chơi khác trong phòng
+      // Thêm 'from: socket.id' để client bên kia biết đây là trạng thái của đối thủ
+      socket.to(roomId).emit('game:state', { ...payload, from: socket.id });
     });
+    socket.on('game:attack', (roomId: string, data: { lines: number }) => {
+      if (!roomId || !data || typeof data.lines !== 'number' || data.lines <= 0) {
+        console.warn(`[Socket] ⚠️ Received invalid 'game:attack' from ${socket.id}`);
+        return;
+      }
 
-    // Khi một bên game over, broadcast kết thúc trận đấu cho cả room
-    socket.on('player:topout', (data) => {
-      if (!data?.roomId) return;
-      io.in(data.roomId).emit('match:end', {
-        winner: data.winner || null,
-        loser: socket.id,
-        reason: data.reason,
-      });
+      console.log(`[Socket] 💣 Player ${socket.id} sent ${data.lines} garbage lines to room ${roomId}`);
+
+      // Gửi sự kiện 'game:garbage' (legacy) cho đối thủ
+      // Client 'Versus.tsx' có handler 'onGarbage' sẽ gọi 'applyGarbageRows'
+      // Đây là cách fix đơn giản nhất.
+      socket.to(roomId).emit('game:garbage', data.lines);
     });
+    // ====================================================================
+    // [END] SỬA LỖI ĐỒNG BỘ BOARD
+    // ====================================================================
+
+
+    // ====================================================================
+    // [START] SỬA LỖI GAME OVER
+    // ====================================================================
+    // Client 'Versus.tsx' gửi 'game:topout', không phải 'player:topout'.
+    // Client cũng lắng nghe 'game:over', không phải 'match:end'.
+   socket.on('game:topout', (roomId: string, reason: string) => {
+      
+      if (!roomId) {
+        console.warn(`[Socket] ⚠️ ${socket.id} sent 'game:topout' without a roomId.`);
+        return;
+      }
+
+      console.log(`[Socket] 🏁 Player ${socket.id} topped out in room ${roomId}. Reason: ${reason}`);
+
+      // --- [LOGIC TÌM NGƯỜI THẮNG] ---
+      // Server phải tự xác định người thắng.
+      // Logic này giả định phòng 1v1.
+      const room = io.sockets.adapter.rooms.get(roomId);
+      let winnerId: string | null = null;
+
+      if (room) {
+        const allPlayers = Array.from(room); // Lấy tất cả socket ID trong phòng
+        // Người thắng là người *không phải* socket.id vừa gửi 'game:topout'
+        winnerId = allPlayers.find(id => id !== socket.id) || null;
+      }
+      
+      if (winnerId) {
+         console.log(`[Socket] 🏆 Winner determined: ${winnerId}`);
+      } else {
+         console.log(`[Socket] ⚠️ Could not determine winner for room ${roomId}`);
+         // Vẫn có thể xảy ra nếu người thắng cũng vừa disconnect
+      }
+      // --- [HẾT LOGIC TÌM NGƯỜI THẮNG] ---
+
+      // Phát 'game:over' cho TẤT CẢ mọi người trong phòng
+      io.in(roomId).emit('game:over', {
+        winner: winnerId,         // Gửi ID người thắng vừa tìm được
+        loser: socket.id,         // Người gửi là người thua
+        reason: reason || 'Topout'  // Gửi lý do (nếu có)
+      });
+
+      // (Nâng cao): Tại đây, bạn cũng nên gọi matchManager để cập nhật
+      // trạng thái trận đấu trong Redis/DB, ví dụ:
+      // matchManager.endMatch(roomId, winnerId, socket.id);
+    });
+    // ====================================================================
+    // [END] SỬA LỖI GAME OVER
+    // ====================================================================
+
 
     // ==========================================
     // DISCONNECT HANDLER

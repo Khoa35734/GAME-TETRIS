@@ -52,13 +52,20 @@ export const ScorePanel = ({
   </div>
 );
 
+// ===================================
+// START: CÁC THAY ĐỔI
+// ===================================
 const panel: CSS = {
   width: 170,
   padding: 12,
   borderRadius: 12,
-  background: "rgba(255,255,255,0.06)",
-  backdropFilter: "blur(6px)",
+  // Sửa: Đổi từ nền trắng 6% sang nền đen 75%
+  background: "rgba(20, 20, 22, 0.75)", 
+  // Sửa: Tăng độ mờ
+  backdropFilter: "blur(10px)", 
   boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+  // Thêm: Viền trắng mờ để tách biệt khỏi nền
+  border: "1px solid rgba(255, 255, 255, 0.1)" 
 };
 
 const title: CSS = {
@@ -67,6 +74,9 @@ const title: CSS = {
   letterSpacing: 1,
   opacity: 0.9,
 };
+// ===================================
+// END: CÁC THAY ĐỔI
+// ===================================
 
 const stat: CSS = {
   fontWeight: 600,
@@ -74,4 +84,3 @@ const stat: CSS = {
 };
 
 export default {};
-

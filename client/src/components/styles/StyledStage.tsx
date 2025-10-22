@@ -22,8 +22,20 @@ export const StyledStage = styled.div<Props>`
   border-top: 0;
   width: var(--boardW);
   max-width: var(--boardW);
-  /* Transparent board background */
-  background: transparent;
+  
+  /* =================================== */
+  /* START: SỬA LỖI LƯỚI (Grid)          */
+  /* =================================== */
+  
+  /* Thay vì trong suốt, chúng ta đặt màu nền 
+     là màu xám nhạt. Màu này sẽ lấp đầy 'grid-gap: 1px'
+     và tạo ra đường lưới rõ ràng. */
+  background: rgba(255, 255, 255, 0.25);
+  
+  /* =================================== */
+  /* END: SỬA LỖI                         */
+  /* =================================== */
+
   overflow: visible;
 
   /* Bottom border - subtle transparent style */

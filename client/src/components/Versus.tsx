@@ -2185,7 +2185,7 @@ useEffect(() => {
             
             <div style={{ display: 'grid', gap: 12 }}>
               <NextPanel queue={nextFour as any} />
-              <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
+              <div style={{ background: 'rgba(20,20,22,0.75)', padding: 8, borderRadius: 10, color: '#fff' }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>STATUS</div>
                 <div>Rows: {rows}</div>
                 <div>Level: {level}</div>
