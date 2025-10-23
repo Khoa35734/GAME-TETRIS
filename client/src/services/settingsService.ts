@@ -54,7 +54,7 @@ export const getUserSettings = async (): Promise<{ success: boolean; settings?: 
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get(`${getApiUrl()}/settings`, {
+    const response = await axios.get<{ success: boolean; settings?: UserSettings; message?: string }>(`${getApiUrl()}/settings`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -78,7 +78,7 @@ export const updateUserSettings = async (settings: Partial<UserSettings>): Promi
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.put(`${getApiUrl()}/settings`, settings, {
+    const response = await axios.put<{ success: boolean; message?: string }>(`${getApiUrl()}/settings`, settings, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -102,7 +102,7 @@ export const updateKeyBindings = async (keyBindings: KeyBindings): Promise<{ suc
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.patch(
+    const response = await axios.patch<{ success: boolean; message?: string }>(
       `${getApiUrl()}/settings/keys`,
       { key_bindings: keyBindings },
       {
@@ -130,7 +130,7 @@ export const resetSettings = async (): Promise<{ success: boolean; message?: str
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post(`${getApiUrl()}/settings/reset`, {}, {
+    const response = await axios.post<{ success: boolean; message?: string }>(`${getApiUrl()}/settings/reset`, {}, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
