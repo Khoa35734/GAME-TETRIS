@@ -1,10 +1,10 @@
 import React from "react";
 import Cell from "./Cell";
 import { StyledStage } from "./styles/StyledStage";
-import { END_BUFFER_ROWS } from "../gamehelper";
+import { END_BUFFER_ROWS } from "../game/gamehelper";
 
 // Sửa lỗi: Import kiểu "Stage" trực tiếp từ gameHelpers
-import type { Stage as StageType } from '../gamehelper'; 
+import type { Stage as StageType } from '../game/gamehelper'; 
 
 type Props = {
   stage: StageType; // Sử dụng kiểu đã import

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createStage, calculateGhostPosition } from "../gamehelper";
+import { createStage, calculateGhostPosition } from "../game/gamehelper";
 import type { Player } from "./usePlayer";
 
 export type CellValue = string | number;

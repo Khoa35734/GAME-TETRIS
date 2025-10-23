@@ -5,7 +5,7 @@ import MatchmakingSystem from '../matchmaking';
 import BO3MatchManager from '../managers/bo3MatchManager';
 import { bagGenerator, nextPieces, TType } from '../game/pieceGenerator';
 import { onlineUsers as onlineUsersState, userPresence } from '../core/state';
-
+import { setupRoomHandlers } from './roomHandlers';
 export type PlayerState = {
   id: string;
   ready: boolean;
@@ -64,9 +64,9 @@ export function setupSocketHandlers(io: Server, matchmaking: MatchmakingSystem) 
   io.on('connection', async (socket: Socket) => {
     const accountId = (socket as any).accountId;
     const username = (socket as any).username;
-
     console.log(`\n[Socket] ✅ User connected: ${username} (ID: ${accountId}, Socket: ${socket.id})`);
 
+setupRoomHandlers(socket, io);
     // Store socket user info in Redis
     try {
       await storeSocketUser(socket.id, accountId, username);
@@ -90,62 +90,71 @@ export function setupSocketHandlers(io: Server, matchmaking: MatchmakingSystem) 
     // ==========================================
 
     // [ĐÃ SỬA] Xử lý khi client tải xong màn hình game và báo sẵn sàng
-    socket.on('game:im_ready', async (roomId: string) => {
-      if (!roomId) {
-        console.warn(`[Socket] ⚠️ ${username} sent 'game:im_ready' with no roomId`);
-        return;
+    // Dán code này vào file: socketHandlers.ts (thay thế hàm cũ)
+
+// [ĐÃ SỬA] Xử lý khi client tải xong màn hình game và báo sẵn sàng
+socket.on('game:im_ready', async (roomId: string) => {
+  if (!roomId) {
+    console.warn(`[Socket] ⚠️ ${username} sent 'game:im_ready' with no roomId`);
+    return;
+  }
+
+  console.log(`[Socket] 🙋 ${username} (${accountId}) is READY in room ${roomId}`);
+
+  let match: MatchData | null = null;
+
+  try {
+    // Step 1: Set player as ready
+    // (Lưu ý: Đảm bảo playerId của bạn trong matchManager là socket.id)
+    match = await matchManager.setPlayerReady(roomId, socket.id, true);
+    if (!match) {
+      throw new Error(`Match not found (roomId: ${roomId})`);
+    }
+
+    // Step 2: Check if all players are ready and match is full
+    const allPlayersReady = match.players.length >= match.maxPlayers &&
+                            match.players.every(p => p.ready);
+
+    // ================================================================
+    // 🌟 SỬA LỖI QUAN TRỌNG:
+    // Trận đấu đã được bắt đầu (status: 'in_progress') bởi 'room:startGame'.
+    // Chúng ta chỉ cần check 'allPlayersReady' để gửi data.
+    // ================================================================
+    if (allPlayersReady && match.status === 'in_progress') {
+      console.log(`[Socket] 🏁 All players ready in ${roomId}. Emitting 'game:start' to clients...`);
+
+      // Step 3: EMIT 'game:start' to ALL players in the room
+      const firstPieces = nextPieces(bagGenerator(match.seed), 7);
+
+      if (match.players.length < 2) {
+         console.warn(`[Socket] ⚠️ Match ${roomId} has less than 2 players, aborting start.`);
+         return;
       }
 
-      console.log(`[Socket] 🙋 ${username} (${accountId}) is READY in room ${roomId}`);
+      const p1 = match.players[0];
+      const p2 = match.players[1];
 
-      let match: MatchData | null = null;
-
-      try {
-        // Step 1: Set player as ready
-        // (Lưu ý: Đảm bảo playerId của bạn trong matchManager là socket.id)
-        match = await matchManager.setPlayerReady(roomId, socket.id, true);
-        if (!match) {
-          throw new Error(`Match not found (roomId: ${roomId})`);
-        }
-
-        // Step 2: Check if all players are ready and match is full
-        const allPlayersReady = match.players.length >= match.maxPlayers &&
-                                match.players.every(p => p.ready);
-
-        if (allPlayersReady && match.status === 'waiting') {
-          console.log(`[Socket] 🏁 All players ready in ${roomId}. Attempting to start match...`);
-
-          // Step 3: Update match status to 'in_progress'
-          const startedMatch = await matchManager.startMatch(roomId);
-          if (!startedMatch) {
-            throw new Error('Failed to start match in matchManager');
-          }
-          
-          console.log(`[Socket] 🚀 Match ${roomId} started! Emitting 'game:start' to clients...`);
-
-          // Step 4: EMIT 'game:start' to ALL players in the room
-          const firstPieces = nextPieces(bagGenerator(startedMatch.seed), 7);
-          
-          for (const player of startedMatch.players) {
-            const opponent = startedMatch.players.find(p => p.socketId !== player.socketId);
-            
-            io.to(player.socketId).emit('game:start', {
-              roomId: startedMatch.roomId || startedMatch.matchId,
-              opponent: opponent ? opponent.socketId : null,
-              next: firstPieces,
-            });
-          }
-        } else if (match.status !== 'waiting') {
-           console.log(`[Socket] ⏳ Player ${username} is ready, but match ${roomId} is already ${match.status}.`);
-        } else {
-           console.log(`[Socket] ⏳ Player ${username} is ready. Waiting for other players in ${roomId}...`);
-        }
-
-      } catch (error) {
-        console.error(`[Socket] ❌ Error processing 'game:im_ready' for ${username} in room ${roomId}:`, error);
-        socket.emit('matchmaking:error', { error: 'Failed to set ready status or start match' });
+      for (const player of match.players) {
+        // Gửi thông tin chi tiết về cả 2 người chơi
+        // (File Versus.tsx của bạn đã sẵn sàng nhận payload này)
+        io.to(player.socketId).emit('game:start', {
+          roomId: match.roomId || match.matchId,
+          player1: { id: p1.accountId || p1.playerId, name: p1.name },
+          player2: { id: p2.accountId || p2.playerId, name: p2.name },
+          next: firstPieces,
+        });
       }
-    });
+    } else if (match.status !== 'in_progress') {
+       console.log(`[Socket] ⏳ Player ${username} is ready, but match ${roomId} is still ${match.status}.`);
+    } else {
+       console.log(`[Socket] ⏳ Player ${username} is ready. Waiting for other players in ${roomId}...`);
+    }
+
+  } catch (error) {
+    console.error(`[Socket] ❌ Error processing 'game:im_ready' for ${username} in room ${roomId}:`, error);
+    socket.emit('matchmaking:error', { error: 'Failed to set ready status or start match' });
+  }
+});
     
     socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
       console.log(`[Socket] 🔍 ${username} joining ${data?.mode || 'casual'} queue`);

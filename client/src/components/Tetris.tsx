@@ -2,7 +2,7 @@
 import { HoldPanel, NextPanel } from "./SidePanels";
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from 'react-router-dom';
-import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from "../gamehelper";
+import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from "../game/gamehelper";
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from "./styles/StyledTetris";
 

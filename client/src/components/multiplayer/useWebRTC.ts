@@ -31,7 +31,7 @@ export const useWebRTC = (roomId: string | null, onUDPMessage: (msg: UDPMessage)
   }, [cleanupWebRTC, roomId]);
 
   const { sendUDP } = useReliableUDP({
-    dcRef,
+    dc: dcRef.current,
     onMessage: onUDPMessage,
     resendLimit: 3,
     resendInterval: 200,

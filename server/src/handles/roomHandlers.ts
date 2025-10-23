@@ -3,7 +3,7 @@ import { matchManager } from '../managers/matchManager';
 import { matchToRoomSnapshot, findPlayerInMatch } from '../game/helper';
 import { RoomAck } from '../core/types';
 import { playersReadyForGame, onlineUsers } from '../core/state';
-
+import { bagGenerator, nextPieces, TType } from '../game/pieceGenerator';
 export function setupRoomHandlers(socket: Socket, io: Server) {
   // Create room
   socket.on('room:create', async (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
@@ -42,10 +42,11 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
         `[room:create] ✅ ${socket.id} created match ${roomId} (max ${maxPlayers} players) in Redis`
       );
 
-      cb?.({ ok: true, roomId });
-
+      // Gửi snapshot ngay trong callback 'create'
+      // Lỗi 'data' does not exist đã được sửa trong 'types.ts'
       const snapshot = matchToRoomSnapshot(match);
-      io.to(roomId).emit('room:update', snapshot);
+      cb?.({ ok: true, roomId, data: snapshot });
+      
     } catch (err) {
       console.error('[room:create] Error:', err);
       cb?.({ ok: false, error: 'unknown' });
@@ -88,26 +89,38 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
       const displayName = typeof options?.name === 'string' ? options.name : undefined;
       const existingPlayer = match.players.find((p) => p.socketId === socket.id);
 
-      if (!existingPlayer) {
-        await matchManager.addPlayer(roomId, {
-  playerId: socket.id,
-  socketId: socket.id,
-  accountId: (socket as any).username || displayName || (socket as any).accountId.toString(),
-});
-        console.log(`[room:join] ✅ ${socket.id} joined match ${roomId}`);
-      } else {
-        console.log(`[room:join] ✅ ${socket.id} reconnected to match ${roomId}`);
-        socket.to(roomId).emit('player:reconnect', { playerId: socket.id });
-      }
+     // Code MỚI ĐÃ SỬA
+if (!existingPlayer) {
+  await matchManager.addPlayer(roomId, {
+    playerId: socket.id,
+    socketId: socket.id,
+    // 'accountId' nên lấy từ socket (sau khi auth)
+    accountId: (socket as any).accountId?.toString() || (socket as any).username,
+    // 'name' chính là 'displayName' mà client gửi lên
+    name: displayName 
+  });
+  console.log(`[room:join] ✅ ${socket.id} (Name: ${displayName}) joined match ${roomId}`);
+}
 
       await socket.join(roomId);
-      cb?.({ ok: true, roomId });
 
+      // SỬA LỖI (Bỏ Race Condition)
+      // 1. Lấy trạng thái MỚI NHẤT của phòng
       const updatedMatch = await matchManager.getMatch(roomId);
       if (updatedMatch) {
         const snapshot = matchToRoomSnapshot(updatedMatch);
-        io.to(roomId).emit('room:update', snapshot);
+
+        // 2. Gửi snapshot cho người vừa join qua callback
+        // Lỗi 'data' does not exist đã được sửa trong 'types.ts'
+        cb?.({ ok: true, roomId, data: snapshot });
+        
+        // 3. Gửi snapshot cho TẤT CẢ NGƯỜI KHÁC trong phòng (trừ người gửi)
+        socket.to(roomId).emit('room:update', snapshot);
+      } else {
+        // Fallback (Sửa lỗi chuỗi tùy chỉnh)
+        cb?.({ ok: false, error: 'unknown' });
       }
+
     } catch (err) {
       console.error('[room:join] Error:', err);
       cb?.({ ok: false, error: 'unknown' });
@@ -129,11 +142,12 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
       }
 
       const snapshot = matchToRoomSnapshot(match);
-      io.to(socket.id).emit('room:update', snapshot);
       cb?.({ ok: true, data: snapshot });
+      
     } catch (err) {
       console.error('[room:sync] Error:', err);
-      cb?.({ ok: false, error: 'server-error' });
+      // Sửa lỗi chuỗi tùy chỉnh
+      cb?.({ ok: false, error: 'unknown' });
     }
   });
 
@@ -152,20 +166,25 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
         return;
       }
 
-      await matchManager.removePlayer(roomId, player.playerId);
+      // SỬA LỖI (Logic chuyển host)
+      // 1. Gọi `removePlayer`. Hàm này đã tự động xử lý việc
+      // chuyển host nếu cần.
+      const updatedMatch = await matchManager.removePlayer(roomId, player.playerId);
       socket.leave(roomId);
       console.log(
         `[room:leave] ✅ Player ${socket.id.slice(0, 8)} left match ${roomId.slice(0, 8)}`
       );
-
-      const updatedMatch = await matchManager.getMatch(roomId);
-      if (!updatedMatch || updatedMatch.players.length === 0) {
-        await matchManager.deleteMatch(roomId);
-        console.log(`[room:leave] 🗑️ Empty match ${roomId.slice(0, 8)} deleted`);
-      } else {
+      
+      // 2. `removePlayer` trả về `null` nếu phòng bị xóa (không còn ai)
+      if (updatedMatch) {
+        // Nếu phòng vẫn còn, gửi cập nhật cho những người còn lại
         const snapshot = matchToRoomSnapshot(updatedMatch);
         io.to(roomId).emit('room:update', snapshot);
+      } else {
+        // Phòng đã bị xóa
+        console.log(`[room:leave] 🗑️ Empty match ${roomId.slice(0, 8)} deleted`);
       }
+      
     } catch (err) {
       console.error('[room:leave] Error:', err);
     }
@@ -256,11 +275,13 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
           cb?.({ ok: false, error: `${friendUsername} hiện đang offline` });
           return;
         }
-
+        
+        // Sửa logic kiểm tra bạn bè
         const friendInRoom = match.players.some((p) => {
-          const userIdStr = p.playerId.split('_')[0];
-          return parseInt(userIdStr) === friendId;
+          // Giả sử `p.accountId` lưu trữ `friendId` dạng string
+          return p.accountId === friendId.toString();
         });
+        
         if (friendInRoom) {
           console.error('[room:invite] ❌ Friend already in room');
           cb?.({ ok: false, error: `${friendUsername} đã ở trong phòng` });
@@ -296,22 +317,72 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
 
   // Room chat
   socket.on('room:chat', (roomId: string, message: any, cb?: (ack: RoomAck) => void) => {
-    const { rooms } = require('../core/state');
-    const r = rooms.get(roomId);
-    if (!r) {
+    // Sửa logic chat để dùng 'matchManager'
+    matchManager.getMatch(roomId).then(match => {
+      if (!match) {
+        cb?.({ ok: false, error: 'not-found' });
+        return;
+      }
+      
+      const player = findPlayerInMatch(match, socket.id);
+      if (!player) {
+        cb?.({ ok: false, error: 'unknown' }); // Không có trong phòng
+        return;
+      }
+      
+      const payload = {
+        from: socket.id,
+        message,
+        ts: Date.now(),
+      };
+      io.to(roomId).emit('room:chat', payload);
+      cb?.({ ok: true, roomId });
+      
+    }).catch(() => {
+       // Sửa lỗi chuỗi tùy chỉnh
+       cb?.({ ok: false, error: 'unknown' });
+    });
+  });
+
+  // SỬA LỖI (Logic Bắt đầu trận)
+ // Dán code này vào file: roomHandlers.ts (thay thế hàm cũ)
+
+// Dán code này vào file: roomHandlers.ts (thay thế hàm cũ)
+
+socket.on('room:startGame', async (roomId: string, cb?: (result: RoomAck) => void) => {
+  try {
+    const match = await matchManager.getMatch(roomId);
+    if (!match) {
       cb?.({ ok: false, error: 'not-found' });
       return;
     }
-    if (!r.players.has(socket.id)) {
+
+    // Chỉ host mới được bắt đầu
+    if (match.hostPlayerId !== socket.id) {
       cb?.({ ok: false, error: 'unknown' });
       return;
     }
-    const payload = {
-      from: socket.id,
-      message,
-      ts: Date.now(),
-    };
-    io.to(roomId).emit('room:chat', payload);
-    cb?.({ ok: true, roomId });
-  });
+
+    // Gọi 'startMatch'. Nó tự kiểm tra logic 'ready'
+    const startedMatch = await matchManager.startMatch(roomId); 
+
+    if (!startedMatch) {
+      // 'startMatch' trả về null nếu thất bại (ví dụ: chưa ai ready)
+      cb?.({ ok: false, error: 'unknown' });
+      return;
+    }
+
+    console.log(`[room:startGame] 🚀 Match ${roomId} is starting... emitting 'game:starting'`);
+
+    // 1. Gửi sự kiện 'game:starting' cho TẤT CẢ client (để điều hướng)
+    // Client 'Versus.tsx' sẽ nhận và gửi lại 'game:im_ready'
+    io.to(roomId).emit('game:starting'); 
+
+    cb?.({ ok: true });
+
+  } catch (err) {
+    console.error('[room:startGame] Error:', err);
+    cb?.({ ok: false, error: 'unknown' });
+  }
+});
 }

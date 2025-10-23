@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { Stage as StageType, Cell as StageCell } from '../../gamehelper';
+import type { Stage as StageType, Cell as StageCell } from '../../game/gamehelper';
 import socket from '../../socket';
 
 export const useGarbageSystem = (roomId: string | null, sendUDP: Function, _sendTopout: Function) => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from '../../gamehelper';
+import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from '../../game/gamehelper';
 import { useInterval } from '../../hooks/useInterval';
 import { usePlayer } from '../../hooks/usePlayer';
 import { useStage } from '../../hooks/useStage';

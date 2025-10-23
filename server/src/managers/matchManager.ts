@@ -3,6 +3,7 @@
  * Manages multiple matches simultaneously with atomic operations
  */
 
+import { match } from 'assert/strict';
 import { redis } from '../stores/redisStore';
 
 // ========================================
@@ -37,6 +38,7 @@ export interface PlayerMatchState {
   playerId: string;
   socketId: string;
   accountId?: string;
+  name?: string;
   ready: boolean;
   alive: boolean;
   score: number;
@@ -90,13 +92,14 @@ export class MatchManager {
     hostPlayerId: string;
     hostSocketId: string;
     hostAccountId?: string;
+    hostName?: string;
     mode: 'ranked' | 'custom' | 'practice';
     maxPlayers?: number;
     roomId?: string;
   }): Promise<MatchData> {
     const now = Date.now();
     const seed = now ^ data.matchId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-    
+    const hostName = data.hostName || (data.hostAccountId ? `User_${data.hostAccountId}` : `User_${data.hostPlayerId.slice(0,4)}`);
     const match: MatchData = {
       matchId: data.matchId,
       roomId: data.roomId,
@@ -108,6 +111,7 @@ export class MatchManager {
           playerId: data.hostPlayerId,
           socketId: data.hostSocketId,
           accountId: data.hostAccountId,
+          name: hostName,
           ready: false,
           alive: true,
           score: 0,
@@ -141,14 +145,26 @@ export class MatchManager {
   /**
    * Add player to existing match
    */
-  async addPlayer(matchId: string, data: {
+  async addPlayer(
+
+    matchId: string, data: {
     playerId: string;
     socketId: string;
     accountId?: string;
+    name?: string;
   }): Promise<MatchData | null> {
+    console.log("[DEBUG addPlayer:start]", { matchId, data });
+
     const match = await this.getMatch(matchId);
-    if (!match) return null;
     
+    if (!match) return null;
+    console.log('[DEBUG matchManager.addPlayer]', {
+  matchId,
+  playerId: data.playerId,
+  socketId: data.socketId,
+  playersBefore: match.players.length
+});
+
     if (match.status !== 'waiting') {
       console.warn(`[MatchManager] ⚠️ Cannot add player to match ${matchId} - status: ${match.status}`);
       return null;
@@ -166,13 +182,16 @@ export class MatchManager {
       existing.socketId = data.socketId;
       existing.alive = true;
       existing.disconnectedAt = undefined;
+      if (data.name) existing.name = data.name;
     } else {
       // Add new player
       const now = Date.now();
+      const playerName = data.name || `User_${data.playerId.slice(0,4)}`; // Lấy tên hoặc tạo fallback
       match.players.push({
         playerId: data.playerId,
         socketId: data.socketId,
         accountId: data.accountId,
+        name: playerName,
         ready: false,
         alive: true,
         score: 0,
@@ -184,8 +203,11 @@ export class MatchManager {
         lastActionTime: now,
       });
     }
-    
+    console.log('[DEBUG matchManager.addPlayer] playersAfter', match.players.map(p => p.playerId));
+
     match.updatedAt = Date.now();
+    console.log("[DEBUG addPlayer:after]", { playersAfter: match.players.length, allPlayers: match.players });
+
     await this.saveMatch(match);
     
     // Map player to match
@@ -229,6 +251,33 @@ export class MatchManager {
   /**
    * Mark player as ready/unready
    */
+  // ==================================================
+  // START THÊM MỚI
+  // Thêm toàn bộ hàm này
+  // ==================================================
+  /**
+   * Update socket ID for a reconnecting player
+   */
+  async updatePlayerSocket(matchId: string, playerId: string /* accountId */, newSocketId: string): Promise<MatchData | null> {
+    const match = await this.getMatch(matchId);
+    if (!match) return null;
+
+    const player = match.players.find(p => p.playerId === playerId); // Tìm bằng accountId
+    if (player) {
+      player.socketId = newSocketId; // Cập nhật socketId mới
+      player.alive = true; // Đánh dấu là đã kết nối lại
+      player.disconnectedAt = undefined;
+      match.updatedAt = Date.now();
+      await this.saveMatch(match);
+      console.log(`[MatchManager] 🔄 Player ${playerId} (${player.name}) reconnected with new socket ${newSocketId} in match ${matchId}`);
+    } else {
+        console.warn(`[MatchManager] ⚠️ updatePlayerSocket: Player ${playerId} not found in match ${matchId}`);
+    }
+    return match;
+  }
+  // ==================================================
+  // KẾT THÚC HÀM MỚI
+  // ==================================================
   async setPlayerReady(matchId: string, playerId: string, ready: boolean): Promise<MatchData | null> {
     const match = await this.getMatch(matchId);
     if (!match) return null;
@@ -263,8 +312,21 @@ export class MatchManager {
     
     const allReady = match.players.every(p => p.ready || p.playerId === match.hostPlayerId);
     if (!allReady) {
-      console.warn(`[MatchManager] ⚠️ Cannot start match ${matchId} - not all ready`);
-      return null;
+      let allReady = false;
+    if (match.mode === 'custom') {
+        const nonHostPlayers = match.players.filter(p => p.playerId !== match.hostPlayerId);
+        // Ensure there is at least one non-host player AND all of them are ready
+        allReady = nonHostPlayers.length > 0 && nonHostPlayers.every(p => p.ready);
+        console.log(`[MatchManager] Custom match ready check for ${matchId}: nonHost=${nonHostPlayers.length}, allReady=${allReady}`);
+    } else { // ranked, practice, etc.
+        allReady = match.players.every(p => p.ready); // All players must be ready
+         console.log(`[MatchManager] Ranked/Other match ready check for ${matchId}: allReady=${allReady}`);
+    }
+
+    if (!allReady) {
+      console.warn(`[MatchManager] ⚠️ Cannot start match ${matchId} - not all required players ready`);
+      return null; // Return null if not ready
+    }
     }
     
     match.status = 'in_progress';

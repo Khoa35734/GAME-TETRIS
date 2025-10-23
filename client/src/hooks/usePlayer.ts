@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { STAGE_WIDTH, checkCollision } from "../gamehelper";
+import { STAGE_WIDTH, checkCollision } from "../game/gamehelper";
 import { TETROMINOES } from "../components/tetrominos";
 import type { Stage, CellValue } from "./useStage";
 import { useQueue, type TType } from "./useQueue";

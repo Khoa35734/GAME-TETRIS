@@ -6,8 +6,8 @@ import { useReliableUDP, type UDPMessage } from '../hooks/useReliableUDP';
 import Stage from './Stage';
 import { HoldPanel, NextPanel } from './SidePanels';
 import GarbageQueueBar from './GarbageQueueBar';
-import { checkCollision, createStage, isGameOverFromBuffer, getTSpinType } from '../gamehelper';
-import type { Stage as StageType, Cell as StageCell, TSpinType } from '../gamehelper';
+import { checkCollision, createStage, isGameOverFromBuffer, getTSpinType } from '../game/gamehelper';
+import type { Stage as StageType, Cell as StageCell, TSpinType } from '../game/gamehelper';
 import { usePlayer } from '../hooks/usePlayer';
 import { useStage } from '../hooks/useStage';
 import { useGameStatus } from '../hooks/useGameStatus';
@@ -16,7 +16,7 @@ import { useInterval } from '../hooks/useInterval';
 // ========================================
 // 🎮 SRS ROTATION & INPUT SYSTEM IMPORTS
 // ========================================
-import { tryRotate } from '../srsRotation';
+import { tryRotate } from '../game/srsRotation';
 // Future: Full TETR.IO mechanics (uncomment when needed)
 /*
 import {
@@ -155,6 +155,7 @@ const Versus: React.FC = () => {
   const navigate = useNavigate();
   const { roomId: urlRoomId } = useParams<{ roomId?: string }>();
   const [meId, setMeId] = useState<string | null>(null);
+  
   const [opponentId, setOpponentId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(urlRoomId || null);
   const [waiting, setWaiting] = useState(true);
@@ -183,7 +184,7 @@ const Versus: React.FC = () => {
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
 
   const [playerName, setPlayerName] = useState<string>('Bạn');
-  const [opponentName, setOpponentName] = useState<string | null>(null);
+  const [opponentName, setOpponentName] = useState<string>('Đối thủ');
   const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
   const [seriesBestOf, setSeriesBestOf] = useState<number>(3);
   const [seriesWinsRequired, setSeriesWinsRequired] = useState<number>(getWinsRequired(3));
@@ -193,6 +194,22 @@ const Versus: React.FC = () => {
   const seriesWinsRequiredRef = useRef(seriesWinsRequired);
   const playerRoleRef = useRef<'player1' | 'player2' | null>(playerRole);
   const seriesCurrentGameRef = useRef(seriesCurrentGame);
+  useEffect(() => {
+  let resolvedId: string | null = null;
+  let resolvedName = 'Bạn';
+  try {
+    const userStr = localStorage.getItem('tetris:user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      if (user?.accountId) resolvedId = String(user.accountId);
+      if (user?.username) resolvedName = String(user.username);
+    }
+  } catch (err) { /* ... */ }
+  if (!resolvedId) resolvedId = socket.id || `guest_${Date.now().toString(36)}`; // Fallback ID
+  setMeId(resolvedId);
+  setPlayerName(resolvedName); // Set tên ban đầu của bạn
+  console.log(`[Versus] Initial Identity: meId=${resolvedId}, playerName=${resolvedName}`);
+}, []);
   useEffect(() => {
     seriesBestOfRef.current = seriesBestOf;
     setSeriesWinsRequired(prev => {
@@ -1012,24 +1029,71 @@ const initWebRTC = useCallback(
 
     // This listener now fires reliably for both ranked and custom games
     const onGameStart = (payload?: any) => {
-      console.log('🎮 [Versus] game:start event received!', { payload, waiting, roomId });
-      stopMatchmaking();
-      // Shield: Only start countdown if we are actually waiting for one.
-      if (waiting) {
-        console.log('✅ [Versus] Starting countdown - setting countdown to 3');
-        if (payload?.roomId) setRoomId(payload.roomId);
-        if (payload?.opponent) setOpponentId(payload.opponent);
-        if (payload?.next && Array.isArray(payload.next)) {
-            setQueueSeed(payload.next);
-            setOppNextFour(payload.next.slice(0, 4));
+  console.log('🎮 [Versus] game:start event received!', payload);
+  stopMatchmaking(); // Hàm dừng matchmaking của bạn
+
+  if (waiting) { // Chỉ xử lý nếu đang chờ
+    if (payload?.roomId) setRoomId(payload.roomId);
+
+    // --- SỬA LOGIC LẤY THÔNG TIN NGƯỜI CHƠI ---
+    let myInfo: { id: string, name: string } | null = null;
+    let opponentInfo: { id: string, name: string } | null = null;
+
+    // Xác định ai là ai dựa trên meId (accountId của client này)
+    if (payload?.player1 && payload?.player2 && meId) {
+        if (payload.player1.id === meId) {
+            myInfo = payload.player1;
+            opponentInfo = payload.player2;
+        } else if (payload.player2.id === meId) {
+            myInfo = payload.player2;
+            opponentInfo = payload.player1;
+        } else {
+             console.error("[Versus] Could not identify player in game:start payload!", { meId, p1: payload.player1.id, p2: payload.player2.id });
+             // Fallback (ít tin cậy hơn)
+             if (payload.opponent) { // Nếu server chỉ gửi opponent ID cũ
+                 setOpponentId(String(payload.opponent));
+                 setOpponentName(`Opponent_${String(payload.opponent).slice(0,4)}`);
+             } else {
+                 setOpponentId(null);
+                 setOpponentName('Đối thủ');
+             }
         }
-        setNetOppStage(null);
-        setWaiting(false);
-        setCountdown(3);
+
+        // Cập nhật state với thông tin từ server
+        if (myInfo?.name) {
+            setPlayerName(myInfo.name); // Cập nhật/Xác nhận tên của bạn
+        }
+        if (opponentInfo) {
+            setOpponentId(opponentInfo.id);
+            setOpponentName(opponentInfo.name || `Opponent_${opponentInfo.id.slice(0,4)}`); // Set tên đối thủ
+        } else if (!opponentId && !opponentName) { // Chỉ set fallback nếu chưa có gì
+             setOpponentId(null);
+             setOpponentName('Đối thủ');
+        }
+
+    } else {
+      console.warn("[Versus] game:start payload missing player details. Using fallbacks.");
+      // Giữ fallback cũ nếu payload không đúng cấu trúc
+      if (payload?.opponent) {
+        setOpponentId(String(payload.opponent));
+        setOpponentName(`Opponent_${String(payload.opponent).slice(0,4)}`);
       } else {
-        console.log('⚠️ [Versus] Ignoring game:start because waiting is false');
+        setOpponentId(null);
+        setOpponentName('Đối thủ');
       }
-    };
+    }
+    // --- KẾT THÚC SỬA LOGIC ---
+
+    if (payload?.next && Array.isArray(payload.next)) {
+        setQueueSeed(payload.next);
+    }
+    setNetOppStage(null);
+    setWaiting(false);
+    setCountdown(3); // Bắt đầu đếm ngược
+  } else {
+      console.log('⚠️ [Versus] Ignoring game:start because not in waiting state.');
+  }
+};
     socket.on('game:start', onGameStart);
 
     const onGameNext = (arr: any) => {
@@ -2163,7 +2227,7 @@ useEffect(() => {
           {/* Left side: YOU (ĐÃ ĐỔI - Board của bạn bên TRÁI với viền xanh lá) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
             <div style={{ gridColumn: '1 / -1', color: '#4ecdc4', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
-              {(playerName || meId) ? `🎮 Bạn: ${playerName || meId}` : '🎮 Bạn'}
+              {playerName ? `🎮 Bạn: ${playerName}` : '🎮 Bạn'}
             </div>
             <HoldPanel hold={hold as any} />
             
@@ -2221,7 +2285,7 @@ useEffect(() => {
           {/* Right side: OPPONENT (ĐÃ ĐỔI - Board đối thủ bên PHẢI với viền đỏ) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
             <div style={{ gridColumn: '1 / -1', color: '#ff6b6b', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
-              {(opponentName || opponentId) ? `⚔️ Đối thủ: ${opponentName || opponentId}` : '⚔️ Đối thủ'}
+              {(opponentName || opponentId) ? `⚔️ Đối thủ: ${opponentName || `User_${opponentId?.slice(0,4)}`}` : '⚔️ Đối thủ'}
             </div>
             <HoldPanel hold={oppHold} />
             

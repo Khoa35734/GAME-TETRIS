@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { createStage } from '../../gamehelper';
+import { createStage } from '../../game/gamehelper';
 
 type MatchResult = {
   outcome: 'win' | 'lose';

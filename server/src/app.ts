@@ -8,55 +8,56 @@ import { rankedQueueSize } from './stores/redisStore';
 const app = express();
 
 // ============================
-// 🔧 CORS CONFIGURATION
+// 🔧 CORS CONFIG (Dynamic Private Network Support)
 // ============================
 
-// Danh sách các origin được phép kết nối tới API
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://10.142.21.19:5173',
-  'http://192.168.1.29:5173', // ⚡ thêm IP LAN của bạn
-];
-
-// Cấu hình middleware CORS chi tiết
-app.use(cors({
-  origin: function (origin, callback) {
-    // Cho phép Postman, server-to-server (không có origin)
+const corsOptions = {
+  origin: function (origin: string | undefined, callback: any) {
+    // Cho phép Postman, server-to-server, hoặc request nội bộ không có Origin
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn('[CORS] Blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+    // ✅ Cho phép tất cả IP thuộc mạng nội bộ theo RFC1918 + localhost
+    // - 10.0.0.0 – 10.255.255.255
+    // - 172.16.0.0 – 172.31.255.255
+    // - 192.168.0.0 – 192.168.255.255
+    // - localhost, 127.0.0.1
+    const allowedPattern = /^http:\/\/(localhost|127\.0\.0\.1|(10|172\.(1[6-9]|2\d|3[0-1])|192\.168)\.\d+\.\d+)(:\d+)?$/;
+
+    if (allowedPattern.test(origin)) {
+      console.log('[CORS] ✅ Allowed origin:', origin);
+      return callback(null, true);
     }
+
+    console.warn('[CORS] ❌ Blocked origin:', origin);
+    return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true, // ⚠️ Cho phép gửi cookie (refresh token)
-}));
+  credentials: true, // Cho phép cookie / JWT gửi kèm
+};
+
+app.use(cors(corsOptions));
 
 // ============================
-// Middleware khác
+// 📦 Middleware khác
 // ============================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ============================
-// Mount các route API
+// 🧩 Mount các route API
 // ============================
 mountApiRoutes(app);
 mountExtraEndpoints(app);
 mountTestPages(app);
 
 // ============================
-// Health Check Endpoint
+// ❤️ Health Check Endpoint
 // ============================
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // ============================
-// Matchmaking Stats (Redis)
+// 🧠 Matchmaking Stats (Redis)
 // ============================
 app.get('/api/matchmaking/stats', async (req, res) => {
   try {

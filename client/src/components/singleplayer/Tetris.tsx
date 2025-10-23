@@ -13,7 +13,7 @@ import { StatusPanel } from './ui/StatusPanel';
 import { OverlayCountdown } from './ui/OverlayCountdown';
 import { WinOverlay } from './ui/WinOverlay';
 import { GameOverOverlay } from './ui/GameOverOverlay';
-import { createStage } from '../../gamehelper';
+import { createStage } from '../../game/gamehelper';
 import socket from '../../socket';
 
 const Tetris: React.FC = () => {

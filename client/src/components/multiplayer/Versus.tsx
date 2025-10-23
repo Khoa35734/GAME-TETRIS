@@ -12,7 +12,7 @@ import { useGameLifecycle } from './useGameLifecycle';
 // Import các hook và helper game (THÊM LẠI)
 import { usePlayer } from '../../hooks/usePlayer';
 import { useStage } from '../../hooks/useStage';
-import { createStage, type Stage as StageType } from '../../gamehelper';
+import { createStage, type Stage as StageType } from '../../game/gamehelper';
 
 // Import các component UI
 import Stage from '../Stage';
