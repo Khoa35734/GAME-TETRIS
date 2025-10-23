@@ -1,5 +1,5 @@
 import express from 'express';
-import { sequelize } from '../postgres'; // Ensure you have a Sequelize instance configured
+import { sequelize } from '../stores/postgres'; // Ensure you have a Sequelize instance configured
 import { QueryTypes } from 'sequelize';
 
 const router = express.Router();

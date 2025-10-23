@@ -356,7 +356,7 @@ const BroadcastMessages: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredBroadcasts.map((broadcast, index) => (
+                  filteredBroadcasts.map((broadcast) => (
                     <tr key={broadcast.id} style={{ borderTop: '1px solid #374151', transition: 'background 0.3s' }} onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(55, 65, 81, 0.3)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
                       <td style={{ padding: '16px 24px', fontSize: '0.875rem' }}>#{broadcast.id}</td>
                       <td style={{ padding: '16px 24px' }}>

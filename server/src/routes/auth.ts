@@ -1,9 +1,8 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { sequelize } from '../postgres';
+import { sequelize } from '../stores/postgres';
 import { QueryTypes } from 'sequelize';
-
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || '123456'; // ⚠️ Nên đưa vào .env thật nhé!
 const SALT_ROUNDS = 10;

@@ -1,6 +1,6 @@
 // Message Model - Hộp thư của người chơi
 import { DataTypes, Model, Optional } from 'sequelize';
-import { sequelize } from '../postgres';
+import { sequelize } from '../stores/postgres';
 
 interface MessageAttributes {
   message_id: number;

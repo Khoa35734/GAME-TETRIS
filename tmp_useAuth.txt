@@ -1,0 +1,412 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { authService, type AuthResponse } from '../../../services/authService';
+import authenticateUser from '../../../socket';
+import type { User } from '../types';
+
+interface UseAuthArgs {
+  setCurrentUser: (u: User | null) => void;
+  navigate: (path: string) => void;
+}
+
+interface StoredUser {
+  accountId: number;
+  username: string;
+  email: string;
+  role?: string;
+  isGuest?: boolean;
+}
+
+interface PendingSession {
+  user: StoredUser;
+  token: string;
+}
+
+type UserHint = {
+  username: string;
+  email: string;
+};
+
+const STORAGE_KEYS = {
+  user: 'tetris:user',
+  pendingSession: 'tetris:pending-session',
+  lastUserHint: 'tetris:last-user-hint',
+} as const;
+
+const isStorageAvailable = () =>
+  typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const readJson = <T,>(key: string): T | null => {
+  if (!isStorageAvailable()) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+};
+
+const writeJson = (key: string, value: unknown) => {
+  if (!isStorageAvailable()) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage write errors (e.g. quota exceeded or private mode)
+  }
+};
+
+const removeItem = (key: string) => {
+  if (!isStorageAvailable()) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal errors
+  }
+};
+
+const normalizeStoredUser = (value: unknown): StoredUser | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<Record<keyof StoredUser, unknown>>;
+  if (typeof candidate.accountId !== 'number') return null;
+  if (typeof candidate.username !== 'string' || !candidate.username) return null;
+  if (typeof candidate.email !== 'string' || !candidate.email) return null;
+
+  return {
+    accountId: candidate.accountId,
+    username: candidate.username,
+    email: candidate.email,
+    role: typeof candidate.role === 'string' ? candidate.role : 'player',
+    isGuest: typeof candidate.isGuest === 'boolean' ? candidate.isGuest : false,
+  };
+};
+
+const normalizePendingSession = (value: unknown): PendingSession | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { user?: unknown; token?: unknown };
+  if (typeof candidate.token !== 'string' || !candidate.token) return null;
+
+  const user = normalizeStoredUser(candidate.user);
+  if (!user) return null;
+
+  return { user, token: candidate.token };
+};
+
+const normalizeHint = (value: unknown): UserHint | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { username?: unknown; email?: unknown };
+  if (typeof candidate.username !== 'string' || !candidate.username) return null;
+  if (typeof candidate.email !== 'string' || !candidate.email) return null;
+  return { username: candidate.username, email: candidate.email };
+};
+
+const loadStoredUser = (): StoredUser | null => normalizeStoredUser(authService.getCurrentUser());
+
+const saveStoredUser = (user: StoredUser) => writeJson(STORAGE_KEYS.user, user);
+
+const loadPendingSession = (): PendingSession | null =>
+  normalizePendingSession(readJson<PendingSession>(STORAGE_KEYS.pendingSession));
+
+const savePendingSession = (session: PendingSession) => writeJson(STORAGE_KEYS.pendingSession, session);
+
+const clearPendingSessionStorage = () => removeItem(STORAGE_KEYS.pendingSession);
+
+const loadLastUserHint = (): UserHint | null => normalizeHint(readJson<UserHint>(STORAGE_KEYS.lastUserHint));
+
+const saveLastUserHint = (hint: UserHint) => writeJson(STORAGE_KEYS.lastUserHint, hint);
+
+const toUser = (stored: StoredUser): User => ({
+  username: stored.username,
+  email: stored.email,
+  isGuest: stored.isGuest ?? false,
+  accountId: stored.accountId,
+  role: stored.role || 'player',
+});
+
+const toPending = (user: StoredUser, token: string): PendingSession => ({
+  user,
+  token,
+});
+
+const toHint = (user: StoredUser) => ({
+  username: user.username,
+  email: user.email,
+});
+
+export function useAuth({ setCurrentUser, navigate }: UseAuthArgs) {
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+  const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+  const [showGameModes, setShowGameModes] = useState(false);
+  const [error, setError] = useState('');
+
+  const [pendingSession, setPendingSession] = useState<PendingSession | null>(loadPendingSession());
+  const [lastUserHint, setLastUserHint] = useState<UserHint | null>(loadLastUserHint());
+
+  const [loginForm, setLoginForm] = useState({
+    email: lastUserHint?.email || '',
+    password: '',
+  });
+
+  const [registerForm, setRegisterForm] = useState({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  });
+
+  const applySession = useCallback((storedUser: StoredUser, token: string) => {
+    const session = toPending(storedUser, token);
+    const hint = toHint(storedUser);
+
+    setPendingSession(session);
+    savePendingSession(session);
+    saveStoredUser(storedUser);
+
+    setLastUserHint(hint);
+    saveLastUserHint(hint);
+
+    setLoginForm({ email: storedUser.email, password: '' });
+  }, []);
+
+  const syncFromStorage = useCallback((): User | null => {
+    const storedUser = loadStoredUser();
+    const token = authService.getToken();
+    if (!storedUser || !token) return null;
+
+    const model = toUser(storedUser);
+    setCurrentUser(model);
+    applySession(storedUser, token);
+    setShowGameModes(false);
+    authenticateUser.emit?.('authenticate', { accountId: model.accountId, username: model.username });
+    return model;
+  }, [applySession, setCurrentUser]);
+
+  const verifyExistingSession = useCallback(async (): Promise<PendingSession | null> => {
+    const token = authService.getToken();
+    if (!token) return null;
+
+    const response = await authService.verifyToken();
+    if (!response?.success || !response.user) return null;
+
+    const storedUser = loadStoredUser();
+    const hydratedUser: StoredUser = {
+      accountId: response.user.accountId,
+      username: response.user.username,
+      email: response.user.email,
+      role: storedUser?.role ?? response.user.role ?? 'player',
+      isGuest: storedUser?.isGuest ?? false,
+    };
+
+    saveStoredUser(hydratedUser);
+    return toPending(hydratedUser, token);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const session = await verifyExistingSession();
+      if (cancelled) return;
+
+      if (session) {
+        const model = toUser(session.user);
+        setCurrentUser(model);
+        applySession(session.user, session.token);
+        setShowGameModes(false);
+        authenticateUser.emit('authenticate', { accountId: model.accountId, username: model.username });
+        if (model.role === 'admin') navigate('/admin');
+      } else {
+        const model = syncFromStorage();
+        if (model?.role === 'admin') navigate('/admin');
+        if (!model) {
+          setCurrentUser(null);
+          setPendingSession(null);
+        }
+      }
+    };
+
+    bootstrap().catch((err) => {
+      console.error('[useAuth] bootstrap error:', err);
+      const model = syncFromStorage();
+      if (model?.role === 'admin') navigate('/admin');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applySession, navigate, setCurrentUser, syncFromStorage, verifyExistingSession]);
+
+  const handleLogin = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      setError('');
+
+      if (!loginForm.email || !loginForm.password) {
+        setError('Please fill in all required fields');
+        return;
+      }
+
+      setLoading(true);
+      setLoadingMessage('Signing in...');
+
+      try {
+        const result: AuthResponse = await authService.login(loginForm.email, loginForm.password);
+        if (result.success && result.token && result.user) {
+          const storedUser: StoredUser = {
+            accountId: result.user.accountId,
+            username: result.user.username,
+            email: result.user.email,
+            role: result.user.role || 'player',
+            isGuest: false,
+          };
+          setCurrentUser(toUser(storedUser));
+          applySession(storedUser, result.token);
+          // After successful login, show game mode menu
+          setShowGameModes(true);
+          authenticateUser.emit?.('authenticate', { accountId: storedUser.accountId, username: storedUser.username });
+          if (storedUser.role === 'admin') navigate('/admin');
+        } else {
+          setError(result.message || 'Login failed');
+        }
+      } catch (err) {
+        console.error('[Auth] login error:', err);
+        setError('Unable to reach server. Please try again later.');
+      } finally {
+        setLoading(false);
+        setLoadingMessage('');
+      }
+    },
+    [applySession, loginForm, navigate, setCurrentUser],
+  );
+
+  const handleRegister = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      setError('');
+
+      const { username, email, password, confirmPassword } = registerForm;
+      if (!username || !email || !password || !confirmPassword) {
+        setError('Please fill in all required fields');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+      if (password.length < 6) {
+        setError('Password must be at least 6 characters');
+        return;
+      }
+
+      setLoading(true);
+      setLoadingMessage('Creating account...');
+
+      try {
+        const result: AuthResponse = await authService.register(username, email, password);
+        if (result.success && result.token && result.user) {
+          const storedUser: StoredUser = {
+            accountId: result.user.accountId,
+            username: result.user.username,
+            email: result.user.email,
+            role: result.user.role || 'player',
+            isGuest: false,
+          };
+          setCurrentUser(toUser(storedUser));
+          applySession(storedUser, result.token);
+          // After successful registration, show game mode menu
+          setShowGameModes(true);
+          authenticateUser.emit?.('authenticate', { accountId: storedUser.accountId, username: storedUser.username });
+          setRegisterForm({ username: '', email: '', password: '', confirmPassword: '' });
+          if (storedUser.role === 'admin') navigate('/admin');
+        } else {
+          setError(result.message || 'Registration failed');
+        }
+      } catch (err) {
+        console.error('[Auth] register error:', err);
+        setError('Unable to reach server. Please try again later.');
+      } finally {
+        setLoading(false);
+        setLoadingMessage('');
+      }
+    },
+    [applySession, navigate, registerForm, setCurrentUser],
+  );
+
+  const continuePendingSession = useCallback(() => {
+    const session =
+      pendingSession ??
+      loadPendingSession() ??
+      (() => {
+        const storedUser = loadStoredUser();
+        const token = authService.getToken();
+        if (!storedUser || !token) return null;
+        const pending = toPending(storedUser, token);
+        setPendingSession(pending);
+        savePendingSession(pending);
+        return pending;
+      })();
+
+    if (!session) return;
+
+    const model = toUser(session.user);
+    setCurrentUser(model);
+    authenticateUser.emit?.('authenticate', { accountId: model.accountId, username: model.username });
+    setShowGameModes(true);
+  }, [pendingSession, setCurrentUser]);
+
+  const discardPendingSession = useCallback(() => {
+    clearPendingSessionStorage();
+    setPendingSession(null);
+    setCurrentUser(null);
+    setShowGameModes(false);
+  }, [setCurrentUser]);
+
+  const playAsGuest = useCallback(() => {
+    const guestId = 'Guest_' + Math.random().toString(36).slice(2, 11);
+    const guestUser: StoredUser = {
+      accountId: -Math.floor(Math.random() * 90000) - 10000,
+      username: guestId,
+      email: `${guestId}@guest.local`,
+      isGuest: true,
+    };
+    setCurrentUser(toUser(guestUser));
+    setShowGameModes(true);
+    setPendingSession(null);
+    clearPendingSessionStorage();
+  }, [setCurrentUser]);
+
+  const logout = useCallback(() => {
+    authService.logout();
+    setCurrentUser(null);
+    setShowGameModes(false);
+    setActiveTab('login');
+    setPendingSession(null);
+    clearPendingSessionStorage();
+    const hint = loadLastUserHint();
+    setLastUserHint(hint);
+    setLoginForm({ email: hint?.email || '', password: '' });
+  }, [setCurrentUser]);
+
+  return {
+    activeTab,
+    setActiveTab,
+    loading,
+    loadingMessage,
+    showGameModes,
+    setShowGameModes,
+    loginForm,
+    setLoginForm,
+    registerForm,
+    setRegisterForm,
+    error,
+    setError,
+    handleLogin,
+    handleRegister,
+    playAsGuest,
+    logout,
+    pendingSession,
+    continuePendingSession,
+    discardPendingSession,
+    lastUserHint,
+  } as const;
+}

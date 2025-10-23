@@ -11,7 +11,7 @@
  * 4. Remove this file when migration complete
  */
 
-import { matchManager, MatchData, PlayerMatchState } from './matchManager';
+import { matchManager, MatchData, PlayerMatchState } from './managers/matchManager';
 
 // ========================================
 // 📦 LEGACY TYPE DEFINITIONS

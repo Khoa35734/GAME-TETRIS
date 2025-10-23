@@ -1,17 +1,25 @@
-// Server-side Matchmaking System with Penalty Management
+// Server-side matchmaking with BO3 support, confirmation flow, and penalties.
 // File: server/src/matchmaking.ts
 
 import { Server, Socket } from 'socket.io';
-import { getSocketUserInfo, storeSocketUser } from './redisStore';
-import { matchManager } from './matchManager';
-import BO3MatchManager from './bo3MatchManager';
+import { getSocketUserInfo, storeSocketUser } from './stores/redisStore';
+import { matchManager } from './managers/matchManager';
+import BO3MatchManager from './managers/bo3MatchManager';
+
+const normalizeBestOf = (value: number): number => {
+  const cleaned = Math.max(1, Math.floor(value));
+  return cleaned % 2 === 0 ? cleaned + 1 : cleaned;
+};
+
+const DEFAULT_SERIES_BEST_OF = normalizeBestOf(Number(process.env.MATCH_SERIES_BEST_OF ?? 3));
+const DEFAULT_SERIES_WINS_REQUIRED = Math.floor(DEFAULT_SERIES_BEST_OF / 2) + 1;
 
 interface Player {
   socketId: string;
   accountId: number;
   username: string;
   mode: 'casual' | 'ranked';
-  rating?: number; // For ranked matchmaking
+  rating?: number;
   searchStartTime: number;
 }
 
@@ -20,6 +28,8 @@ interface Match {
   player1: Player;
   player2: Player;
   mode: 'casual' | 'ranked';
+  bestOf: number;
+  winsRequired: number;
   confirmedPlayers: Set<string>;
   createdAt: number;
   confirmTimeout?: NodeJS.Timeout;
@@ -29,7 +39,7 @@ interface PenaltyRecord {
   accountId: number;
   declineCount: number;
   lastDeclineTime: number;
-  penaltyUntil: number; // Timestamp when penalty expires
+  penaltyUntil: number;
 }
 
 class MatchmakingSystem {
@@ -39,106 +49,107 @@ class MatchmakingSystem {
   private rankedQueue: Player[] = [];
   private activeMatches: Map<string, Match> = new Map();
   private penalties: Map<number, PenaltyRecord> = new Map();
-  
-  // Penalty settings
-  private readonly PENALTY_BASE_DURATION = 60; // 60 seconds base penalty
-  private readonly PENALTY_MULTIPLIER = 2; // Multiply by 2 for each additional decline
-  private readonly PENALTY_RESET_TIME = 24 * 60 * 60 * 1000; // Reset counter after 24 hours
-  private readonly MATCH_CONFIRM_TIMEOUT = 30000; // 30 seconds to confirm (tăng lên cho dễ test)
+
+  private readonly MATCHMAKING_TICK = 2000;
+  private readonly MATCH_CONFIRM_TIMEOUT = 30000;
+  private readonly PENALTY_BASE_DURATION = 60; // seconds
+  private readonly PENALTY_MULTIPLIER = 2;
+  private readonly PENALTY_RESET_TIME = 24 * 60 * 60 * 1000;
 
   constructor(io: Server) {
     this.io = io;
+    console.log('[INIT] MatchmakingSystem constructed');
+
     this.bo3MatchManager = new BO3MatchManager(io);
-    this.setupSocketHandlers();
-    
-    // Periodic matchmaking check every 2 seconds
-    setInterval(() => this.processMatchmaking(), 2000);
+    setInterval(() => this.processMatchmaking(), this.MATCHMAKING_TICK);
   }
 
-  private setupSocketHandlers() {
-    this.io.on('connection', (socket: Socket) => {
-      console.log(`[Matchmaking] Player connected: ${socket.id}`);
-
-      // Join matchmaking queue
-      socket.on('matchmaking:join', (data: { mode: 'casual' | 'ranked' }) => {
-        this.handleJoinQueue(socket, data);
-      });
-
-      // Cancel matchmaking
-      socket.on('matchmaking:cancel', () => {
-        this.handleCancelQueue(socket);
-      });
-
-      // Confirm match
-      socket.on('matchmaking:confirm-accept', (data: { matchId: string }) => {
-        this.handleConfirmAccept(socket, data.matchId);
-      });
-
-      // Decline match
-      socket.on('matchmaking:confirm-decline', (data: { matchId: string }) => {
-        this.handleConfirmDecline(socket, data.matchId);
-      });
-
-      // Disconnect
-      socket.on('disconnect', () => {
-        this.handleDisconnect(socket);
-      });
-    });
+  public handleSocketConnected(socket: Socket): void {
+    const accountId = (socket as any).accountId;
+    const username = (socket as any).username;
+    console.log(
+      `[Matchmaking] Player connected: ${username ?? 'Unknown'} (${accountId ?? 'n/a'})`,
+    );
   }
 
-  private handleJoinQueue(socket: Socket, data: { mode: 'casual' | 'ranked' }) {
-    const { mode } = data;
-    
-    // Get player info from Redis instead of socket properties
-    getSocketUserInfo(socket.id).then(userInfo => {
-      if (!userInfo) {
-        console.warn(`[Matchmaking] Socket ${socket.id} not authenticated`);
-        socket.emit('matchmaking:error', { error: 'Not authenticated' });
-        return;
+  public async handleJoinQueue(socket: Socket, data: { mode: 'casual' | 'ranked' }): Promise<void> {
+    const mode = data?.mode ?? 'casual';
+    const userInfo = await getSocketUserInfo(socket.id);
+
+    let accountId = userInfo?.accountId;
+    let username = userInfo?.username;
+
+    if (!accountId) {
+      accountId = (socket as any).accountId;
+      username = (socket as any).username;
+      if (accountId && username) {
+        console.log(`[Matchmaking] Fallback to socket auth: ${username} (${accountId})`);
       }
+    }
 
-      const { accountId, username } = userInfo;
+    if (!accountId || !username) {
+      console.warn(`[Matchmaking] Socket ${socket.id} missing account info`);
+      socket.emit('matchmaking:error', { error: 'Not authenticated' });
+      return;
+    }
 
-      // Check if player has active penalty
-      const penalty = this.penalties.get(accountId);
-      if (penalty && Date.now() < penalty.penaltyUntil) {
-        const remainingTime = Math.ceil((penalty.penaltyUntil - Date.now()) / 1000);
-        socket.emit('matchmaking:penalty', { duration: remainingTime });
-        return;
+    if (!userInfo) {
+      try {
+        await storeSocketUser(socket.id, accountId, username);
+        console.log(`[Matchmaking] Backfilled Redis user ${username} (${accountId})`);
+      } catch (error) {
+        console.error('[Matchmaking] Failed to backfill socket user in Redis:', error);
       }
+    }
 
-      // Remove from any existing queue
-      this.removeFromQueue(socket.id);
+    const remainingPenalty = this.getRemainingPenalty(accountId);
+    if (remainingPenalty > 0) {
+      socket.emit('matchmaking:penalty', { duration: remainingPenalty });
+      return;
+    }
 
-      const player: Player = {
-        socketId: socket.id,
-        accountId,
-        username,
-        mode,
-        searchStartTime: Date.now(),
-      };
-
-      if (mode === 'casual') {
-        this.casualQueue.push(player);
-        console.log(`[Matchmaking] Player ${username} (ID: ${accountId}) joined casual queue`);
-      } else {
-        // For ranked, add rating (placeholder - get from database)
-        player.rating = 1500;
-        this.rankedQueue.push(player);
-        console.log(`[Matchmaking] Player ${username} (ID: ${accountId}) joined ranked queue (Rating: ${player.rating})`);
-      }
-    }).catch(err => {
-      console.error(`[Matchmaking] Error getting user info:`, err);
-      socket.emit('matchmaking:error', { error: 'Authentication error' });
-    });
-  }
-
-  private handleCancelQueue(socket: Socket) {
     this.removeFromQueue(socket.id);
-    console.log(`[Matchmaking] Player ${socket.id} cancelled search`);
+
+    const player: Player = {
+      socketId: socket.id,
+      accountId,
+      username,
+      mode,
+      rating: mode === 'ranked' ? 1500 : undefined,
+      searchStartTime: Date.now(),
+    };
+
+    if (mode === 'casual') {
+      this.casualQueue.push(player);
+      console.log(
+        `[Matchmaking] ${username} (${accountId}) joined casual queue | size=${this.casualQueue.length}`,
+      );
+    } else {
+      this.rankedQueue.push(player);
+      console.log(
+        `[Matchmaking] ${username} (${accountId}) joined ranked queue (rating ${player.rating ?? 'n/a'}) | size=${this.rankedQueue.length}`,
+      );
+    }
+
+    this.processMatchmaking();
   }
 
-  private handleConfirmAccept(socket: Socket, matchId: string) {
+  public handleCancelQueue(socket: Socket): void {
+    const removed = this.removeFromQueue(socket.id);
+    const active = this.findActiveMatchBySocket(socket.id);
+
+    if (active) {
+      console.log(`[Matchmaking] ${socket.id} cancelled while matched -> decline`);
+      this.handleConfirmDecline(socket, active.matchId);
+      return;
+    }
+
+    if (removed) {
+      console.log(`[Matchmaking] ${socket.id} cancelled search`);
+    }
+  }
+
+  public async handleConfirmAccept(socket: Socket, matchId: string): Promise<void> {
     const match = this.activeMatches.get(matchId);
     if (!match) {
       socket.emit('matchmaking:error', { error: 'Match not found' });
@@ -146,118 +157,80 @@ class MatchmakingSystem {
     }
 
     match.confirmedPlayers.add(socket.id);
-    
-    const playerName = match.player1.socketId === socket.id 
-      ? match.player1.username 
-      : match.player2.username;
-    
-    console.log(`✅ [Matchmaking] ${playerName} đã chấp nhận match ${matchId}`);
-    console.log(`   Confirmed: ${match.confirmedPlayers.size}/2`);
+    const playerName =
+      match.player1.socketId === socket.id ? match.player1.username : match.player2.username;
 
-    // ✅ XÓA player khỏi queue ngay khi confirm để tránh bị match lại
-    this.removeFromQueue(socket.id);
-    console.log(`   🗑️ Removed ${playerName} from queue (already confirmed)`);
+    console.log(`[Matchmaking] ${playerName} accepted match ${matchId} (${match.confirmedPlayers.size}/2)`);
 
-    // Notify this player they're waiting for opponent
     if (match.confirmedPlayers.size === 1) {
-      socket.emit('matchmaking:waiting', { 
-        message: 'Đang chờ đối thủ chấp nhận...' 
-      });
-      console.log(`   ⏳ Đang chờ đối thủ...`);
+      socket.emit('matchmaking:waiting', { message: 'Waiting for opponent confirmation...' });
+      return;
     }
 
-    // If both players confirmed, start the match
-    if (match.confirmedPlayers.size === 2) {
-      console.log(`✅ [Matchmaking] Cả 2 người chơi đã chấp nhận! Bắt đầu tạo BO3 match...`);
-      this.startMatch(match);
+    if (match.confirmedPlayers.size >= 2) {
+      await this.startMatch(match);
     }
   }
 
-  private handleConfirmDecline(socket: Socket, matchId: string) {
+  public handleConfirmDecline(socket: Socket, matchId: string): void {
     const match = this.activeMatches.get(matchId);
     if (!match) return;
 
-    // Get accountId from Redis
-    getSocketUserInfo(socket.id).then(userInfo => {
-      if (userInfo) {
-        this.applyPenalty(userInfo.accountId);
-      }
+    const isPlayer1 = match.player1.socketId === socket.id;
+    const decliningPlayer = isPlayer1 ? match.player1 : match.player2;
+    const otherPlayer = isPlayer1 ? match.player2 : match.player1;
 
-      // Notify other player
-      const otherPlayerId = match.player1.socketId === socket.id 
-        ? match.player2.socketId 
-        : match.player1.socketId;
-      
-      this.io.to(otherPlayerId).emit('matchmaking:opponent-declined');
+    const penaltyDuration = this.applyPenalty(decliningPlayer.accountId);
+    this.io.to(decliningPlayer.socketId).emit('matchmaking:penalty', { duration: penaltyDuration });
 
-      // Return other player to queue
-      const otherPlayer = match.player1.socketId === socket.id ? match.player2 : match.player1;
-      if (match.mode === 'casual') {
-        this.casualQueue.push(otherPlayer);
-      } else {
-        this.rankedQueue.push(otherPlayer);
-      }
+    this.io.to(otherPlayer.socketId).emit('matchmaking:opponent-declined');
+    this.requeuePlayer(otherPlayer);
 
-      // Clean up match
-      if (match.confirmTimeout) {
-        clearTimeout(match.confirmTimeout);
-      }
-      this.activeMatches.delete(matchId);
-
-      console.log(`[Matchmaking] Player ${socket.id} declined match ${matchId}`);
-    });
+    this.clearActiveMatch(matchId);
+    console.log(`[Matchmaking] ${decliningPlayer.username} declined match ${matchId}`);
   }
 
-  private handleDisconnect(socket: Socket) {
+  public handleDisconnect(socket: Socket): void {
     this.removeFromQueue(socket.id);
-    
-    // Check if player is in an active match confirmation
-    for (const [matchId, match] of this.activeMatches.entries()) {
-      if (match.player1.socketId === socket.id || match.player2.socketId === socket.id) {
-        // Treat disconnect as decline - get accountId from Redis
-        getSocketUserInfo(socket.id).then(userInfo => {
-          if (userInfo) {
-            this.applyPenalty(userInfo.accountId);
-          }
-        });
 
-        // Notify other player
-        const otherPlayerId = match.player1.socketId === socket.id 
-          ? match.player2.socketId 
-          : match.player1.socketId;
-        
-        this.io.to(otherPlayerId).emit('matchmaking:opponent-declined');
+    const active = this.findActiveMatchBySocket(socket.id);
+    if (!active) return;
 
-        // Return other player to queue
-        const otherPlayer = match.player1.socketId === socket.id ? match.player2 : match.player1;
-        if (match.mode === 'casual') {
-          this.casualQueue.push(otherPlayer);
-        } else {
-          this.rankedQueue.push(otherPlayer);
-        }
+    const { matchId, match } = active;
+    const isPlayer1 = match.player1.socketId === socket.id;
+    const disconnectingPlayer = isPlayer1 ? match.player1 : match.player2;
+    const otherPlayer = isPlayer1 ? match.player2 : match.player1;
 
-        // Clean up
-        if (match.confirmTimeout) {
-          clearTimeout(match.confirmTimeout);
-        }
-        this.activeMatches.delete(matchId);
-      }
-    }
+    const penaltyDuration = this.applyPenalty(disconnectingPlayer.accountId);
+    console.log(
+      `[Matchmaking] ${disconnectingPlayer.username} disconnected during confirm, penalty ${penaltyDuration}s`,
+    );
+
+    this.io.to(otherPlayer.socketId).emit('matchmaking:opponent-declined');
+    this.requeuePlayer(otherPlayer);
+    this.clearActiveMatch(matchId);
   }
 
   private processMatchmaking() {
-    // Process casual queue
-    this.matchPlayers(this.casualQueue, 'casual');
-    
-    // Process ranked queue (with MMR matching)
-    this.matchPlayersRanked(this.rankedQueue);
+    if (this.casualQueue.length >= 2) {
+      console.log(
+        `[Matchmaking] Processing casual queue | size=${this.casualQueue.length}`,
+      );
+      this.matchPlayers(this.casualQueue, 'casual');
+    }
+
+    if (this.rankedQueue.length >= 2) {
+      console.log(
+        `[Matchmaking] Processing ranked queue | size=${this.rankedQueue.length}`,
+      );
+      this.matchPlayersRanked(this.rankedQueue);
+    }
   }
 
   private matchPlayers(queue: Player[], mode: 'casual' | 'ranked') {
     while (queue.length >= 2) {
       const player1 = queue.shift()!;
       const player2 = queue.shift()!;
-
       this.createMatch(player1, player2, mode);
     }
   }
@@ -265,337 +238,310 @@ class MatchmakingSystem {
   private matchPlayersRanked(queue: Player[]) {
     if (queue.length < 2) return;
 
-    // Sort by rating
-    queue.sort((a, b) => (a.rating || 0) - (b.rating || 0));
-
-    // Match players with close ratings
+    queue.sort((a, b) => (a.rating ?? 0) - (b.rating ?? 0));
     const matched: Player[] = [];
+
     for (let i = 0; i < queue.length - 1; i++) {
       if (matched.includes(queue[i])) continue;
-
       const player1 = queue[i];
       const player2 = queue[i + 1];
-
-      // Check rating difference (expand search range over time)
       const searchDuration = Date.now() - player1.searchStartTime;
-      const maxRatingDiff = 100 + Math.floor(searchDuration / 10000) * 50; // Expand by 50 every 10s
+      const maxRatingDiff = 100 + Math.floor(searchDuration / 10000) * 50;
 
-      if (Math.abs((player1.rating || 0) - (player2.rating || 0)) <= maxRatingDiff) {
+      if (Math.abs((player1.rating ?? 0) - (player2.rating ?? 0)) <= maxRatingDiff) {
         this.createMatch(player1, player2, 'ranked');
         matched.push(player1, player2);
       }
     }
 
-    // Remove matched players from queue
-    this.rankedQueue = queue.filter(p => !matched.includes(p));
+    this.rankedQueue = queue.filter((p) => !matched.includes(p));
   }
 
   private createMatch(player1: Player, player2: Player, mode: 'casual' | 'ranked') {
     const matchId = this.generateMatchId();
-    
+    const bestOf = DEFAULT_SERIES_BEST_OF;
+    const winsRequired = DEFAULT_SERIES_WINS_REQUIRED;
+
     const match: Match = {
       matchId,
       player1,
       player2,
       mode,
+      bestOf,
+      winsRequired,
       confirmedPlayers: new Set(),
       createdAt: Date.now(),
     };
 
+    match.confirmTimeout = setTimeout(() => this.handleConfirmTimeout(matchId), this.MATCH_CONFIRM_TIMEOUT);
+
     this.activeMatches.set(matchId, match);
+    this.emitMatchFound(match);
 
-    console.log(`\n🎮 [Matchmaking] ĐÃ TÌM THẤY TRẬN ĐẤU!`);
-    console.log(`   Match ID: ${matchId}`);
-    console.log(`   Player 1: ${player1.username} (${player1.accountId})`);
-    console.log(`   Player 2: ${player2.username} (${player2.accountId})`);
-    console.log(`   Mode: ${mode}`);
-    console.log(`   ⏰ Có 10 giây để chấp nhận...`);
-
-    // Notify both players
-    this.io.to(player1.socketId).emit('matchmaking:found', {
-      matchId,
-      opponent: { username: player2.username },
-      timeout: 10, // 10 seconds
-    });
-
-    this.io.to(player2.socketId).emit('matchmaking:found', {
-      matchId,
-      opponent: { username: player1.username },
-      timeout: 10, // 10 seconds
-    });
-
-    // Set timeout for confirmation
-    match.confirmTimeout = setTimeout(() => {
-      this.handleConfirmTimeout(matchId);
-    }, this.MATCH_CONFIRM_TIMEOUT);
+    console.log(
+      `[Matchmaking] Match ${matchId} created (${mode}) ${player1.username} vs ${player2.username}`,
+    );
   }
 
-  private handleConfirmTimeout(matchId: string) {
-    const match = this.activeMatches.get(matchId);
-    if (!match) return;
+  private emitMatchFound(match: Match) {
+    const timeoutSeconds = Math.floor(this.MATCH_CONFIRM_TIMEOUT / 1000);
+    const basePayload = {
+      matchId: match.matchId,
+      mode: match.mode,
+      timeout: timeoutSeconds,
+      series: {
+        bestOf: match.bestOf,
+        winsRequired: match.winsRequired,
+      },
+    };
 
-    // Check who didn't confirm
-    const player1Confirmed = match.confirmedPlayers.has(match.player1.socketId);
-    const player2Confirmed = match.confirmedPlayers.has(match.player2.socketId);
+    this.io.to(match.player1.socketId).emit('matchmaking:found', {
+      ...basePayload,
+      playerRole: 'player1',
+      player: { accountId: match.player1.accountId, username: match.player1.username },
+      opponent: { accountId: match.player2.accountId, username: match.player2.username },
+    });
 
-    // Apply penalty to players who didn't confirm
-    if (!player1Confirmed) {
-      // this.applyPenalty(match.player1.accountId); // ⚠️ TẮT PENALTY KHI TEST
-      console.log(`⚠️ [Matchmaking] Player 1 didn't confirm (penalty disabled for testing)`);
-      this.io.to(match.player1.socketId).emit('matchmaking:timeout');
-    }
-
-    if (!player2Confirmed) {
-      // this.applyPenalty(match.player2.accountId); // ⚠️ TẮT PENALTY KHI TEST
-      console.log(`⚠️ [Matchmaking] Player 2 didn't confirm (penalty disabled for testing)`);
-      this.io.to(match.player2.socketId).emit('matchmaking:timeout');
-    }
-
-    // Return confirmed player(s) to queue
-    if (player1Confirmed) {
-      this.io.to(match.player1.socketId).emit('matchmaking:opponent-declined');
-      if (match.mode === 'casual') {
-        this.casualQueue.push(match.player1);
-      } else {
-        this.rankedQueue.push(match.player1);
-      }
-    }
-
-    if (player2Confirmed) {
-      this.io.to(match.player2.socketId).emit('matchmaking:opponent-declined');
-      if (match.mode === 'casual') {
-        this.casualQueue.push(match.player2);
-      } else {
-        this.rankedQueue.push(match.player2);
-      }
-    }
-
-    this.activeMatches.delete(matchId);
-    console.log(`[Matchmaking] Match ${matchId} timed out`);
+    this.io.to(match.player2.socketId).emit('matchmaking:found', {
+      ...basePayload,
+      playerRole: 'player2',
+      player: { accountId: match.player2.accountId, username: match.player2.username },
+      opponent: { accountId: match.player1.accountId, username: match.player1.username },
+    });
   }
 
   private async startMatch(match: Match) {
-    // Create room for the BO3 match
-    const roomId = `match_${match.matchId}`;
-
-    // Clear timeout
     if (match.confirmTimeout) {
       clearTimeout(match.confirmTimeout);
     }
 
-    console.log(`[Matchmaking] 🎮 Cả 2 người chơi đã chấp nhận! Đang tạo BO3 match...`);
-    console.log(`   Player 1: ${match.player1.username} (${match.player1.accountId})`);
-    console.log(`   Player 2: ${match.player2.username} (${match.player2.accountId})`);
+    this.activeMatches.delete(match.matchId);
+
+    const roomId = `match_${match.matchId}`;
+    const seriesScore = { player1Wins: 0, player2Wins: 0 };
 
     try {
-      // 1. Create match in Redis via MatchManager (để room tồn tại)
+      await this.ensurePlayersJoinRoom([match.player1.socketId, match.player2.socketId], roomId);
+
+      const redisMode = match.mode === 'ranked' ? 'ranked' : 'custom';
       await matchManager.createMatch({
         matchId: roomId,
+        roomId,
+        mode: redisMode,
         hostPlayerId: match.player1.socketId,
         hostSocketId: match.player1.socketId,
-        mode: 'custom', // Use 'custom' mode for matchmaking rooms
-        maxPlayers: 2,
-        roomId: roomId,
         hostAccountId: String(match.player1.accountId),
+        maxPlayers: 2,
       });
 
-      // 2. Add player 2 to the match
       await matchManager.addPlayer(roomId, {
         playerId: match.player2.socketId,
         socketId: match.player2.socketId,
         accountId: String(match.player2.accountId),
       });
 
-      // 3. Join socket.io rooms for broadcasting
-      const socket1 = this.io.sockets.sockets.get(match.player1.socketId);
-      const socket2 = this.io.sockets.sockets.get(match.player2.socketId);
-      
-      if (socket1) await socket1.join(roomId);
-      if (socket2) await socket2.join(roomId);
 
-      // 3.5. ✅ SET CẢ 2 PLAYERS READY (matchmaking không cần lobby)
-      await matchManager.setPlayerReady(roomId, match.player1.socketId, true);
-      await matchManager.setPlayerReady(roomId, match.player2.socketId, true);
-      
-      console.log(`[Matchmaking] ✅ Both players set to READY (auto-start)`);
 
-      // 4. ✅ TẠO BO3 MATCH để quản lý best of 3
       const bo3Match = this.bo3MatchManager.createMatch(
         match.matchId,
         roomId,
         {
           socketId: match.player1.socketId,
           accountId: match.player1.accountId,
-          username: match.player1.username
+          username: match.player1.username,
         },
         {
           socketId: match.player2.socketId,
           accountId: match.player2.accountId,
-          username: match.player2.username
+          username: match.player2.username,
         },
-        match.mode
+        match.mode,
+        match.bestOf,
       );
 
-      console.log(`[Matchmaking] ✅ BO3 Match created successfully!`);
-      console.log(`   Room ID: ${roomId}`);
-      console.log(`   Mode: ${match.mode} (Best of 3)`);
-      console.log(`   Status: Ready to start`);
+      const seriesPayload = {
+        bestOf: bo3Match.bestOf,
+        winsRequired: bo3Match.winsRequired,
+        currentGame: bo3Match.currentGame,
+        score: seriesScore,
+      };
 
-      // 5. ✅ QUAN TRỌNG: Đợi 500ms để đảm bảo Redis đã lưu xong
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // 6. Verify room exists in Redis before notifying clients
-      const verifyRoom = await matchManager.getMatch(roomId);
-      if (!verifyRoom) {
-        throw new Error('Room verification failed - not found in Redis');
-      }
-
-      console.log(`[Matchmaking] ✅ Room verified in Redis, notifying clients...`);
-
-      // 7. Notify both players to start
-      this.io.to(match.player1.socketId).emit('matchmaking:start', { 
+      const baseStartPayload = {
+        matchId: match.matchId,
         roomId,
-        matchType: 'bo3',
         mode: match.mode,
-        autoStart: true, // ✅ Auto start game, không cần lobby
-        opponent: {
-          username: match.player2.username,
-          accountId: match.player2.accountId
-        }
-      });
-      this.io.to(match.player2.socketId).emit('matchmaking:start', { 
-        roomId,
-        matchType: 'bo3',
-        mode: match.mode,
-        autoStart: true, // ✅ Auto start game, không cần lobby
-        opponent: {
-          username: match.player1.username,
-          accountId: match.player1.accountId
-        }
+        series: seriesPayload,
+      };
+
+      this.io.to(match.player1.socketId).emit('matchmaking:start', {
+        ...baseStartPayload,
+        playerRole: 'player1',
+        player: { accountId: match.player1.accountId, username: match.player1.username },
+        opponent: { accountId: match.player2.accountId, username: match.player2.username },
       });
 
-      // ⏳ ĐỢI 1 GIÂY để client navigate và setup listeners xong
-      console.log(`[Matchmaking] ⏳ Waiting 1s for clients to navigate and setup listeners...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      this.io.to(match.player2.socketId).emit('matchmaking:start', {
+        ...baseStartPayload,
+        playerRole: 'player2',
+        player: { accountId: match.player2.accountId, username: match.player2.username },
+        opponent: { accountId: match.player1.accountId, username: match.player1.username },
+      });
 
-      // 8. ✅ EMIT game:start riêng cho từng player với opponent socketId để setup WebRTC
-      console.log(`\n[Matchmaking] 🎮 EMITTING game:start events...`);
-      
-      // Player 1 nhận opponent là player 2
-      const payload1 = {
-        roomId,
-        countdown: 3,
-        matchType: 'bo3',
-        mode: match.mode,
-        opponent: match.player2.socketId // ← WebRTC cần opponent socket.id
-      };
-      console.log(`   📤 Sending to Player 1 (${match.player1.socketId}):`, payload1);
-      this.io.to(match.player1.socketId).emit('game:start', payload1);
-
-      // Player 2 nhận opponent là player 1  
-      const payload2 = {
-        roomId,
-        countdown: 3,
-        matchType: 'bo3',
-        mode: match.mode,
-        opponent: match.player1.socketId // ← WebRTC cần opponent socket.id
-      };
-      console.log(`   📤 Sending to Player 2 (${match.player2.socketId}):`, payload2);
-      this.io.to(match.player2.socketId).emit('game:start', payload2);
-
-      console.log(`[Matchmaking] ✅ Game start events emitted - Check if clients receive them!\n`);
-
-      this.activeMatches.delete(match.matchId);
-      console.log(`[Matchmaking] ✅ Match ${match.matchId} started successfully (BO3)`);
-      
+      console.log(`[Matchmaking] Match ${match.matchId} started successfully (room ${roomId})`);
     } catch (error) {
-      console.error(`[Matchmaking] ❌ Error creating BO3 match:`, error);
-      
-      // Notify players about error
-      this.io.to(match.player1.socketId).emit('matchmaking:error', { error: 'Failed to create room' });
-      this.io.to(match.player2.socketId).emit('matchmaking:error', { error: 'Failed to create room' });
-      
-      // Return both to queue
-      if (match.mode === 'casual') {
-        this.casualQueue.push(match.player1, match.player2);
+      console.error('[Matchmaking] Failed to start match:', error);
+
+      await matchManager.deleteMatch(roomId).catch(() => undefined);
+
+      await Promise.all(
+        [match.player1.socketId, match.player2.socketId].map(async (socketId) => {
+          const clientSocket = this.io.sockets.sockets.get(socketId);
+          if (clientSocket) {
+            await clientSocket.leave(roomId);
+          }
+        }),
+      );
+
+      this.io.to(match.player1.socketId).emit('matchmaking:error', {
+        error: 'Failed to start match',
+      });
+      this.io.to(match.player2.socketId).emit('matchmaking:error', {
+        error: 'Failed to start match',
+      });
+
+      this.requeuePlayer(match.player1);
+      this.requeuePlayer(match.player2);
+    }
+  }
+
+  private handleConfirmTimeout(matchId: string) {
+    const match = this.activeMatches.get(matchId);
+    if (!match) return;
+
+    if (match.confirmTimeout) {
+      clearTimeout(match.confirmTimeout);
+    }
+
+    const timeoutAt = new Date(match.createdAt + this.MATCH_CONFIRM_TIMEOUT);
+    console.warn(`[Matchmaking] Match ${matchId} confirmation timeout at ${timeoutAt.toISOString()}`);
+
+    for (const player of [match.player1, match.player2]) {
+      if (match.confirmedPlayers.has(player.socketId)) {
+        this.io.to(player.socketId).emit('matchmaking:opponent-declined');
+        this.requeuePlayer(player);
       } else {
-        this.rankedQueue.push(match.player1, match.player2);
+        const penaltyDuration = this.applyPenalty(player.accountId);
+        this.io.to(player.socketId).emit('matchmaking:penalty', { duration: penaltyDuration });
       }
-      this.activeMatches.delete(match.matchId);
+    }
+
+    this.activeMatches.delete(matchId);
+  }
+
+  private async ensurePlayersJoinRoom(socketIds: string[], roomId: string) {
+    await Promise.all(
+      socketIds.map(async (socketId) => {
+        const clientSocket = this.io.sockets.sockets.get(socketId);
+        if (clientSocket) {
+          await clientSocket.join(roomId);
+        }
+      }),
+    );
+  }
+
+  private requeuePlayer(player: Player) {
+    const clientSocket = this.io.sockets.sockets.get(player.socketId);
+    if (!clientSocket || clientSocket.disconnected) return;
+
+    const queuedPlayer: Player = {
+      ...player,
+      searchStartTime: Date.now(),
+    };
+
+    this.removeFromQueue(player.socketId);
+
+    if (player.mode === 'casual') {
+      this.casualQueue.push(queuedPlayer);
+    } else {
+      this.rankedQueue.push(queuedPlayer);
     }
   }
 
-  private applyPenalty(accountId: number) {
+  private removeFromQueue(socketId: string): boolean {
+    const initialCasual = this.casualQueue.length;
+    const initialRanked = this.rankedQueue.length;
+
+    this.casualQueue = this.casualQueue.filter((p) => p.socketId !== socketId);
+    this.rankedQueue = this.rankedQueue.filter((p) => p.socketId !== socketId);
+
+    return this.casualQueue.length !== initialCasual || this.rankedQueue.length !== initialRanked;
+  }
+
+  private clearActiveMatch(matchId: string) {
+    const match = this.activeMatches.get(matchId);
+    if (!match) return;
+
+    if (match.confirmTimeout) {
+      clearTimeout(match.confirmTimeout);
+    }
+
+    this.activeMatches.delete(matchId);
+  }
+
+  private findActiveMatchBySocket(socketId: string): { matchId: string; match: Match } | null {
+    for (const [matchId, match] of this.activeMatches.entries()) {
+      if (match.player1.socketId === socketId || match.player2.socketId === socketId) {
+        return { matchId, match };
+      }
+    }
+    return null;
+  }
+
+  private applyPenalty(accountId: number): number {
     const now = Date.now();
-    let penalty = this.penalties.get(accountId);
+    const existing = this.penalties.get(accountId);
+    let declineCount = 1;
 
-    if (!penalty) {
-      penalty = {
-        accountId,
-        declineCount: 0,
-        lastDeclineTime: now,
-        penaltyUntil: 0,
-      };
-      this.penalties.set(accountId, penalty);
+    if (existing && now - existing.lastDeclineTime < this.PENALTY_RESET_TIME) {
+      declineCount = existing.declineCount + 1;
     }
 
-    // Reset counter if last decline was more than 24 hours ago
-    if (now - penalty.lastDeclineTime > this.PENALTY_RESET_TIME) {
-      penalty.declineCount = 0;
-    }
+    const durationSeconds =
+      this.PENALTY_BASE_DURATION * Math.pow(this.PENALTY_MULTIPLIER, declineCount - 1);
 
-    penalty.declineCount++;
-    penalty.lastDeclineTime = now;
+    const penalty: PenaltyRecord = {
+      accountId,
+      declineCount,
+      lastDeclineTime: now,
+      penaltyUntil: now + durationSeconds * 1000,
+    };
 
-    // Calculate penalty duration: 60s * (2^declineCount)
-    const duration = this.PENALTY_BASE_DURATION * Math.pow(this.PENALTY_MULTIPLIER, penalty.declineCount - 1);
-    penalty.penaltyUntil = now + duration * 1000;
-
-    console.log(`[Matchmaking] Penalty applied to ${accountId}: ${duration}s (Decline count: ${penalty.declineCount})`);
-
-    // Notify player
-    const socket = this.findSocketByAccountId(accountId);
-    if (socket) {
-      socket.emit('matchmaking:penalty', { duration });
-    }
+    this.penalties.set(accountId, penalty);
+    return durationSeconds;
   }
 
-  private removeFromQueue(socketId: string) {
-    this.casualQueue = this.casualQueue.filter(p => p.socketId !== socketId);
-    this.rankedQueue = this.rankedQueue.filter(p => p.socketId !== socketId);
-  }
+  private getRemainingPenalty(accountId: number): number {
+    const record = this.penalties.get(accountId);
+    if (!record) return 0;
 
-  private findSocketByAccountId(accountId: number): Socket | null {
-    const sockets = Array.from(this.io.sockets.sockets.values());
-    return sockets.find(s => (s as any).accountId === accountId) || null;
+    const now = Date.now();
+    if (now >= record.penaltyUntil) {
+      this.penalties.delete(accountId);
+      return 0;
+    }
+
+    return Math.ceil((record.penaltyUntil - now) / 1000);
   }
 
   private generateMatchId(): string {
-    return `match_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  // Public API for stats
-  public getQueueStats() {
-    return {
-      casual: {
-        players: this.casualQueue.length,
-        averageWaitTime: this.calculateAverageWaitTime(this.casualQueue),
-      },
-      ranked: {
-        players: this.rankedQueue.length,
-        averageWaitTime: this.calculateAverageWaitTime(this.rankedQueue),
-      },
-      activeMatches: this.activeMatches.size,
-      penalizedPlayers: this.penalties.size,
-    };
-  }
-
-  private calculateAverageWaitTime(queue: Player[]): number {
-    if (queue.length === 0) return 0;
-    const now = Date.now();
-    const totalWait = queue.reduce((sum, p) => sum + (now - p.searchStartTime), 0);
-    return Math.floor(totalWait / queue.length / 1000); // Return seconds
+    return `mm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 }
 
 export default MatchmakingSystem;
+
+
+
+
+
+

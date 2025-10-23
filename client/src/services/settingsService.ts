@@ -29,6 +29,11 @@ export interface UserSettings {
   language_pref?: string;
 }
 
+type ApiResponse<T extends object = Record<string, unknown>> = {
+  success: boolean;
+  message?: string;
+} & T;
+
 export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   moveLeft: 'ArrowLeft',
   moveRight: 'ArrowRight',
@@ -54,7 +59,7 @@ export const getUserSettings = async (): Promise<{ success: boolean; settings?: 
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.get<{ success: boolean; settings?: UserSettings; message?: string }>(`${getApiUrl()}/settings`, {
+    const response = await axios.get<ApiResponse<{ settings?: UserSettings }>>(`${getApiUrl()}/settings`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -78,7 +83,7 @@ export const updateUserSettings = async (settings: Partial<UserSettings>): Promi
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.put<{ success: boolean; message?: string }>(`${getApiUrl()}/settings`, settings, {
+    const response = await axios.put<ApiResponse>(`${getApiUrl()}/settings`, settings, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -102,7 +107,7 @@ export const updateKeyBindings = async (keyBindings: KeyBindings): Promise<{ suc
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.patch<{ success: boolean; message?: string }>(
+    const response = await axios.patch<ApiResponse>(
       `${getApiUrl()}/settings/keys`,
       { key_bindings: keyBindings },
       {
@@ -130,7 +135,7 @@ export const resetSettings = async (): Promise<{ success: boolean; message?: str
       return { success: false, message: 'Not authenticated' };
     }
 
-    const response = await axios.post<{ success: boolean; message?: string }>(`${getApiUrl()}/settings/reset`, {}, {
+    const response = await axios.post<ApiResponse>(`${getApiUrl()}/settings/reset`, {}, {
       headers: {
         Authorization: `Bearer ${token}`,
       },

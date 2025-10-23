@@ -51,7 +51,7 @@ const Inbox: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       const response = await fetch(`${API_BASE}/api/messages?userId=${userId}&filter=${filter}`);
       if (response.ok) {
         const data = await response.json();
@@ -69,7 +69,7 @@ const Inbox: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       const response = await fetch(`${API_BASE}/api/messages/stats/${userId}`);
       if (response.ok) {
         const data = await response.json();
@@ -82,7 +82,7 @@ const Inbox: React.FC = () => {
 
   const markAsRead = async (messageId: number) => {
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       await fetch(`${API_BASE}/api/messages/${messageId}/read`, { method: 'PATCH' });
       fetchMessages();
       fetchStats();
@@ -93,7 +93,7 @@ const Inbox: React.FC = () => {
 
   const toggleStar = async (messageId: number, currentStarred: boolean) => {
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       await fetch(`${API_BASE}/api/messages/${messageId}/star`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -109,7 +109,7 @@ const Inbox: React.FC = () => {
   const deleteMessage = async (messageId: number) => {
     if (!confirm('Bạn có chắc muốn xóa tin nhắn này?')) return;
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       await fetch(`${API_BASE}/api/messages/${messageId}`, { method: 'DELETE' });
       fetchMessages();
       fetchStats();
@@ -129,7 +129,7 @@ const Inbox: React.FC = () => {
     if (!confirm(`Xóa ${selectedMessages.size} tin nhắn đã chọn?`)) return;
     
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       await fetch(`${API_BASE}/api/messages/bulk/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -150,7 +150,7 @@ const Inbox: React.FC = () => {
     }
     
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
       await fetch(`${API_BASE}/api/messages/bulk/read`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

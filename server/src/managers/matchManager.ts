@@ -3,7 +3,7 @@
  * Manages multiple matches simultaneously with atomic operations
  */
 
-import { redis } from './redisStore';
+import { redis } from '../stores/redisStore';
 
 // ========================================
 // 🎯 REDIS KEYS STRUCTURE

@@ -3,7 +3,7 @@ import Friendship, { FriendshipStatus } from '../models/Friendship';
 import User from '../models/User';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
-import { isUserOnline } from '../index';
+import { isUserOnline, getUserPresence } from '../index';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || '123456';
@@ -58,13 +58,20 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      friends: friends.map((f) => ({
-        userId: f.user_id,
-        username: f.user_name,
-        email: f.email,
-        createdAt: f.created_at,
-        isOnline: isUserOnline(f.user_id), // Check online status
-      })),
+      friends: friends.map((f) => {
+        const presence = getUserPresence(f.user_id);
+        const isOnline = isUserOnline(f.user_id);
+        return {
+          userId: f.user_id,
+          username: f.user_name,
+          email: f.email,
+          createdAt: f.created_at,
+          isOnline,
+          presenceStatus: presence?.status || (isOnline ? 'online' : 'offline'),
+          gameMode: presence?.mode,
+          inGameSince: presence?.since,
+        };
+      }),
     });
   } catch (error: any) {
     console.error('[Friends] Get friends error:', error);

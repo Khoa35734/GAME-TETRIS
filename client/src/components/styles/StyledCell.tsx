@@ -13,9 +13,18 @@ export const StyledCell = styled.div<Props>`
     const isEmpty = props.type === 0 || props.type === '0';
     const typeStr = String(props.type);
     
-  // Empty cells - làm tối hơn để dễ nhìn
-  if (props.isBuffer && isEmpty) return 'transparent';
-  if (isEmpty) return 'rgba(0, 0, 0, 0.65)'; // Tối hơn từ 0.35 → 0.65
+    // ===================================
+    // START: SỬA LỖI NỀN (Background)
+    // ===================================
+
+    // Empty cells - làm tối hơn để dễ nhìn
+    if (props.isBuffer && isEmpty) return 'transparent';
+    // Tăng độ mờ từ 0.65 lên 0.85 để làm tối nền
+    if (isEmpty) return 'rgba(0, 0, 0, 0.85)'; 
+    
+    // ===================================
+    // END: SỬA LỖI
+    // ===================================
     
     // Special types with solid colors
     if (props.type === 'W') return 'rgba(255,255,255,1)';
@@ -47,8 +56,18 @@ export const StyledCell = styled.div<Props>`
       return '1px solid rgba(255, 193, 7, 0.4)';
     }
     
+    // ===================================
+    // START: SỬA LỖI LƯỚI (Grid)
+    // ===================================
+    
     // Vùng chơi chính - viền trùng với màu nền để xoá lưới
-    if (isEmpty) return '1px solid rgba(0, 0, 0, 0.65)'; // cùng màu nền ô trống
+    // Sửa lại viền của ô trống để khớp với nền ô trống MỚI
+    if (isEmpty) return '1px solid rgba(0, 0, 0, 0.85)'; // cùng màu nền ô trống
+    
+    // ===================================
+    // END: SỬA LỖI
+    // ===================================
+    
     if (props.type === 'ghost') return `1px solid rgba(${props.color}, 0.45)`; // trùng màu ghost
     if (props.type === 'garbage') return `1px solid rgba(${props.color}, 0.95)`; // trùng màu garbage
 
