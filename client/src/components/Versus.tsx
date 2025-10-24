@@ -2240,7 +2240,7 @@ useEffect(() => {
                 padding: '4px',
                 background: 'transparent'
               }}>
-                <Stage stage={stage} fillWhiteProgress={myFillWhiteProgress} />
+                <Stage stage={stage} fillWhiteProgress={myFillWhiteProgress} player={player} />
               </div>
               
               {/* Garbage Queue Bar - using the new component */}

@@ -5,85 +5,69 @@ type Props = {
   type: string | number;
   color: string;
   isBuffer?: boolean;
-}
+};
 
 export const StyledCell = styled.div<Props>`
   width: auto;
-  background: ${(props) => {
-    const isEmpty = props.type === 0 || props.type === '0';
-    const typeStr = String(props.type);
-    
-    // ===================================
-    // START: SỬA LỖI NỀN (Background)
-    // ===================================
 
-    // Empty cells - làm tối hơn để dễ nhìn
-    if (props.isBuffer && isEmpty) return 'transparent';
-    // Tăng độ mờ từ 0.65 lên 0.85 để làm tối nền
-    if (isEmpty) return 'rgba(0, 0, 0, 0.85)'; 
-    
-    // ===================================
-    // END: SỬA LỖI
-    // ===================================
-    
-    // Special types with solid colors
-    if (props.type === 'W') return 'rgba(255,255,255,1)';
-    if (props.type === 'garbage') return `rgba(${props.color}, 0.95)`;
-    
-    // Ghost piece - tăng opacity để thấy rõ hơn trên nền tối
-    if (props.type === 'ghost') {
-      return `rgba(${props.color}, 0.45)`; // Tăng từ 0.30 → 0.45
+  background: ${(props) => {
+    const isEmpty = props.type === 0 || props.type === "0";
+    const typeStr = String(props.type);
+
+    /* 🟦 Nếu là buffer + ô trống → trong suốt hoàn toàn */
+    if (props.isBuffer && isEmpty) return "transparent";
+
+    /* Ô trống (trong vùng board chính) → trong suốt để lộ texture nền */
+    if (isEmpty) return "transparent";
+
+    /* Ô đặc biệt */
+    if (props.type === "W") return "rgba(255,255,255,1)";
+    if (props.type === "garbage") return `rgba(${props.color}, 1)`;
+
+    /* 👻 Ghost block — sáng hơn, có ánh mờ nhẹ để dễ thấy */
+    if (props.type === "ghost") {
+      const [r, g, b] = props.color.split(",").map((v) => parseInt(v.trim()));
+      const lighter = `${Math.min(r + 50, 255)}, ${Math.min(g + 50, 255)}, ${Math.min(b + 50, 255)}`;
+      return `rgba(${lighter}, 0.55)`; // sáng hơn và trong suốt vừa phải
     }
-    
-    // Tetromino blocks with texture
+
+    /* Tetromino có texture riêng -> hiển thị ảnh gốc, không blend */
     if (TEXTURE_MAP[typeStr]) {
       return `url(${TEXTURE_MAP[typeStr]})`;
     }
-    
-    // Fallback to solid color
-    return `rgba(${props.color}, 0.8)`;
+
+    /* Mặc định màu đặc */
+    return `rgba(${props.color}, 1)`;
   }};
+
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  border: ${(props) => {
-    const isEmpty = props.type === 0 || props.type === '0';
-    const typeStr = String(props.type);
-    
-    // Buffer rows (3 hàng trên) - viền vàng để phân biệt
-    if (props.isBuffer) {
-      if (isEmpty) return '1px solid rgba(255, 193, 7, 0.2)';
-      return '1px solid rgba(255, 193, 7, 0.4)';
-    }
-    
-    // ===================================
-    // START: SỬA LỖI LƯỚI (Grid)
-    // ===================================
-    
-    // Vùng chơi chính - viền trùng với màu nền để xoá lưới
-    // Sửa lại viền của ô trống để khớp với nền ô trống MỚI
-    if (isEmpty) return '1px solid rgba(0, 0, 0, 0.85)'; // cùng màu nền ô trống
-    
-    // ===================================
-    // END: SỬA LỖI
-    // ===================================
-    
-    if (props.type === 'ghost') return `1px solid rgba(${props.color}, 0.45)`; // trùng màu ghost
-    if (props.type === 'garbage') return `1px solid rgba(${props.color}, 0.95)`; // trùng màu garbage
+  image-rendering: pixelated;
+  border: none;
 
-    // Nếu có texture, bỏ viền để không thấy đường lưới
-    if (TEXTURE_MAP[typeStr]) return '0px solid transparent';
-
-    // Tetromino không texture - viền trùng màu block
-    return `1px solid rgba(${props.color}, 0.8)`;
-  }};
+  /* Đổ bóng nhẹ cho khối Tetromino để nổi bật */
   box-shadow: ${(props) => {
-    const isEmpty = props.type === 0 || props.type === '0';
+    const isEmpty = props.type === 0 || props.type === "0";
     const typeStr = String(props.type);
-    if (isEmpty || props.type === 'ghost') return 'none';
-    if (TEXTURE_MAP[typeStr]) {
-      return 'inset 0 0 10px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2)';
+
+    if ((props.isBuffer && isEmpty) || isEmpty) return "none";
+
+    /* ✨ Ghost có viền sáng đặc biệt để tách khỏi nền */
+    if (props.type === "ghost") {
+      return `
+        0 0 4px rgba(255,255,255,0.6),
+        inset 0 0 6px rgba(255,255,255,0.4)
+      `;
     }
-    return 'none';
+
+    if (TEXTURE_MAP[typeStr]) {
+      return `
+        inset 0 0 6px rgba(0,0,0,0.5),
+        0 1px 3px rgba(0,0,0,0.25)
+      `;
+    }
+
+    return "none";
   }};
 `;

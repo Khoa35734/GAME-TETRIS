@@ -46,11 +46,11 @@ const RoomLobby: React.FC = () => {
   // Danh tinh
   const [displayName, setDisplayName] = useState('');
   const [identityReady, setIdentityReady] = useState(false);
-  const [myAccountId, setMyAccountId] = useState<string | null>(null); // accountId (neu co)
+  const [_myAccountId, setMyAccountId] = useState<string | null>(null); // accountId (neu co)
   const [mySocketId, setMySocketId] = useState<string | null>(socket.id || null); // socket.id that
 
   // Ping
-  const [myPing, setMyPing] = useState<number | null>(null);
+  const [_myPing, setMyPing] = useState<number | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
 
   // Invite friends

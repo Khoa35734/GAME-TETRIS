@@ -9,7 +9,7 @@ import ReportsManagement from './components/admin/ReportsManagement';
 import FeedbackManagement from './components/admin/FeedbackManagement';
 import BroadcastMessages from './components/admin/BroadcastMessages';
 
-import Tetris from './components/Tetris';
+import Tetris from './components/singleplayer/Tetris';
 import HomeMenu from './components/HomeMenu';
 import OnlineMenu from './components/OnlineMenu';
 import Versus from './components/Versus';
