@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
-import socket from '../socket'; // Import socket
-import type { Friend, FriendRequest, SearchResult } from '../services/friendsService';
+import socket from '../../socket'; // Import socket
+import type { Friend, FriendRequest, SearchResult } from '../../services/friendsService';
 import {
   getFriends,
   getFriendRequests,
@@ -10,7 +10,7 @@ import {
   acceptFriendRequest,
   rejectFriendRequest,
   removeFriend,
-} from '../services/friendsService';
+} from '../../services/friendsService';
 
 interface FriendsManagerProps {
   onBack: () => void;

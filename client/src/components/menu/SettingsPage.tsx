@@ -3,14 +3,14 @@ import styled from 'styled-components';
 import type {
   KeyBindings,
   UserSettings,
-} from '../services/settingsService';
+} from '../../services/settingsService';
 import {
   getUserSettings,
   updateKeyBindings,
   updateUserSettings,
   resetSettings,
   DEFAULT_KEY_BINDINGS,
-} from '../services/settingsService';
+} from '../../services/settingsService';
 
 const SettingsContainer = styled.div`
   padding: 20px;

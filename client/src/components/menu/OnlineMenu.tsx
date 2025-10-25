@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { StyledTetrisWrapper } from './styles/StyledTetris';
-import socket from '../socket';
+import { StyledTetrisWrapper } from '../styles/StyledTetris';
+import socket from '../../socket';
 
 interface CustomRoomCardProps {
   icon: string;

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { StyledTetrisWrapper } from './styles/StyledTetris';
-import socket from '../socket';
+import { StyledTetrisWrapper } from '../styles/StyledTetris';
+import socket from '../../socket';
 
 const OnlineJoinRoom: React.FC = () => {
   const [code, setCode] = useState('');

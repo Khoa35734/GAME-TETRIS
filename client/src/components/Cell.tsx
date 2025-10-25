@@ -1,6 +1,9 @@
+// File: Cell.tsx (Updated to use textureUtils)
+
 import React from "react";
 import { StyledCell } from "./styles/StyledCell";
-import { TETROMINOES } from "./tetrominos";
+// Import các hàm helper thay vì TETROMINOES trực tiếp cho việc styling
+import { getTetrominoTexture, getTetrominoColor } from "./textureUtils"; // <<< Đảm bảo đường dẫn này đúng
 
 interface CellProps {
   type: string | number;
@@ -8,33 +11,65 @@ interface CellProps {
 }
 
 const Cell: React.FC<CellProps> = ({ type, isBuffer }) => {
-  // Xác định loại tetromino và màu sắc
-  let tetrominoType: keyof typeof TETROMINOES;
-  
-  if (typeof type === 'string' && type.startsWith('ghost:')) {
-    // Ghost piece - lấy màu từ type thật
-    const realType = type.split(':')[1] as keyof typeof TETROMINOES;
-    tetrominoType = realType in TETROMINOES ? realType : 0;
-    
-    // 🔧 FIX: Ghost của O piece (2x2 vàng) dùng màu trắng thay vì vàng
-    const color = realType === 'O' ? '255, 255, 255' : TETROMINOES[tetrominoType].color;
-    
-    return <StyledCell type={'ghost'} color={color} data-ghost="true" isBuffer={isBuffer} />;
-  } else if (type === 'garbage') {
-    // Hàng rác - màu xám
-    tetrominoType = 'garbage';
-  } else if (typeof type === 'string' && type in TETROMINOES) {
-    tetrominoType = type as keyof typeof TETROMINOES;
-  } else if (type === 'ghost') {
-    tetrominoType = 'ghost';
-  } else if (type === 'W') {
-    tetrominoType = 'W';
+  let color: string | undefined;
+  let textureUrl: string | undefined;
+  // `cellTypeForStyle` sẽ giữ type gốc ('T', 'L', 'garbage', 'ghost', 'W', 0)
+  // để StyledCell có thể áp dụng các style đặc biệt nếu cần (vd: ghost, W)
+  let cellTypeForStyle: string | number = type;
+
+  const typeStr = String(type); // Chuyển type thành string để xử lý nhất quán
+
+  if (typeStr.startsWith('ghost:')) {
+    // --- Ghost Piece ---
+    const realType = typeStr.split(':')[1];
+    // Ghost dùng màu sáng hơn, không dùng texture
+    color = realType === 'O' ? '255, 255, 255' : getTetrominoColor(realType) || '200,200,200'; // Lấy màu gốc, fallback
+    cellTypeForStyle = 'ghost'; // Dùng type 'ghost' cho StyledCell
+    textureUrl = undefined;
+
+  } else if (typeStr === 'W') {
+    // --- Whiteout Cell ---
+    color = '255, 255, 255';
+    cellTypeForStyle = 'W'; // Dùng type 'W' cho StyledCell
+    textureUrl = undefined;
+
+  } else if (typeStr === '0' || type === 0) {
+     // --- Empty Cell ---
+     color = undefined; // Hoặc '0, 0, 0' nếu bạn muốn màu nền đen nhẹ
+     cellTypeForStyle = 0; // Dùng type 0 cho StyledCell
+     textureUrl = undefined;
+
   } else {
-    tetrominoType = 0;
+    // --- Standard Tetromino, Garbage, hoặc bất kỳ type nào định nghĩa trong textureUtils ---
+    cellTypeForStyle = typeStr; // Giữ nguyên type gốc ('T', 'garbage', ...) cho StyledCell
+
+    // ⭐ Ưu tiên lấy texture bằng hàm helper từ textureUtils.ts ⭐
+    const texturePath = getTetrominoTexture(typeStr);
+
+    if (texturePath) {
+      // Nếu có texture -> tạo url()
+      textureUrl = `url(${texturePath})`;
+      // Đặt color là undefined để StyledCell không vẽ màu nền che texture
+      color = undefined;
+      // Hoặc đặt màu fallback nếu muốn màu nền hiển thị sau texture lỗi
+      // color = getTetrominoColor(typeStr);
+    } else {
+      // Nếu không có texture -> lấy màu fallback từ textureUtils.ts
+      color = getTetrominoColor(typeStr);
+      textureUrl = undefined;
+    }
   }
-  
-  const color = TETROMINOES[tetrominoType].color;
-  return <StyledCell type={type} color={color} isBuffer={isBuffer} />;
+
+  // Truyền các props đã xác định cho StyledCell
+  return (
+    <StyledCell
+      type={cellTypeForStyle} // Truyền type đã xử lý ('ghost', 'W', 0, 'T', 'garbage'...)
+      color={color}           // Có thể là string (màu RGB) hoặc undefined
+      texture={textureUrl}      // Có thể là 'url(...)' hoặc undefined
+      isBuffer={isBuffer}
+    />
+  );
 };
 
-export default Cell;
+// Memo vẫn hữu ích để tránh render lại cell không cần thiết
+export default React.memo(Cell);

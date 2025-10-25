@@ -1089,7 +1089,8 @@ const initWebRTC = useCallback(
     }
     setNetOppStage(null);
     setWaiting(false);
-    setCountdown(3); // Bắt đầu đếm ngược
+    setCountdown(3);
+    startGameRef.current();  // Bắt đầu đếm ngược
   } else {
       console.log('⚠️ [Versus] Ignoring game:start because not in waiting state.');
   }

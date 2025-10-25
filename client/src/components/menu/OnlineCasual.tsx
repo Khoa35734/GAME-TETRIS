@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MatchmakingUI from './MatchmakingUI';
+import MatchmakingUI from '../MatchmakingUI';
 
 const OnlineCasual: React.FC = () => {
   const navigate = useNavigate();

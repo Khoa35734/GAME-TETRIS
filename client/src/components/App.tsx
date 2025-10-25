@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 
 import ProtectedRoute from './ProtectedRoute';
-import { InvitationNotification } from './InvitationNotification';
+import { InvitationNotification } from './menu/InvitationNotification';
 import { MobileWarning } from './MobileWarning';
 import AdminDashboard from './admin/AdminDashboard';
 import ReportsManagement from './admin/ReportsManagement';
@@ -10,16 +10,16 @@ import FeedbackManagement from './admin/FeedbackManagement';
 import BroadcastMessages from './admin/BroadcastMessages';
 
 import Tetris from './singleplayer/Tetris';
-import HomeMenu from './HomeMenu';
-import OnlineMenu from './OnlineMenu';
+import HomeMenu from './menu/HomeMenu';
+import OnlineMenu from './menu/OnlineMenu';
 import Versus from '../components/Versus';
 import OnlineCreateRoom from './OnlineCreateRoom';
-import OnlineJoinRoom from './OnlineJoinRoom';
-import RoomLobby from './RoomLobby';
-import Inbox from './Inbox';
+import OnlineJoinRoom from './menu/OnlineJoinRoom';
+import RoomLobby from './menu/RoomLobby';
+import Inbox from './menu/Inbox';
 import SinglePlayerSettings from './SinglePlayerSettings';
 import OnlineRanked from './OnlineRanked';
-import OnlineCasual from './OnlineCasual';
+import OnlineCasual from './menu/OnlineCasual';
 
 const Home: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);

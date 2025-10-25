@@ -6,7 +6,8 @@ export const TEXTURE_MAP: { [key: string]: string } = {
   O: '/img/texture/iron.jpg',        // Iron - light gray (matches O/yellow)
   S: '/img/texture/emeral.jpg',      // Emerald - green (matches S color)
   T: '/img/texture/amethyst.webp',   // Redstone - purple/red (matches T color)
-  Z: '/img/texture/redstone.webp',   // Redstone - red (matches Z color)
+  Z: '/img/texture/redstone.webp',
+  garbage: '/img/texture/blackstone.webp'   // Garbage - gray (matches garbage color)
 };
 
 // Fallback colors for tetromino types (used as backup)
@@ -17,7 +18,8 @@ export const TETROMINO_COLORS: { [key: string]: string } = {
   O: "223, 217, 36",    // Yellow
   S: "48, 211, 56",     // Green
   T: "132, 61, 198",    // Purple
-  Z: "227, 78, 78",     // Red
+  Z: "227, 78, 78",
+  garbage: "100, 100, 100", // Gray (matches garbage color)
 };
 
 // Get texture URL for a tetromino type

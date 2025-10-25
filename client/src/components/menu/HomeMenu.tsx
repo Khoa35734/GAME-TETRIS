@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { authService, type AuthResponse } from "../services/authService";
+import { authService, type AuthResponse } from "../../services/authService";
 import SettingsPage from './SettingsPage';
 import FriendsManager from './FriendsManager';
-import ConnectionDebug from './ConnectionDebug'; // Debug tool
-import ProfileModal from './ProfileModal'; // Profile modal
-import socket from '../socket'; // Import socket để gửi authentication
+import ConnectionDebug from '../ConnectionDebug'; // Debug tool
+import ProfileModal from '../ProfileModal'; // Profile modal
+import socket from '../../socket'; // Import socket để gửi authentication
 
 interface User {
   username: string;

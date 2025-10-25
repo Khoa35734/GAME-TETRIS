@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import socket from '../socket';
-import { getApiBaseUrl } from '../services/apiConfig';
+import socket from '../../socket';
+import { getApiBaseUrl } from '../../services/apiConfig';
 
 type Player = {
   id: string;              // socket.id tren server
