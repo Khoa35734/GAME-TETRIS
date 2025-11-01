@@ -1,89 +1,94 @@
-import styled from "styled-components";
-import { TEXTURE_MAP } from "../textureUtils";
+// File: StyledCell.tsx (Updated)
 
+import styled from "styled-components";
+import { TEXTURE_MAP } from "../textureUtils"; // Giữ lại nếu box-shadow cần
+
+// Cập nhật Props
 type Props = {
   type: string | number;
-  color: string;
-  isBuffer?: boolean;
-}
+  color?: string;      // Color giờ là optional
+  texture?: string;   // Thêm texture prop
+  $isBuffer?: boolean; // transient prop to avoid forwarding to DOM
+};
 
 export const StyledCell = styled.div<Props>`
   width: auto;
-  background: ${(props) => {
-    const isEmpty = props.type === 0 || props.type === '0';
-    const typeStr = String(props.type);
-    
-    // ===================================
-    // START: SỬA LỖI NỀN (Background)
-    // ===================================
+  aspect-ratio: 1 / 1;
 
-    // Empty cells - làm tối hơn để dễ nhìn
-    if (props.isBuffer && isEmpty) return 'transparent';
-    // Tăng độ mờ từ 0.65 lên 0.85 để làm tối nền
-    if (isEmpty) return 'rgba(0, 0, 0, 0.85)'; 
-    
-    // ===================================
-    // END: SỬA LỖI
-    // ===================================
-    
-    // Special types with solid colors
-    if (props.type === 'W') return 'rgba(255,255,255,1)';
-    if (props.type === 'garbage') return `rgba(${props.color}, 0.95)`;
-    
-    // Ghost piece - tăng opacity để thấy rõ hơn trên nền tối
-    if (props.type === 'ghost') {
-      return `rgba(${props.color}, 0.45)`; // Tăng từ 0.30 → 0.45
+  /* ================================== */
+  /* LOGIC BACKGROUND ĐÃ CẬP NHẬT       */
+  /* ================================== */
+  background-image: ${props => props.texture || 'none'}; // Ưu tiên background-image từ prop texture
+  background-color: ${props => { // Background color sẽ là nền hoặc fallback
+    const isEmpty = props.type === 0 || props.type === "0";
+
+    /* Buffer + ô trống -> transparent */
+    if (props.$isBuffer && isEmpty) return "transparent";
+
+    /* Ô trống trong board -> transparent */
+    if (isEmpty) return "transparent"; // Hoặc màu nền nhẹ: "rgba(0, 0, 0, 0.3)"
+
+    /* Ô Whiteout */
+    if (props.type === "W") return "rgba(255, 255, 255, 1)";
+
+    /* Ghost block (vẫn dùng màu đã tính toán) */
+    if (props.type === "ghost" && props.color) {
+      // Logic tính màu ghost giữ nguyên nếu bạn muốn ghi đè màu từ Cell.tsx
+      const [r, g, b] = props.color.split(",").map((v) => parseInt(v.trim()));
+      const lighter = `${Math.min(r + 50, 255)}, ${Math.min(g + 50, 255)}, ${Math.min(b + 50, 255)}`;
+      return `rgba(${lighter}, 0.55)`;
+      // Hoặc đơn giản là dùng màu được truyền vào nếu Cell.tsx đã tính
+      // return `rgba(${props.color}, 0.55)`;
     }
-    
-    // Tetromino blocks with texture
-    if (TEXTURE_MAP[typeStr]) {
-      return `url(${TEXTURE_MAP[typeStr]})`;
+
+    /* Các ô có màu (Tetromino, Garbage không có texture) */
+    if (props.color && !props.texture) { // Chỉ dùng màu nếu KHÔNG có texture
+        return `rgba(${props.color}, 1)`;
     }
-    
-    // Fallback to solid color
-    return `rgba(${props.color}, 0.8)`;
+
+    /* Fallback nếu có texture nhưng nó lỗi, hoặc ô đặc biệt không có màu/texture */
+    /* Có thể hiện màu color nhẹ phía sau texture */
+     if (props.color && props.texture) {
+       return `rgba(${props.color}, 0.8)`; // Màu nhẹ phía sau texture
+     }
+
+    /* Fallback cuối cùng */
+    return 'transparent'; // Tránh hiển thị màu đen không mong muốn
+
   }};
+  /* ================================== */
+  /* KẾT THÚC LOGIC BACKGROUND         */
+  /* ================================== */
+
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  border: ${(props) => {
-    const isEmpty = props.type === 0 || props.type === '0';
-    const typeStr = String(props.type);
-    
-    // Buffer rows (3 hàng trên) - viền vàng để phân biệt
-    if (props.isBuffer) {
-      if (isEmpty) return '1px solid rgba(255, 193, 7, 0.2)';
-      return '1px solid rgba(255, 193, 7, 0.4)';
-    }
-    
-    // ===================================
-    // START: SỬA LỖI LƯỚI (Grid)
-    // ===================================
-    
-    // Vùng chơi chính - viền trùng với màu nền để xoá lưới
-    // Sửa lại viền của ô trống để khớp với nền ô trống MỚI
-    if (isEmpty) return '1px solid rgba(0, 0, 0, 0.85)'; // cùng màu nền ô trống
-    
-    // ===================================
-    // END: SỬA LỖI
-    // ===================================
-    
-    if (props.type === 'ghost') return `1px solid rgba(${props.color}, 0.45)`; // trùng màu ghost
-    if (props.type === 'garbage') return `1px solid rgba(${props.color}, 0.95)`; // trùng màu garbage
+  image-rendering: pixelated;
+  border: none;
 
-    // Nếu có texture, bỏ viền để không thấy đường lưới
-    if (TEXTURE_MAP[typeStr]) return '0px solid transparent';
-
-    // Tetromino không texture - viền trùng màu block
-    return `1px solid rgba(${props.color}, 0.8)`;
-  }};
+  /* Giữ nguyên logic box-shadow */
   box-shadow: ${(props) => {
-    const isEmpty = props.type === 0 || props.type === '0';
-    const typeStr = String(props.type);
-    if (isEmpty || props.type === 'ghost') return 'none';
-    if (TEXTURE_MAP[typeStr]) {
-      return 'inset 0 0 10px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2)';
+    const isEmpty = props.type === 0 || props.type === "0";
+    const typeStr = String(props.type); // typeStr giờ có thể là 'garbage'
+
+  if ((props.$isBuffer && isEmpty) || isEmpty) return "none";
+    if (props.type === "ghost") {
+      return `
+        0 0 4px rgba(255,255,255,0.6),
+        inset 0 0 6px rgba(255,255,255,0.4)
+      `;
     }
-    return 'none';
+    // Áp dụng bóng nếu ô có texture (dùng props.texture hoặc check TEXTURE_MAP)
+    // Hoặc nếu type là garbage (ngay cả khi chỉ có màu)
+    if (props.texture || TEXTURE_MAP[typeStr] || props.type === 'garbage') {
+      return `
+        inset 0 0 6px rgba(0,0,0,0.5),
+        0 1px 3px rgba(0,0,0,0.25)
+      `;
+    }
+    return "none";
   }};
+
+  /* KHÔNG dùng visibility nữa để giữ logic buffer gốc của bạn */
+  /* visibility: ${props => props.$isBuffer ? 'hidden' : 'visible'}; */
 `;

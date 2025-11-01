@@ -4,6 +4,7 @@ type TetrominoShape = (string | number)[][];
 interface Tetromino {
   shape: TetrominoShape;
   color: string;
+  
 }
 
 // Định nghĩa kiểu cho đối tượng chứa tất cả các khối tetromino

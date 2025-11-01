@@ -1,65 +1,52 @@
 import React from 'react';
+import styled from 'styled-components';
+// Import lại các styled components từ GameOverOverlay hoặc tạo file chung
+import { OverlayContainer, ContentBox as BaseContentBox, StatsGrid, StatRow, StatLabel, StatValue, ButtonGroup, PrimaryButton, SecondaryButton } from './GameOverOverlay'; // Giả sử GameOverOverlay export chúng
+
+// Ghi đè style cho Win
+const ContentBox = styled(BaseContentBox)`
+  border: 2px solid rgba(0, 200, 100, 0.6); // Viền xanh lá
+`;
+
+const Title = styled.div`
+  font-size: 36px;
+  font-weight: 800;
+  margin-bottom: 24px;
+  color: #00ff88; // Màu xanh lá
+  text-shadow: 0 2px 8px rgba(0, 255, 136, 0.5);
+`;
 
 interface Props {
-  visible: boolean;
-  elapsedMs: number;
-  rows: number;
-  level: number;
-  piecesPlaced: number;
-  inputs: number;
-  holds: number;
+  elapsedMs: number; rows: number; level: number; piecesPlaced: number; inputs: number; holds: number;
   onPlayAgain: () => void;
   onMenu: () => void;
 }
 
-export const WinOverlay: React.FC<Props> = ({ visible, elapsedMs, rows, level, piecesPlaced, inputs, holds, onPlayAgain, onMenu }) => {
-  if (!visible) return null;
-  return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', zIndex: 1000 }}>
-      <div style={{ background: 'rgba(40,40,45,0.95)', padding: '32px 48px', borderRadius: 16, border: '2px solid rgba(0,200,100,0.5)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', color: '#fff', textAlign: 'center', minWidth: 320 }}>
-        <div style={{ fontSize: 36, fontWeight: 800, marginBottom: 24, color: '#00ff88' }}>🎉 YOU WIN! 🎉</div>
-        <div style={{ fontSize: 14, textAlign: 'left', lineHeight: 1.8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Time:</span>
-            <span style={{ fontWeight: 600 }}>{(elapsedMs / 1000).toFixed(2)}s</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Lines Cleared:</span>
-            <span style={{ fontWeight: 600 }}>{rows}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Level:</span>
-            <span style={{ fontWeight: 600 }}>{level + 1}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Pieces Placed:</span>
-            <span style={{ fontWeight: 600 }}>{piecesPlaced}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>PPS (Pieces/sec):</span>
-            <span style={{ fontWeight: 600 }}>{elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00'}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Total Inputs:</span>
-            <span style={{ fontWeight: 600 }}>{inputs}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Holds Used:</span>
-            <span style={{ fontWeight: 600 }}>{holds}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ color: '#aaa' }}>Finesse (Inputs/Piece):</span>
-            <span style={{ fontWeight: 600 }}>{piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00'}</span>
-          </div>
-        </div>
-        <div style={{ marginTop: 24 }}>
-          <button onClick={onPlayAgain} style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none', color: '#fff', padding: '12px 32px', borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: 'pointer', marginRight: 12 }}>Play Again</button>
-          <button onClick={onMenu} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '12px 32px', borderRadius: 8, fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>Menu</button>
-        </div>
-      </div>
-    </div>
-  );
+export const WinOverlay: React.FC<Props> = ({ elapsedMs, rows, level, piecesPlaced, inputs, holds, onPlayAgain, onMenu }) => {
+    const pps = elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00';
+    const finesse = piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00';
+    const timeStr = (elapsedMs / 1000).toFixed(2);
+
+    return (
+      <OverlayContainer>
+        <ContentBox>
+          <Title>🎉 YOU WIN! 🎉</Title>
+          <StatsGrid>
+            <StatRow><StatLabel>Time:</StatLabel> <StatValue>{timeStr}s</StatValue></StatRow>
+            <StatRow><StatLabel>Lines Cleared:</StatLabel> <StatValue>{rows}</StatValue></StatRow>
+            <StatRow><StatLabel>Level:</StatLabel> <StatValue>{level + 1}</StatValue></StatRow>
+            <StatRow><StatLabel>Pieces Placed:</StatLabel> <StatValue>{piecesPlaced}</StatValue></StatRow>
+            <StatRow><StatLabel>PPS (Pieces/sec):</StatLabel> <StatValue>{pps}</StatValue></StatRow>
+            <StatRow><StatLabel>Total Inputs:</StatLabel> <StatValue>{inputs}</StatValue></StatRow>
+            <StatRow><StatLabel>Holds Used:</StatLabel> <StatValue>{holds}</StatValue></StatRow>
+            <StatRow><StatLabel>Finesse (Inputs/Piece):</StatLabel> <StatValue>{finesse}</StatValue></StatRow>
+          </StatsGrid>
+          <ButtonGroup>
+            {/* Đổi tên nút */}
+            <PrimaryButton onClick={onPlayAgain}>Play Again</PrimaryButton>
+            <SecondaryButton onClick={onMenu}>Menu</SecondaryButton>
+          </ButtonGroup>
+        </ContentBox>
+      </OverlayContainer>
+    );
 };
-
-export default React.memo(WinOverlay);
-

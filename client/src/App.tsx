@@ -2,22 +2,26 @@ import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 
 import ProtectedRoute from './components/ProtectedRoute';
-import { InvitationNotification } from './components/InvitationNotification';
+import { InvitationNotification } from './components/menu/InvitationNotification';
 import { MobileWarning } from './components/MobileWarning';
 import AdminDashboard from './components/admin/AdminDashboard';
 import ReportsManagement from './components/admin/ReportsManagement';
 import FeedbackManagement from './components/admin/FeedbackManagement';
 import BroadcastMessages from './components/admin/BroadcastMessages';
 
-import Tetris from './components/Tetris';
-import HomeMenu from './components/HomeMenu';
-import OnlineMenu from './components/OnlineMenu';
-import Versus from './components/Versus';
+import Tetris from './components/singleplayer/Tetris';
+import HomeMenu from './components/menu/HomeMenu';
+import OnlineMenu from './components/menu/OnlineMenu';
+import Versus from './components/multiplayer/Versus';
 import OnlineCreateRoom from './components/OnlineCreateRoom';
+import OnlineJoinRoom from './components/menu/OnlineJoinRoom';
+import RoomLobby from './components/menu/RoomLobby';
+import Inbox from './components/menu/Inbox';
 import OnlineJoinRoom from './components/OnlineJoinRoom';
 import RoomLobby from './components/RoomLobby';
 import SinglePlayerSettings from './components/SinglePlayerSettings';
 import OnlineRanked from './components/OnlineRanked';
+import OnlineCasual from './components/menu/OnlineCasual';
 import OnlineCasual from './components/OnlineCasual';
 import Inbox from './components/Inbox'; // 📬 Inbox component
 import Leaderboard from './components/Leaderboard'; // 🏆 Leaderboard component

@@ -1,58 +1,72 @@
+// Sửa trong file: game/helper.ts
+
 import { MatchData, PlayerMatchState } from '../managers/matchManager';
-import { playerPings } from '../core/state';
 
-export function normalizeIp(ip: string | undefined | null): string {
-  if (!ip) return '';
-  let v = String(ip).trim();
-  if (v.startsWith('::ffff:')) v = v.slice(7);
-  if (v === '::1') v = '127.0.0.1';
-  return v;
-}
+// Kiểu dữ liệu mà RoomLobby.tsx mong đợi
+type ClientPlayerState = {
+  id: string;       
+  name?: string;
+  ready: boolean;
+  alive: boolean;
+  accountId?: string;
+  ping?: number | null; // RoomLobby.tsx cũng dùng ping
+};
 
-export function matchToRoomSnapshot(match: MatchData) {
+// Kiểu dữ liệu snapshot mà RoomLobby.tsx mong đợi
+type RoomSnapshot = {
+  matchId: string;
+  roomId?: string;
+  host: string;   // RoomLobby.tsx tìm trường tên 'host'
+  status: string;
+  mode: string;
+  maxPlayers: number;
+  players: ClientPlayerState[];
+};
+
+/**
+ * Ánh xạ (map) dữ liệu MatchData (server) sang RoomSnapshot (client).
+ */
+export const matchToRoomSnapshot = (match: MatchData): RoomSnapshot | null => {
+  if (!match) return null;
+
+  // ===== 🌟 PHẦN SỬA LỖI QUAN TRỌNG =====
+  
+  // 1. Ánh xạ TẤT CẢ players (KHÔNG LỌC)
+  //    -> Việc này sửa lỗi "0/2"
+  const clientPlayers = match.players.map((player: PlayerMatchState) => ({
+    
+    // 2. Ánh xạ 'playerId' (server) -> 'id' (client)
+    //    -> Việc này sửa lỗi hiển thị danh sách
+    id: player.playerId, 
+    
+    // 3. Giữ các trường khác mà RoomLobby.tsx cần
+    name: player.name,
+    ready: player.ready,
+    alive: (player as any).alive ?? true, // Thêm 'alive'
+    accountId: player.accountId,
+    ping: (player as any).ping ?? null, // Thêm 'ping'
+  }));
+
   return {
-    id: match.matchId,
-    host: match.hostPlayerId,
-    started: match.status === 'in_progress',
+    matchId: match.matchId,
+    roomId: match.roomId,
+    
+    // 4. Ánh xạ 'hostPlayerId' (server) -> 'host' (client)
+    //    -> Việc này sửa lỗi nhận diện Host
+    host: match.hostPlayerId, 
+    
+    status: match.status,
+    mode: match.mode,
     maxPlayers: match.maxPlayers,
-    players: match.players.map((p) => {
-      const pingData = playerPings.get(p.socketId || p.playerId);
-      return {
-        id: p.playerId,
-        ready: p.ready,
-        alive: p.alive,
-        name: p.accountId || null,
-        combo: p.combo || 0,
-        b2b: p.b2b || 0,
-        pendingGarbage: p.pendingGarbage || 0,
-        ping: pingData?.ping ?? null,
-      };
-    }),
+    
+    // 5. Trả về danh sách đầy đủ
+    players: clientPlayers,
   };
-}
+};
 
-export function findPlayerInMatch(match: MatchData | null, socketId: string): PlayerMatchState | undefined {
-  if (!match) return undefined;
-  return match.players.find((p) => p.socketId === socketId);
-}
-
-export function roomSnapshot(roomId: string, rooms: Map<string, any>) {
-  const r = rooms.get(roomId);
-  if (!r) return null;
-  return {
-    id: r.id,
-    host: r.host,
-    started: r.started,
-    maxPlayers: r.maxPlayers,
-    players: [...r.players.values()].map((p: any) => {
-      const pingData = playerPings.get(p.id);
-      return {
-        id: p.id,
-        ready: p.ready,
-        alive: p.alive,
-        name: p.name ?? null,
-        ping: pingData?.ping ?? null,
-      };
-    }),
-  };
-}
+// Hàm này cũng nên được export
+export const findPlayerInMatch = (match: MatchData, playerId: string) => {
+    if (!match) return null;
+    // Tìm bằng 'playerId' (được dùng trong server)
+    return match.players.find(p => p.playerId === playerId || p.accountId === playerId);
+};

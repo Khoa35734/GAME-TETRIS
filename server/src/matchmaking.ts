@@ -386,6 +386,10 @@ class MatchmakingSystem {
         player: { accountId: match.player2.accountId, username: match.player2.username },
         opponent: { accountId: match.player1.accountId, username: match.player1.username },
       });
+       // === EMIT GAME START TO BOTH CLIENTS ===
+
+
+console.log(`[Matchmaking] 🚀 Emitted 'game:start' to room ${roomId}`);
 
       console.log(`[Matchmaking] Match ${match.matchId} started successfully (room ${roomId})`);
     } catch (error) {
@@ -412,6 +416,19 @@ class MatchmakingSystem {
       this.requeuePlayer(match.player1);
       this.requeuePlayer(match.player2);
     }
+    this.io.to(match.player1.socketId).emit('game:start', {
+  roomId,
+  player1: { id: match.player1.accountId, name: match.player1.username },
+  player2: { id: match.player2.accountId, name: match.player2.username },
+  next: [], // optional: bạn có thể gửi mảng khối ban đầu từ bagGenerator() nếu muốn
+});
+
+this.io.to(match.player2.socketId).emit('game:start', {
+  roomId,
+  player1: { id: match.player1.accountId, name: match.player1.username },
+  player2: { id: match.player2.accountId, name: match.player2.username },
+  next: [],
+});
   }
 
   private handleConfirmTimeout(matchId: string) {
@@ -536,6 +553,7 @@ class MatchmakingSystem {
   private generateMatchId(): string {
     return `mm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
+  
 }
 
 export default MatchmakingSystem;

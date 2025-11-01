@@ -3,16 +3,17 @@
  * Manages multiple matches simultaneously with atomic operations
  */
 
+import { match } from 'assert/strict';
 import { redis } from '../stores/redisStore';
 
 // ========================================
-// 🎯 REDIS KEYS STRUCTURE
+// ≡ƒÄ» REDIS KEYS STRUCTURE
 // ========================================
 const KEYS = {
-  // Active matches hash: match:{matchId} → JSON
+  // Active matches hash: match:{matchId} ΓåÆ JSON
   match: (matchId: string) => `match:${matchId}`,
   
-  // Player to match mapping: player:{playerId} → matchId
+  // Player to match mapping: player:{playerId} ΓåÆ matchId
   playerMatch: (playerId: string) => `player:match:${playerId}`,
   
   // Active matches set (for cleanup/monitoring)
@@ -29,7 +30,7 @@ const KEYS = {
 };
 
 // ========================================
-// 📊 TYPE DEFINITIONS
+// ≡ƒôè TYPE DEFINITIONS
 // ========================================
 export type MatchStatus = 'waiting' | 'starting' | 'in_progress' | 'paused' | 'finished';
 
@@ -37,6 +38,7 @@ export interface PlayerMatchState {
   playerId: string;
   socketId: string;
   accountId?: string;
+  name?: string;
   ready: boolean;
   alive: boolean;
   score: number;
@@ -75,12 +77,33 @@ export interface MatchStats {
 }
 
 // ========================================
-// 🔧 MATCH MANAGER CLASS
+// ≡ƒöº MATCH MANAGER CLASS
 // ========================================
 export class MatchManager {
   private readonly MATCH_TTL = 7200; // 2 hours
   private readonly LOCK_TTL = 5; // 5 seconds for locks
   private readonly PLAYER_TIMEOUT = 30000; // 30 seconds disconnect timeout
+  private async wait(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async withMatchLock<T>(matchId: string, task: () => Promise<T>): Promise<T> {
+    const lockKey = KEYS.matchLock(matchId);
+    const maxAttempts = 6;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const acquired = await redis.set(lockKey, '1', { NX: true, EX: this.LOCK_TTL });
+      if (acquired) {
+        try {
+          return await task();
+        } finally {
+          await redis.del(lockKey).catch(() => undefined);
+        }
+      }
+      await this.wait(50 * (attempt + 1));
+    }
+    throw new Error(`[MatchManager] Failed to acquire lock for match ${matchId}`);
+  }
+
   
   /**
    * Create a new match
@@ -90,13 +113,14 @@ export class MatchManager {
     hostPlayerId: string;
     hostSocketId: string;
     hostAccountId?: string;
+    hostName?: string;
     mode: 'ranked' | 'custom' | 'practice';
     maxPlayers?: number;
     roomId?: string;
   }): Promise<MatchData> {
     const now = Date.now();
     const seed = now ^ data.matchId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-    
+    const hostName = data.hostName || (data.hostAccountId ? `User_${data.hostAccountId}` : `User_${data.hostPlayerId.slice(0,4)}`);
     const match: MatchData = {
       matchId: data.matchId,
       roomId: data.roomId,
@@ -108,6 +132,7 @@ export class MatchManager {
           playerId: data.hostPlayerId,
           socketId: data.hostSocketId,
           accountId: data.hostAccountId,
+          name: hostName,
           ready: false,
           alive: true,
           score: 0,
@@ -134,28 +159,40 @@ export class MatchManager {
     // Map player to match
     await redis.set(KEYS.playerMatch(data.hostPlayerId), data.matchId, { EX: this.MATCH_TTL });
     
-    console.log(`[MatchManager] ✅ Created match ${data.matchId} (${data.mode})`);
+    console.log(`[MatchManager] Γ£à Created match ${data.matchId} (${data.mode})`);
     return match;
   }
   
   /**
    * Add player to existing match
    */
-  async addPlayer(matchId: string, data: {
+  async addPlayer(
+
+    matchId: string, data: {
     playerId: string;
     socketId: string;
     accountId?: string;
+    name?: string;
   }): Promise<MatchData | null> {
+    console.log("[DEBUG addPlayer:start]", { matchId, data });
+
     const match = await this.getMatch(matchId);
-    if (!match) return null;
     
+    if (!match) return null;
+    console.log('[DEBUG matchManager.addPlayer]', {
+  matchId,
+  playerId: data.playerId,
+  socketId: data.socketId,
+  playersBefore: match.players.length
+});
+
     if (match.status !== 'waiting') {
-      console.warn(`[MatchManager] ⚠️ Cannot add player to match ${matchId} - status: ${match.status}`);
+      console.warn(`[MatchManager] ΓÜá∩╕Å Cannot add player to match ${matchId} - status: ${match.status}`);
       return null;
     }
     
     if (match.players.length >= match.maxPlayers) {
-      console.warn(`[MatchManager] ⚠️ Match ${matchId} is full`);
+      console.warn(`[MatchManager] ΓÜá∩╕Å Match ${matchId} is full`);
       return null;
     }
     
@@ -166,13 +203,16 @@ export class MatchManager {
       existing.socketId = data.socketId;
       existing.alive = true;
       existing.disconnectedAt = undefined;
+      if (data.name) existing.name = data.name;
     } else {
       // Add new player
       const now = Date.now();
+      const playerName = data.name || `User_${data.playerId.slice(0,4)}`; // Lß║Ñy t├¬n hoß║╖c tß║ío fallback
       match.players.push({
         playerId: data.playerId,
         socketId: data.socketId,
         accountId: data.accountId,
+        name: playerName,
         ready: false,
         alive: true,
         score: 0,
@@ -184,14 +224,17 @@ export class MatchManager {
         lastActionTime: now,
       });
     }
-    
+    console.log('[DEBUG matchManager.addPlayer] playersAfter', match.players.map(p => p.playerId));
+
     match.updatedAt = Date.now();
+    console.log("[DEBUG addPlayer:after]", { playersAfter: match.players.length, allPlayers: match.players });
+
     await this.saveMatch(match);
     
     // Map player to match
     await redis.set(KEYS.playerMatch(data.playerId), matchId, { EX: this.MATCH_TTL });
     
-    console.log(`[MatchManager] 👤 Player ${data.playerId} joined match ${matchId}`);
+    console.log(`[MatchManager] ≡ƒæñ Player ${data.playerId} joined match ${matchId}`);
     return match;
   }
   
@@ -211,99 +254,217 @@ export class MatchManager {
     // If no players left, delete match
     if (match.players.length === 0) {
       await this.deleteMatch(matchId);
-      console.log(`[MatchManager] 🗑️ Deleted empty match ${matchId}`);
+      console.log(`[MatchManager] ≡ƒùæ∩╕Å Deleted empty match ${matchId}`);
       return null;
     }
     
     // Transfer host if needed
     if (match.hostPlayerId === playerId && match.players.length > 0) {
       match.hostPlayerId = match.players[0].playerId;
-      console.log(`[MatchManager] 👑 New host for ${matchId}: ${match.hostPlayerId}`);
+      console.log(`[MatchManager] ≡ƒææ New host for ${matchId}: ${match.hostPlayerId}`);
     }
     
     await this.saveMatch(match);
-    console.log(`[MatchManager] 👋 Player ${playerId} left match ${matchId}`);
+    console.log(`[MatchManager] ≡ƒæï Player ${playerId} left match ${matchId}`);
     return match;
   }
   
   /**
    * Mark player as ready/unready
    */
-  async setPlayerReady(matchId: string, playerId: string, ready: boolean): Promise<MatchData | null> {
+  // ==================================================
+  // START TH├èM Mß╗ÜI
+  // Th├¬m to├án bß╗Ö h├ám n├áy
+  // ==================================================
+  /**
+   * Update socket ID for a reconnecting player
+   */
+  async updatePlayerSocket(matchId: string, playerId: string /* accountId */, newSocketId: string): Promise<MatchData | null> {
     const match = await this.getMatch(matchId);
     if (!match) return null;
-    
-    const player = match.players.find(p => p.playerId === playerId);
-    if (!player) return null;
-    
-    player.ready = ready;
-    match.updatedAt = Date.now();
-    await this.saveMatch(match);
-    
-    console.log(`[MatchManager] ${ready ? '✅' : '⏸️'} Player ${playerId} ready: ${ready}`);
+
+    const player = match.players.find(p => p.playerId === playerId); // T├¼m bß║▒ng accountId
+    if (player) {
+      player.socketId = newSocketId; // Cß║¡p nhß║¡t socketId mß╗¢i
+      player.alive = true; // ─É├ính dß║Ñu l├á ─æ├ú kß║┐t nß╗æi lß║íi
+      player.disconnectedAt = undefined;
+      match.updatedAt = Date.now();
+      await this.saveMatch(match);
+      console.log(`[MatchManager] ≡ƒöä Player ${playerId} (${player.name}) reconnected with new socket ${newSocketId} in match ${matchId}`);
+    } else {
+        console.warn(`[MatchManager] ΓÜá∩╕Å updatePlayerSocket: Player ${playerId} not found in match ${matchId}`);
+    }
     return match;
   }
+  // ==================================================
+  // Kß║╛T TH├ÜC H├ÇM Mß╗ÜI
+  // ==================================================
+  async setPlayerReady(
+    matchId: string,
+    playerId: string,
+    ready: boolean
+  ): Promise<{ match: MatchData; allReady: boolean; statusChanged: boolean } | null> {
+    return this.withMatchLock(matchId, async () => {
+      const match = await this.getMatch(matchId);
+      if (!match) return null;
+
+      const player = match.players.find(
+        (p) => p.playerId === playerId || p.socketId === playerId
+      );
+      if (!player) return null;
+
+      player.ready = ready;
+      player.alive = true;
+      match.updatedAt = Date.now();
+
+      const allReady =
+        match.players.length >= match.maxPlayers &&
+        match.players.every((p) => p.ready);
+
+      let statusChanged = false;
+      if (allReady && match.status === 'waiting') {
+        match.status = 'in_progress';
+        match.startTime = Date.now();
+        statusChanged = true;
+        for (const participant of match.players) {
+          participant.ready = true;
+          participant.alive = true;
+        }
+      }
+
+      await this.saveMatch(match);
+
+      console.log('[MatchManager] Ready update', {
+        matchId,
+        playerId,
+        ready,
+        allReady,
+        status: match.status,
+      });
+
+      return { match, allReady, statusChanged };
+    });
+  }
+
   
   /**
    * Start match (all players ready)
    */
   async startMatch(matchId: string): Promise<MatchData | null> {
-    const match = await this.getMatch(matchId);
-    if (!match) return null;
-    
-    if (match.status !== 'waiting') {
-      console.warn(`[MatchManager] ⚠️ Cannot start match ${matchId} - already ${match.status}`);
-      return null;
-    }
-    
-    if (match.players.length < 2) {
-      console.warn(`[MatchManager] ⚠️ Cannot start match ${matchId} - need at least 2 players`);
-      return null;
-    }
-    
-    const allReady = match.players.every(p => p.ready || p.playerId === match.hostPlayerId);
-    if (!allReady) {
-      console.warn(`[MatchManager] ⚠️ Cannot start match ${matchId} - not all ready`);
-      return null;
-    }
-    
-    match.status = 'in_progress';
-    match.startTime = Date.now();
-    match.updatedAt = Date.now();
-    await this.saveMatch(match);
-    
-    console.log(`[MatchManager] 🎮 Match ${matchId} started with ${match.players.length} players`);
-    return match;
+    return this.withMatchLock(matchId, async () => {
+      const match = await this.getMatch(matchId);
+      if (!match) return null;
+
+      if (match.status !== 'waiting') {
+        console.warn('[MatchManager] Cannot start match - invalid status', { matchId, status: match.status });
+        return null;
+      }
+
+      if (match.players.length < match.maxPlayers) {
+        console.warn('[MatchManager] Cannot start match - missing players', {
+          matchId,
+          current: match.players.length,
+          required: match.maxPlayers,
+        });
+        return null;
+      }
+
+      if (!match.players.every((p) => p.ready)) {
+        console.warn('[MatchManager] Cannot start match - player not ready', { matchId });
+        return null;
+      }
+
+      match.status = 'in_progress';
+      match.startTime = Date.now();
+      match.updatedAt = match.startTime;
+      for (const participant of match.players) {
+        participant.alive = true;
+        participant.ready = true;
+      }
+
+      await this.saveMatch(match);
+
+      console.log('[MatchManager] Match started', {
+        matchId,
+        players: match.players.map((p) => p.playerId),
+      });
+
+      return match;
+    });
   }
+
   
   /**
    * End match
    */
   async endMatch(matchId: string, winnerId?: string): Promise<MatchData | null> {
-    const match = await this.getMatch(matchId);
-    if (!match) return null;
-    
-    match.status = 'finished';
-    match.endTime = Date.now();
-    match.winnerId = winnerId;
-    match.updatedAt = Date.now();
-    
-    await this.saveMatch(match);
-    
-    // Save stats
-    await this.saveMatchStats(match);
-    
-    // Remove from active set
-    await redis.sRem(KEYS.activeMatches, matchId);
-    
-    // Clean up player mappings
-    for (const player of match.players) {
-      await redis.del(KEYS.playerMatch(player.playerId));
-    }
-    
-    console.log(`[MatchManager] 🏁 Match ${matchId} ended. Winner: ${winnerId || 'none'}`);
-    return match;
+    return this.withMatchLock(matchId, async () => {
+      const match = await this.getMatch(matchId);
+      if (!match) return null;
+
+      match.status = 'finished';
+      match.endTime = Date.now();
+      match.winnerId = winnerId;
+      match.updatedAt = Date.now();
+
+      await this.saveMatch(match);
+      await this.saveMatchStats(match);
+      await redis.sRem(KEYS.activeMatches, matchId);
+
+      for (const player of match.players) {
+        await redis.del(KEYS.playerMatch(player.playerId));
+        await redis.del(KEYS.playerGarbage(matchId, player.playerId));
+      }
+
+      console.log('[MatchManager] Match ended', { matchId, winnerId });
+
+      return match;
+    });
   }
+
+  async resolveTopout(
+    matchId: string,
+    loserId: string
+  ): Promise<{ match: MatchData; winnerId?: string; loserId: string } | null> {
+    return this.withMatchLock(matchId, async () => {
+      const match = await this.getMatch(matchId);
+      if (!match) return null;
+
+      const loser = match.players.find(
+        (p) => p.playerId === loserId || p.socketId === loserId
+      );
+      if (!loser) return null;
+
+      loser.alive = false;
+      match.updatedAt = Date.now();
+
+      const remaining = match.players.filter((p) => p.alive);
+      const winner = remaining.length === 1 ? remaining[0] : undefined;
+      const winnerIdFinal = winner ? winner.playerId : undefined;
+
+      if (winnerIdFinal) {
+        match.status = 'finished';
+        match.winnerId = winnerIdFinal;
+        match.endTime = Date.now();
+      }
+
+      await this.saveMatch(match);
+
+      if (winnerIdFinal) {
+        await this.saveMatchStats(match);
+        await redis.sRem(KEYS.activeMatches, matchId);
+      }
+
+      console.log('[MatchManager] Topout resolved', {
+        matchId,
+        loser: loser.playerId,
+        winner: winnerIdFinal ?? null,
+      });
+
+      return { match, winnerId: winnerIdFinal, loserId: loser.playerId };
+    });
+  }
+
   
   /**
    * Queue garbage for player (atomic operation)
@@ -313,7 +474,7 @@ export class MatchManager {
     const newTotal = await redis.incrBy(key, lines);
     await redis.expire(key, 300); // 5 minutes
     
-    console.log(`[MatchManager] 💣 Queued ${lines} garbage for ${targetPlayerId} (total: ${newTotal})`);
+    console.log(`[MatchManager] ≡ƒÆú Queued ${lines} garbage for ${targetPlayerId} (total: ${newTotal})`);
     return newTotal;
   }
   
@@ -334,7 +495,7 @@ export class MatchManager {
       await redis.del(key);
     }
     
-    console.log(`[MatchManager] 🛡️ Cancelled ${cancelled} garbage for ${targetPlayerId} (${currentAmount} → ${remaining})`);
+    console.log(`[MatchManager] ≡ƒ¢í∩╕Å Cancelled ${cancelled} garbage for ${targetPlayerId} (${currentAmount} ΓåÆ ${remaining})`);
     return { cancelled, remaining };
   }
   
@@ -347,7 +508,7 @@ export class MatchManager {
     await redis.del(key);
     
     const lines = Number(amount) || 0;
-    console.log(`[MatchManager] 📥 Consuming ${lines} garbage for ${playerId}`);
+    console.log(`[MatchManager] ≡ƒôÑ Consuming ${lines} garbage for ${playerId}`);
     return lines;
   }
   
@@ -389,7 +550,7 @@ export class MatchManager {
     match.updatedAt = Date.now();
     
     await this.saveMatch(match);
-    console.log(`[MatchManager] 🔌 Player ${playerId} disconnected from match ${matchId}`);
+    console.log(`[MatchManager] ≡ƒöî Player ${playerId} disconnected from match ${matchId}`);
   }
   
   /**
@@ -505,14 +666,14 @@ export class MatchManager {
       // Check for stale matches (no updates in 30 minutes)
       const staleThreshold = Date.now() - (30 * 60 * 1000);
       if (match.updatedAt < staleThreshold && match.status !== 'finished') {
-        console.log(`[MatchManager] 🧹 Cleaning stale match ${matchId}`);
+        console.log(`[MatchManager] ≡ƒº╣ Cleaning stale match ${matchId}`);
         await this.deleteMatch(matchId);
         cleaned++;
       }
     }
     
     if (cleaned > 0) {
-      console.log(`[MatchManager] 🧹 Cleaned ${cleaned} stale matches`);
+      console.log(`[MatchManager] ≡ƒº╣ Cleaned ${cleaned} stale matches`);
     }
     
     return cleaned;

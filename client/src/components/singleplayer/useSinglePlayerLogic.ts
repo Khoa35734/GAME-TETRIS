@@ -1,102 +1,131 @@
-import { useEffect, useRef, useState } from 'react';
-import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from '../../gamehelper';
-import { useInterval } from '../../hooks/useInterval';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { createStage, checkCollision, isGameOverFromBuffer, isTSpin } from '../../game/gamehelper';
 import { usePlayer } from '../../hooks/usePlayer';
 import { useStage } from '../../hooks/useStage';
 import { useGameStatus } from '../../hooks/useGameStatus';
-import { getFallSpeed } from './getFallSpeed';
-import { DAS_DELAY, MOVE_INTERVAL, INACTIVITY_LOCK_MS, HARD_CAP_MS } from './constants';
+import { useInterval } from '../../hooks/useInterval';
+import { getFallSpeed } from './getFallSpeed'; // Tách hàm getFallSpeed ra file riêng
+const MAX_LEVEL = 29; // Define locally since MAX_LEVEL is not exported from getFallSpeed.ts
+import { DAS_DELAY, MOVE_INTERVAL, INACTIVITY_LOCK_MS, HARD_CAP_MS, HARD_DROP_DELAY } from './constants'; // Tách hằng số ra file riêng
 
-export interface GameSettings {
+// (Bạn có thể cần định nghĩa lại kiểu Player/Stage hoặc import từ nơi khác nếu cần)
+type GameSettings = {
   linesToClear: number;
   showGhost: boolean;
   enableHardDrop: boolean;
   showNext: boolean;
   showHold: boolean;
-}
+};
 
-export function useSinglePlayerLogic() {
-  const [gameSettings] = useState<GameSettings>(() => {
-    const saved = localStorage.getItem('tetris:singleSettings');
-    if (saved) {
-      try { return JSON.parse(saved); } catch {}
-    }
-    return { linesToClear: 40, showGhost: true, enableHardDrop: true, showNext: true, showHold: true };
-  });
+export const useSinglePlayerLogic = (gameSettings: GameSettings) => {
+  // --- STATE VÀ REFS CHO LOGIC GAME ---
+  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, canHold, nextFour, holdSwap, clearHold] = usePlayer();
+  const [stage, setStage, rowsCleared, clearEventId] = useStage(player);
+  const [, , rows, setRows, level, setLevel] = useGameStatus();
+  const lastMoveTimeRef = useRef<number>(0);
 
   const [hasHeld, setHasHeld] = useState(false);
   const [dropTime, setDropTime] = useState<number | null>(null);
   const [gameOver, setGameOver] = useState<boolean>(false);
   const [startGameOverSequence, setStartGameOverSequence] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(3);
-  const [showGameOverOverlay, setShowGameOverOverlay] = useState(false);
-
   const [locking, setLocking] = useState(false);
   const [isGrounded, setIsGrounded] = useState(false);
+  const [win, setWin] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [timerOn, setTimerOn] = useState(false);
+  const [piecesPlaced, setPiecesPlaced] = useState(0);
+  const [inputs, setInputs] = useState(0);
+  const [holds, setHolds] = useState(0);
+  const [isSoftDropping, setIsSoftDropping] = useState(false);
   const inactivityTimeoutRef = useRef<number | null>(null);
   const capTimeoutRef = useRef<number | null>(null);
   const capExpiredRef = useRef<boolean>(false);
   const groundedSinceRef = useRef<number | null>(null);
   const lastGroundActionRef = useRef<number | null>(null);
   const prevPlayerRef = useRef<{ x: number; y: number; rotKey: string } | null>(null);
-
-  const [moveIntent, setMoveIntent] = useState<{ dir: number; startTime: number; dasCharged: boolean } | null>(null);
-
-  const [player, updatePlayerPos, resetPlayer, playerRotate, hold, canHold, nextFour, holdSwap, clearHold] = usePlayer();
-  const [stage, setStage, rowsCleared, clearEventId] = useStage(player);
-  const [, , rows, setRows, level, setLevel] = useGameStatus();
-
-  const [win, setWin] = useState(false);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [timerOn, setTimerOn] = useState(false);
-  const whiteoutRaf = useRef<number | null>(null);
-
-  const [piecesPlaced, setPiecesPlaced] = useState(0);
-  const [inputs, setInputs] = useState(0);
-  const [holds, setHolds] = useState(0);
-
+const [moveIntent, setMoveIntent] = useState<{ 
+  dir: number; 
+  startTime: number; 
+  dasCharged: boolean; 
+  movedInitial: boolean;
+} | null>(null);
   const hardDropLastTimeRef = useRef<number>(0);
-  const HARD_DROP_DELAY = 100;
+  // const afkTimeoutRef = useRef<number | null>(null); // Giữ lại nếu bạn muốn dùng sau
 
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { wrapperRef.current?.focus(); }, []);
+  // --- HÀM LOGIC GAME ---
+  
+  const clearInactivity = useCallback(() => {
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+      inactivityTimeoutRef.current = null;
+    }
+  }, []);
 
-  useEffect(() => {
-    if (countdown === null) return;
-    if (countdown <= 0) {
-      setCountdown(null);
-      startGame();
+  const clearCap = useCallback(() => {
+    if (capTimeoutRef.current) {
+      clearTimeout(capTimeoutRef.current);
+      capTimeoutRef.current = null;
+    }
+  }, []);
+
+ const doLock = useCallback(() => {
+    if (isGameOverFromBuffer(stage)) {
+      setStartGameOverSequence(true); // Trigger sequence instead of direct game over
+      setDropTime(null);
+      setTimerOn(false);
+      clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
+      return;
+    }
+    const tspin = (player.type === 'T') && isTSpin(player as any, stage as any);
+    if (tspin) console.log('T-Spin!');
+    setLocking(true);
+    clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
+    updatePlayerPos({ x: 0, y: 0, collided: true }); // Cập nhật collided ở đây
+  }, [
+    stage, player, updatePlayerPos, clearInactivity, clearCap, 
+    // 🛑 THÊM DEPENDENCIES
+    setStartGameOverSequence, setDropTime, setTimerOn, setIsGrounded, setLocking
+]);// Thêm dependencies
+
+  const startGroundTimers = useCallback(() => {
+  setIsGrounded(true);
+  const now = Date.now();
+  const firstTouch = groundedSinceRef.current == null;
+  groundedSinceRef.current = groundedSinceRef.current ?? now;
+  lastGroundActionRef.current = now;
+  clearInactivity();
+
+  // 🕐 Nếu đang soft drop, delay 1000ms thay vì INACTIVITY_LOCK_MS
+  const lockDelay = isSoftDropping ? 750 : INACTIVITY_LOCK_MS;
+
+  inactivityTimeoutRef.current = window.setTimeout(doLock, lockDelay);
+
+  if (firstTouch && !capTimeoutRef.current) {
+    capExpiredRef.current = false;
+    capTimeoutRef.current = window.setTimeout(() => {
+      capExpiredRef.current = true;
+    }, HARD_CAP_MS);
+  }
+}, [clearInactivity, clearCap, doLock, isSoftDropping]);
+// Thêm dependencies
+
+  const onGroundAction = useCallback(() => {
+    if (capExpiredRef.current) {
+      doLock();
       return;
     }
-    const t = setTimeout(() => setCountdown((c) => (c ?? 0) - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
+    lastGroundActionRef.current = Date.now();
+    clearInactivity();
+    inactivityTimeoutRef.current = window.setTimeout(doLock, INACTIVITY_LOCK_MS);
+  }, [clearInactivity, doLock]); // Thêm dependency
 
-  const movePlayer = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking || countdown !== null || win) return;
-    if (!checkCollision(player, stage, { x: dir, y: 0 })) {
-      updatePlayerPos({ x: dir, y: 0, collided: false });
-      setInputs((prev) => prev + 1);
-    }
-  };
-
-  const movePlayerToSide = (dir: number) => {
-    if (gameOver || startGameOverSequence || locking || countdown !== null || win) return;
-    let distance = 0;
-    while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) distance += 1;
-    if (distance > 0) {
-      updatePlayerPos({ x: dir * distance, y: 0, collided: false });
-      setInputs((prev) => prev + 1);
-    }
-  };
-
-  const startGame = (): void => {
+  const startGame = useCallback((): void => {
+    console.log("Starting game from hook..."); // Debug log
     setStage(createStage());
     setDropTime(getFallSpeed(0));
     setGameOver(false);
-    setShowGameOverOverlay(false);
     setStartGameOverSequence(false);
-    if (whiteoutRaf.current) cancelAnimationFrame(whiteoutRaf.current);
+    setLocking(false);
     setMoveIntent(null);
     setRows(0);
     setLevel(0);
@@ -109,250 +138,327 @@ export function useSinglePlayerLogic() {
     hardDropLastTimeRef.current = 0;
     clearHold();
     setHasHeld(false);
-    if (inactivityTimeoutRef.current) { clearTimeout(inactivityTimeoutRef.current); inactivityTimeoutRef.current = null; }
-    if (capTimeoutRef.current) { clearTimeout(capTimeoutRef.current); capTimeoutRef.current = null; }
-    capExpiredRef.current = false;
-    groundedSinceRef.current = null;
-    lastGroundActionRef.current = null;
-    setIsGrounded(false);
+    clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
     resetPlayer();
-    wrapperRef.current?.focus();
-  };
+  }, [setStage, setDropTime, setGameOver, setStartGameOverSequence, setRows, setLevel, setWin, setElapsedMs, setTimerOn, setPiecesPlaced, setInputs, setHolds, clearHold, setHasHeld, clearInactivity, clearCap, resetPlayer]); // Thêm dependencies
 
-  const clearInactivity = () => {
-    if (inactivityTimeoutRef.current) {
-      clearTimeout(inactivityTimeoutRef.current);
-      inactivityTimeoutRef.current = null;
+  const drop = useCallback((): void => {
+    // Tăng level nếu cần
+    if (rows > (level + 1) * 10) { // Sửa lỗi: Cần check rows, không phải level
+       const newLevel = level + 1;
+       if (newLevel < MAX_LEVEL) { // Chỉ tăng nếu chưa max
+           setLevel(newLevel); // Dùng setLevel trực tiếp
+           setDropTime(getFallSpeed(newLevel));
+       }
     }
-  };
-  const clearCap = () => {
-    if (capTimeoutRef.current) {
-      clearTimeout(capTimeoutRef.current);
-      capTimeoutRef.current = null;
-    }
-  };
-
-  const doLock = () => {
-    if (isGameOverFromBuffer(stage)) {
-      setGameOver(true);
-      setDropTime(null);
-      setTimerOn(false);
-      clearInactivity();
-      clearCap();
-      capExpiredRef.current = false;
-      groundedSinceRef.current = null;
-      lastGroundActionRef.current = null;
-      setIsGrounded(false);
-      return;
-    }
-    const tspin = player.type === 'T' && isTSpin(player as any, stage as any);
-    if (tspin) console.log('T-Spin!');
-    setLocking(true);
-    clearInactivity();
-    clearCap();
-    capExpiredRef.current = false;
-    groundedSinceRef.current = null;
-    lastGroundActionRef.current = null;
-    setIsGrounded(false);
-    updatePlayerPos({ x: 0, y: 0, collided: true });
-  };
-
-  const startGroundTimers = () => {
-    setIsGrounded(true);
-    const now = Date.now();
-    const firstTouch = groundedSinceRef.current == null;
-    groundedSinceRef.current = groundedSinceRef.current ?? now;
-    lastGroundActionRef.current = now;
-    clearInactivity();
-    inactivityTimeoutRef.current = window.setTimeout(() => { doLock(); }, INACTIVITY_LOCK_MS);
-    if (firstTouch && !capTimeoutRef.current) {
-      capExpiredRef.current = false;
-      capTimeoutRef.current = window.setTimeout(() => { capExpiredRef.current = true; }, HARD_CAP_MS);
-    }
-  };
-
-  const onGroundAction = () => {
-    if (capExpiredRef.current) { doLock(); return; }
-    lastGroundActionRef.current = Date.now();
-    clearInactivity();
-    inactivityTimeoutRef.current = window.setTimeout(() => doLock(), INACTIVITY_LOCK_MS);
-  };
-
-  const clearAFKTimer = () => {};
-
-  const drop = (): void => {
-    if (countdown !== null) return;
-    if (rows > (level + 1) * 10) {
-      const newLevel = level + 1;
-      setLevel((prev) => prev + 1);
-      setDropTime(getFallSpeed(newLevel));
-    }
+    // Rơi xuống
     if (!checkCollision(player, stage, { x: 0, y: 1 })) {
       updatePlayerPos({ x: 0, y: 1, collided: false });
     } else {
+      // Chạm đất
       setDropTime(null);
       startGroundTimers();
     }
-  };
+  }, [level, player, stage, updatePlayerPos, rows, setLevel, setDropTime]); // Thêm dependencies
 
-  const hardDrop = (): void => {
-    if (gameOver || startGameOverSequence || countdown !== null) return;
-    const now = Date.now();
-    if (now - hardDropLastTimeRef.current < HARD_DROP_DELAY) return;
-    hardDropLastTimeRef.current = now;
-    let dropDistance = 0;
-    while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
-    const finalY = player.pos.y + dropDistance;
-    if (finalY <= 0) {
-      setGameOver(true);
-      setDropTime(null);
-      setTimerOn(false);
-      return;
+// SỬA LỖI: Đơn giản hóa hardDrop khi đã chạm đất
+const hardDrop = useCallback((): void => {
+  if (gameOver || startGameOverSequence || !gameSettings.enableHardDrop) return;
+
+  const now = Date.now();
+  if (now - hardDropLastTimeRef.current < HARD_DROP_DELAY) return;
+  hardDropLastTimeRef.current = now;
+
+  // 🟢 Nếu đang trong lock delay (đang grounded) → lock luôn khối đó
+  if (isGrounded && !locking) {
+    console.log("[HardDrop] Lock instantly during lock delay");
+    setInputs(prev => prev + 1); // Ghi nhận input
+    
+    // 🛑 FIX: Chỉ cần gọi doLock(). 
+    // doLock() sẽ set locking/collided, và useEffect (on lock) sẽ xử lý
+    // việc resetPlayer() một cách nhất quán.
+    doLock(); 
+
+    // 🛑 XÓA TẤT CẢ LOGIC CŨ BÊN DƯỚI (setTimeout, resetPlayer...)
+    /*
+     // Dọn toàn bộ timer cũ
+     clearInactivity();
+     clearCap();
+     // ...
+     updatePlayerPos({ x: 0, y: 0, collided: true });
+     // ...
+     setTimeout(() => {
+       resetPlayer(); 
+       // ...
+     }, 80); 
+    */
+    return; // Quan trọng
+  }
+
+  // 🧱 Hard drop bình thường (khi đang rơi)
+  let dropDistance = 0;
+  while (!checkCollision(player, stage, { x: 0, y: dropDistance + 1 })) dropDistance += 1;
+
+  // 🔴 Game Over thật nếu spawn bị chặn trên đỉnh
+  if (dropDistance === 0 && player.pos.y === 0 && checkCollision(player, stage, { x: 0, y: 1 })) {
+    console.log("[HardDrop] True Game Over at spawn");
+    setStartGameOverSequence(true);
+    setDropTime(null);
+    setTimerOn(false);
+    clearInactivity();
+    clearCap();
+    capExpiredRef.current = false;
+    groundedSinceRef.current = null;
+    lastGroundActionRef.current = null;
+    setIsGrounded(false);
+    return;
+  }
+
+  // 🔵 Hard Drop giữa không trung
+  setDropTime(null);
+  setLocking(true);
+  clearInactivity();
+  clearCap();
+  capExpiredRef.current = false;
+  groundedSinceRef.current = null;
+  lastGroundActionRef.current = null;
+  setIsGrounded(false);
+  updatePlayerPos({ x: 0, y: dropDistance, collided: true });
+  setInputs(prev => prev + 1);
+}, [
+  gameOver,
+  startGameOverSequence,
+  gameSettings.enableHardDrop,
+  player,
+  stage,
+  updatePlayerPos,
+  resetPlayer,
+  clearInactivity,
+  clearCap,
+  getFallSpeed,
+  level,
+  isGrounded,
+  locking,
+  // 🛑 THÊM DEPENDENCIES
+  doLock,
+  setInputs,
+  setDropTime,
+  setStartGameOverSequence,
+  setTimerOn,
+  setIsGrounded,
+  setLocking
+]);
+
+
+ // Thêm dependencies
+
+ // Code MỚI ĐÃ SỬA
+// Code MỚI - An toàn hơn cho Wall Clip
+const movePlayer = useCallback((dir: number): boolean => {
+    if (gameOver || startGameOverSequence || locking) return false;
+
+    // Lấy player hiện tại để tính toán
+    const currentPiece = player.tetromino;
+    const currentX = player.pos.x;
+    const stageWidth = stage[0]?.length; // Lấy chiều rộng stage
+
+    // Tính vị trí X mới dự định
+    const intendedX = currentX + dir;
+
+    // === KIỂM TRA BIÊN TRƯỚC KHI CHECK COLLISION ===
+    let isMoveValid = true;
+    for (let y = 0; y < currentPiece.length; y += 1) {
+        for (let x = 0; x < currentPiece[y].length; x += 1) {
+            if (currentPiece[y][x] !== 0) { // Nếu là một ô của khối
+                const newX = intendedX + x; // Vị trí X mới của ô này trên board
+                // Kiểm tra xem ô này có ra ngoài biên trái/phải không
+                if (newX < 0 || newX >= stageWidth) {
+                    isMoveValid = false; // Ra ngoài biên -> Di chuyển không hợp lệ
+                    break; // Không cần kiểm tra các ô khác của khối
+                }
+            }
+        }
+        if (!isMoveValid) break; // Thoát vòng lặp ngoài nếu đã tìm thấy lỗi
     }
-    setDropTime(null);
-    setLocking(true);
-    clearInactivity();
-    clearCap();
-    capExpiredRef.current = false;
-    groundedSinceRef.current = null;
-    lastGroundActionRef.current = null;
-    setIsGrounded(false);
-    if (dropDistance > 0) updatePlayerPos({ x: 0, y: dropDistance, collided: true });
-    else updatePlayerPos({ x: 0, y: 0, collided: true });
-  };
+    // ===============================================
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence || countdown !== null || win) return;
-    if ([32, 37, 38, 39, 40, 16].includes((e as any).keyCode)) { e.preventDefault(); e.stopPropagation(); }
-    const keyCode = (e as any).keyCode as number;
-    if (keyCode === 37 || keyCode === 39) {
-      const dir = keyCode === 37 ? -1 : 1;
-      if (!moveIntent || moveIntent.dir !== dir) {
-        movePlayer(dir);
-        setMoveIntent({ dir, startTime: Date.now(), dasCharged: false });
-      }
-    } else if (keyCode === 40) {
-      if (!checkCollision(player, stage, { x: 0, y: 1 })) {
-        updatePlayerPos({ x: 0, y: 1, collided: false });
-        setInputs((prev) => prev + 1);
-      } else {
-        startGroundTimers();
-      }
-    } else if (keyCode === 38) {
-      if (!locking) {
-        playerRotate(stage, 1);
-        setInputs((prev) => prev + 1);
-        if (checkCollision(player, stage, { x: 0, y: 1 })) onGroundAction();
-      }
-    } else if (keyCode === 32) {
-      if (gameSettings.enableHardDrop) {
-        hardDrop();
-        setInputs((prev) => prev + 1);
-      }
-    } else if (keyCode === 16) {
-      if (gameSettings.showHold && !hasHeld && canHold) {
-        holdSwap();
-        setHasHeld(true);
-        setHolds((prev) => prev + 1);
-        setInputs((prev) => prev + 1);
-      }
+    // Nếu không ra ngoài biên VÀ không va chạm với các khối khác
+   // === FIXED: chống spam move vượt biên / đục tường ===
+const now = Date.now();
+const cooldown = Math.min(MOVE_INTERVAL * 0.5, 16);
+if (now - lastMoveTimeRef.current < cooldown) return false; // chặn spam
+lastMoveTimeRef.current = now;
+
+if (isMoveValid && !checkCollision(player, stage, { x: dir, y: 0 })) {
+  updatePlayerPos({ x: dir, y: 0, collided: false });
+  // Clamp player.x để đảm bảo không bao giờ ra ngoài biên
+player.pos.x = Math.max(0, Math.min(player.pos.x, stage[0].length - player.tetromino[0].length));
+
+  setInputs(prev => prev + 1);
+  if (isGrounded) onGroundAction();
+  return true;
+} else {
+  // Nếu va chạm hoặc ra biên → reset intent để ngắt ARR
+  setMoveIntent(null);
+  return false;
+}
+
+
+}, [gameOver, startGameOverSequence, locking, player, stage, updatePlayerPos, isGrounded, onGroundAction, stage]); // Thêm 'stage' vào dependency vì dùng stageWidth // Giữ nguyên dependencies
+
+  const movePlayerToSide = useCallback((dir: number) => {
+    if (gameOver || startGameOverSequence || locking) return;
+    let distance = 0;
+    while (!checkCollision(player, stage, { x: dir * (distance + 1), y: 0 })) distance += 1;
+    if (distance > 0) {
+      updatePlayerPos({ x: dir * distance, y: 0, collided: false });
+      setInputs(prev => prev + 1);
+      if (isGrounded) onGroundAction(); // Gọi onGroundAction nếu đang chạm đất
     }
-  };
+  }, [gameOver, startGameOverSequence, locking, player, stage, updatePlayerPos, isGrounded, onGroundAction]); // Thêm dependencies
 
-  const handleKeyUp = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (gameOver || startGameOverSequence || countdown !== null || win) return;
-    const keyCode = (e as any).keyCode as number;
-    if (keyCode === 37 || keyCode === 39) setMoveIntent(null);
-    else if (keyCode === 40) setDropTime(isGrounded ? null : getFallSpeed(level));
-  };
+  const rotatePlayer = useCallback(() => {
+      if (gameOver || startGameOverSequence || locking) return;
+      playerRotate(stage, 1);
+      setInputs(prev => prev + 1);
+      if (checkCollision(player, stage, { x: 0, y: 1 })) { // Check chạm đất SAU KHI xoay
+          onGroundAction();
+      }
+  }, [gameOver, startGameOverSequence, locking, playerRotate, stage, player, onGroundAction]); // Thêm dependencies
 
-  useInterval(() => { if (!gameOver && !startGameOverSequence && !locking && !win) drop(); }, (dropTime as any) !== undefined ? dropTime : null);
+  const holdPiece = useCallback(() => {
+    if (gameOver || startGameOverSequence || locking || !gameSettings.showHold || hasHeld || !canHold) return;
+    holdSwap();
+    setHasHeld(true);
+    setHolds(prev => prev + 1);
+    setInputs(prev => prev + 1);
+    // Reset timers khi hold
+    clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
+  }, [gameOver, startGameOverSequence, locking, gameSettings.showHold, hasHeld, canHold, holdSwap, clearInactivity, clearCap]); // Thêm dependencies
 
+  // --- USEEFFECTS CHO LOGIC GAME ---
+
+  // Gravity interval
   useInterval(() => {
-    if (moveIntent && !locking) {
-      const { dir, startTime, dasCharged } = moveIntent;
-      const now = Date.now();
-      if (now - startTime > DAS_DELAY && !dasCharged) {
-        if (MOVE_INTERVAL === 0) movePlayerToSide(dir);
-        setMoveIntent((prev) => (prev ? { ...prev, dasCharged: true } : null));
+    if (!gameOver && !startGameOverSequence && !locking && !win) drop();
+  }, dropTime); // Sửa: dropTime có thể là null
+
+  // DAS interval
+ // DAS / ARR handler chuẩn TETR.IO
+// === DAS + ARR interval — CHUẨN TETR.IO ===
+useInterval(() => {
+  if (!moveIntent || locking) return;
+
+  const { dir, startTime, dasCharged, movedInitial } = moveIntent;
+  const now = Date.now();
+  const elapsed = now - startTime;
+
+  // 1️⃣ Di chuyển 1 ô ngay khi vừa nhấn (nếu chưa moveInitial)
+  if (!movedInitial) {
+    const success = movePlayer(dir);
+    // Nếu move hợp lệ, đánh dấu đã di chuyển
+    if (success) {
+      setMoveIntent(prev => prev ? { ...prev, movedInitial: true } : null);
+    } else {
+      // Nếu đụng tường, huỷ luôn intent để tránh spam
+      setMoveIntent(null);
+    }
+    return;
+  }
+
+  // 2️⃣ Khi chưa đủ DAS delay, chờ
+  if (!dasCharged && elapsed < DAS_DELAY) return;
+
+  // 3️⃣ Khi đủ DAS, bật chế độ repeat
+  if (!dasCharged && elapsed >= DAS_DELAY) {
+    setMoveIntent(prev => prev ? { ...prev, dasCharged: true } : null);
+    return;
+  }
+
+  // 4️⃣ Khi DAS đã nạp, thực hiện ARR
+  if (dasCharged) {
+    if (MOVE_INTERVAL > 0) {
+      const success = movePlayer(dir);
+      if (!success) setMoveIntent(null); // chạm tường thì ngắt ARR
+    } else {
+      movePlayerToSide(dir); // instant slide
+    }
+  }
+}, 33); // tick mỗi frame logic (≈60fps)
+ // check mỗi frame logic (~60fps)
+// Luôn chạy interval check DAS charge
+
+  // ARR interval
+  useInterval(() => {
+    if (moveIntent?.dasCharged && MOVE_INTERVAL > 0 && !locking) {
+      movePlayer(moveIntent.dir);
+    }
+  }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : null);
+
+  // Xử lý sau khi khối lock (collided)
+// Xử lý sau khi khối lock (collided)
+  // Xử lý sau khi khối lock (collided)
+  useEffect(() => {
+    if (locking && player.collided && !gameOver && !startGameOverSequence) {
+        setPiecesPlaced(prev => prev + 1);
+        resetPlayer(); // Spawn khối mới
+        setHasHeld(false); // Cho phép hold lại
+        setMoveIntent(null); // Reset DAS/ARR
+        setLocking(false); // Cho phép khối mới rơi
+        setDropTime(getFallSpeed(level)); // Bắt đầu rơi
+        
+        // 🛑 FIX: Reset lại trạng thái soft dropping khi khối mới spawn
+        setIsSoftDropping(false);
+
+        // Reset lock timers
+        clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
+    }
+}, [
+    locking, player.collided, gameOver, startGameOverSequence, resetPlayer, 
+    setHasHeld, level, clearInactivity, clearCap, 
+    
+    // 🛑 THÊM CÁC HÀM SETTER VÀO DEPENDENCIES
+    setMoveIntent, setLocking, setDropTime, setIsSoftDropping, setIsGrounded 
+]); // Thêm dependencies
+
+  // Kiểm tra game over ngay khi spawn
+  useEffect(() => {
+    // Chỉ check khi y=0 và không phải đang lock/collided
+    if (player.pos.y === 0 && !player.collided && !locking && !gameOver && !startGameOverSequence) {
+      if (checkCollision(player, stage, { x: 0, y: 0 })) {
+        setStartGameOverSequence(true); // Bắt đầu sequence thay vì set gameOver trực tiếp
       }
     }
-  }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : 16);
+  }, [player, stage, locking, gameOver, startGameOverSequence]); // Thêm dependencies
 
-  useInterval(() => { if (moveIntent && moveIntent.dasCharged && MOVE_INTERVAL > 0 && !locking) movePlayer(moveIntent.dir); }, MOVE_INTERVAL > 0 ? MOVE_INTERVAL : null);
-
-  useEffect(() => { if (player.collided && !gameOver) setHasHeld(false); }, [player.collided, gameOver]);
-
-  useEffect(() => {
-    if (locking && player.collided && !gameOver) {
-      setPiecesPlaced((prev) => prev + 1);
-      resetPlayer();
-      setMoveIntent(null);
-      setLocking(false);
-      setDropTime(getFallSpeed(level));
-      clearInactivity();
-      clearCap();
-      capExpiredRef.current = false;
-      groundedSinceRef.current = null;
-      lastGroundActionRef.current = null;
-      setIsGrounded(false);
-    }
-  }, [stage, locking, player.collided, gameOver, level, resetPlayer]);
-
-  useEffect(() => {
-    const isSpawningNewPlayer = player.pos.x === 5 && player.pos.y === 0 && !player.collided;
-    if (isSpawningNewPlayer && checkCollision(player, stage, { x: 0, y: 0 })) {
-      setDropTime(null);
-      setStartGameOverSequence(true);
-    }
-  }, [player, stage]);
-
+  // Xử lý khi startGameOverSequence=true
   useEffect(() => {
     if (startGameOverSequence && !gameOver) {
-      updatePlayerPos({ x: 0, y: 0, collided: true });
-      setGameOver(true);
-      setTimerOn(false);
-      clearInactivity();
-      clearCap();
-      capExpiredRef.current = false;
-      groundedSinceRef.current = null;
-      lastGroundActionRef.current = null;
-      setIsGrounded(false);
+      updatePlayerPos({ x: 0, y: 0, collided: true }); // Đảm bảo khối cuối cùng được vẽ
+      setGameOver(true); // Set game over thực sự
+      setTimerOn(false); // Dừng timer
+      // Dọn dẹp timers
+      clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
+      setDropTime(null); // Dừng rơi
     }
-  }, [startGameOverSequence, gameOver, updatePlayerPos]);
+  }, [startGameOverSequence, gameOver, updatePlayerPos, clearInactivity, clearCap]); // Thêm dependencies
+
+  // Cập nhật số dòng đã xóa và kiểm tra win
+  useEffect(() => {
+    if (rowsCleared > 0) {
+      setRows((prev) => prev + rowsCleared);
+    }
+  }, [clearEventId, rowsCleared, setRows]); // Sử dụng clearEventId để trigger đúng 1 lần
 
   useEffect(() => {
-    if (!gameOver) { setShowGameOverOverlay(false); return; }
-    const duration = 1000;
-    const height = stage.length;
-    const start = performance.now();
-    const animate = (t: number) => {
-      const elapsed = t - start;
-      const p = Math.min(1, elapsed / duration);
-      const rowsToWhite = Math.floor(p * height);
-      setStage((prev) => {
-        const copy = prev.map((r) => r.slice()) as any[];
-        for (let i = 0; i < rowsToWhite; i++) {
-          const rowIdx = copy.length - 1 - i;
-          if (rowIdx >= 0) {
-            copy[rowIdx] = (copy[rowIdx] as any[]).map((cell: any) => {
-              const occupied = cell && cell[0] !== 0 && cell[0] !== '0';
-              return occupied ? ['W', 'merged'] : cell;
-            });
-          }
-        }
-        return copy as any;
-      });
-      if (p < 1) {
-        whiteoutRaf.current = requestAnimationFrame(animate);
-      } else {
-        setTimeout(() => setShowGameOverOverlay(true), 200);
-      }
-    };
-    whiteoutRaf.current = requestAnimationFrame(animate);
-    return () => { if (whiteoutRaf.current) cancelAnimationFrame(whiteoutRaf.current); };
-  }, [gameOver, stage.length, setStage]);
+    if (!win && rows >= gameSettings.linesToClear) {
+      setWin(true);
+      setTimerOn(false);
+      setDropTime(null);
+    }
+  }, [rows, win, gameSettings.linesToClear]);
 
+  // Đếm thời gian
   useEffect(() => {
     if (!timerOn) return;
     let raf = 0;
@@ -366,73 +472,67 @@ export function useSinglePlayerLogic() {
     return () => cancelAnimationFrame(raf);
   }, [timerOn]);
 
-  useEffect(() => { if (rowsCleared > 0) { setRows((prev) => prev + rowsCleared); } }, [clearEventId]);
-
-  useEffect(() => { if (!win && rows >= gameSettings.linesToClear) { setWin(true); setTimerOn(false); setDropTime(null); } }, [rows, win, gameSettings.linesToClear]);
-
+  // Cập nhật trạng thái chạm đất và timers dựa trên player/stage
   useEffect(() => {
     const currKey = JSON.stringify(player.tetromino);
     const prev = prevPlayerRef.current;
     prevPlayerRef.current = { x: player.pos.x, y: player.pos.y, rotKey: currKey };
-    if (gameOver || startGameOverSequence || countdown !== null) {
-      clearInactivity();
-      clearCap();
-      capExpiredRef.current = false;
-      groundedSinceRef.current = null;
-      lastGroundActionRef.current = null;
-      setIsGrounded(false);
+
+    if (gameOver || startGameOverSequence || player.collided || locking) {
+      // Dọn dẹp timers nếu game over hoặc đã lock
+      clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
       return;
     }
-    if (player.collided) return;
+
     const touching = checkCollision(player, stage, { x: 0, y: 1 });
+
     if (touching) {
-      if (!isGrounded) startGroundTimers();
-      else if (prev && (prev.x !== player.pos.x || prev.y !== player.pos.y || prev.rotKey !== currKey)) onGroundAction();
-    } else if (isGrounded) {
-      clearInactivity();
-      clearCap();
-      capExpiredRef.current = false;
-      groundedSinceRef.current = null;
-      lastGroundActionRef.current = null;
-      setIsGrounded(false);
-      setDropTime(getFallSpeed(level));
+      if (!isGrounded) {
+        startGroundTimers(); // Mới chạm đất
+      } else {
+        // Đã chạm đất, kiểm tra có hành động không
+         if (prev && (prev.x !== player.pos.x || prev.y !== player.pos.y || prev.rotKey !== currKey)) {
+             onGroundAction(); // Có di chuyển/xoay khi chạm đất
+         }
+      }
+    } else {
+      if (isGrounded) {
+        // Nhấc khỏi đất
+        clearInactivity(); clearCap(); capExpiredRef.current = false; groundedSinceRef.current = null; lastGroundActionRef.current = null; setIsGrounded(false);
+        setDropTime(getFallSpeed(level)); // Bắt đầu rơi lại
+      }
     }
-  }, [player, stage, gameOver, startGameOverSequence, countdown, level, isGrounded]);
+  }, [player, stage, gameOver, startGameOverSequence, locking, isGrounded, level, startGroundTimers, onGroundAction, clearInactivity, clearCap]); // Thêm dependencies
 
-  useEffect(() => () => { clearInactivity(); clearCap(); clearAFKTimer(); }, []);
-  useEffect(() => { return () => {}; }, [countdown, gameOver, startGameOverSequence]);
+  // Dọn dẹp timers khi unmount
+  useEffect(() => () => { clearInactivity(); clearCap(); /* clearAFKTimer(); */ }, [clearInactivity, clearCap]);
 
-  const onWinPlayAgain = () => { setWin(false); setCountdown(3); };
-  const onGameOverTryAgain = () => { setGameOver(false); setShowGameOverOverlay(false); setCountdown(3); };
-
+  // --- TRẢ VỀ STATE VÀ ACTIONS CHO UI ---
   return {
-    // refs and handlers
-    wrapperRef,
-    handleKeyDown,
-    handleKeyUp,
-    // stage & pieces
     stage,
-    gameSettings,
+    player, // UI cần player để vẽ ghost piece
     hold,
     nextFour,
-    // status
+    gameOver,
+    startGameOverSequence, // UI cần biết để bắt đầu animation
+    win,
     rows,
     level,
     elapsedMs,
     piecesPlaced,
     inputs,
     holds,
-    // flags
-    countdown,
-    timerOn,
-    gameOver,
-    showGameOverOverlay,
-    win,
-    // actions
-    startGame,
-    onWinPlayAgain,
-    onGameOverTryAgain,
-  } as const;
-}
+    gameSettings, // Trả về settings để UI biết hiển thị gì
 
-export default useSinglePlayerLogic;
+    // Actions
+    startGame,
+    movePlayer,
+    rotatePlayer,
+    hardDrop,
+    holdPiece,
+    setMoveIntent, // UI cần để xử lý keyUp
+    setDropTime,   // UI cần để xử lý soft drop keyUp
+    updatePlayerPos,
+    setIsSoftDropping// UI cần để xử lý soft drop keyDown
+  };
+};

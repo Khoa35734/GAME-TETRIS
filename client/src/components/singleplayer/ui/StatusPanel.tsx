@@ -1,54 +1,86 @@
 import React from 'react';
+import styled from 'styled-components';
+
+const PanelWrapper = styled.div`
+  background: rgba(20, 20, 22, 0.45); // Tăng độ mờ lên chút
+  padding: 10px 12px; // Điều chỉnh padding
+  border-radius: 10px;
+  color: #fff;
+  font-size: 13px;
+  backdrop-filter: blur(5px); // Thêm hiệu ứng blur
+  border: 1px solid rgba(255, 255, 255, 0.1); // Thêm viền nhẹ
+`;
+
+const Title = styled.div`
+  font-weight: 700;
+  margin-bottom: 8px;
+  font-size: 15px;
+  color: #ddd; // Màu tiêu đề
+  text-transform: uppercase; // Viết hoa
+  letter-spacing: 0.5px; // Giãn chữ
+`;
+
+const StatRow = styled.div`
+  margin-bottom: 5px; // Giảm khoảng cách
+  display: flex;
+  justify-content: space-between; // Căn đều 2 bên
+  line-height: 1.4;
+`;
+
+const StatLabel = styled.span`
+  color: #999; // Màu nhãn nhạt hơn
+`;
+
+const StatValue = styled.span`
+  font-weight: 600;
+  color: #eee; // Màu giá trị sáng hơn
+`;
 
 interface Props {
-  rows: number;
-  level: number;
-  elapsedMs: number;
-  piecesPlaced: number;
-  inputs: number;
-  holds: number;
-  linesToClear: number;
+  rows: number; level: number; elapsedMs: number; piecesPlaced: number; inputs: number; holds: number; linesToClear: number;
+  style?: React.CSSProperties;
 }
 
-export const StatusPanel: React.FC<Props> = ({ rows, level, elapsedMs, piecesPlaced, inputs, holds, linesToClear }) => {
+export const StatusPanel: React.FC<Props> = ({ rows, level, elapsedMs, piecesPlaced, inputs, holds, linesToClear, style }) => {
+  const pps = elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00';
+  const finesse = piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00';
+  const timeStr = (elapsedMs / 1000).toFixed(2);
+
   return (
-    <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff', fontSize: 13 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 15 }}>STATUS</div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Lines:</span>{' '}
-        <span style={{ fontWeight: 600 }}>{rows}</span>
-        <span style={{ color: '#666' }}> / {linesToClear}</span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Level:</span> <span style={{ fontWeight: 600 }}>{level + 1}</span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Time:</span> <span style={{ fontWeight: 600 }}>{(elapsedMs / 1000).toFixed(2)}s</span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>PPS:</span>{' '}
-        <span style={{ fontWeight: 600 }} title={`Pieces: ${piecesPlaced}, Time: ${(elapsedMs / 1000).toFixed(2)}s`}>
-          {elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00'}
-        </span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Pieces:</span> <span style={{ fontWeight: 600 }}>{piecesPlaced}</span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Inputs:</span> <span style={{ fontWeight: 600 }}>{inputs}</span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Holds:</span> <span style={{ fontWeight: 600 }}>{holds}</span>
-      </div>
-      <div style={{ marginBottom: 4 }}>
-        <span style={{ color: '#888' }}>Finesse:</span>{' '}
-        <span style={{ fontWeight: 600 }}>
-          {piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00'}
-        </span>
-      </div>
-    </div>
+    <PanelWrapper style={style}>
+      <Title>Status</Title>
+      <StatRow>
+        <StatLabel>Lines:</StatLabel>
+        <StatValue>{rows} <span style={{ color: '#666', fontSize: '11px' }}> / {linesToClear}</span></StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>Level:</StatLabel>
+        <StatValue>{level + 1}</StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>Time:</StatLabel>
+        <StatValue>{timeStr}s</StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>PPS:</StatLabel>
+        <StatValue>{pps}</StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>Pieces:</StatLabel>
+        <StatValue>{piecesPlaced}</StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>Inputs:</StatLabel>
+        <StatValue>{inputs}</StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>Holds:</StatLabel>
+        <StatValue>{holds}</StatValue>
+      </StatRow>
+      <StatRow>
+        <StatLabel>Finesse:</StatLabel>
+        <StatValue>{finesse}</StatValue>
+      </StatRow>
+    </PanelWrapper>
   );
 };
-
-export default React.memo(StatusPanel);
-
