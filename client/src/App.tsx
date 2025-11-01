@@ -16,7 +16,6 @@ import Versus from './components/Versus';
 import OnlineCreateRoom from './components/OnlineCreateRoom';
 import OnlineJoinRoom from './components/OnlineJoinRoom';
 import RoomLobby from './components/RoomLobby';
-import Inbox from './components/Inbox';
 import SinglePlayerSettings from './components/SinglePlayerSettings';
 import OnlineRanked from './components/OnlineRanked';
 import OnlineCasual from './components/OnlineCasual';
