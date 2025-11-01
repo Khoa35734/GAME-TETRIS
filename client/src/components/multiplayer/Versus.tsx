@@ -104,7 +104,7 @@ const Versus: React.FC = () => {
             autoExitTimerRef.current = null;
           }
           cleanupWebRTC('manual-exit');
-          navigate('/');
+          navigate('/?modes=1');
         }}
         style={{ position: 'fixed', top: 12, left: 12, zIndex: 999, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}
       >
@@ -525,7 +525,7 @@ const Versus: React.FC = () => {
                     autoExitTimerRef.current = null;
                   }
                   cleanupWebRTC('manual-exit');
-                  navigate('/');
+                  navigate('/?modes=1');
                 }}
                 style={{ 
                   padding: '14px 32px', 

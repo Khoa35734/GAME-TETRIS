@@ -253,7 +253,7 @@ const OnlineMenu: React.FC = () => {
           />
         </div>
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/?modes=1')}
           style={{
             width: '100%',
             padding: '12px',

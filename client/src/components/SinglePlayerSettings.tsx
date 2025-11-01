@@ -26,7 +26,7 @@ const SinglePlayerSettings: React.FC = () => {
   };
 
   const handleBack = () => {
-    navigate('/');
+    navigate('/?modes=1');
   };
 
   return (

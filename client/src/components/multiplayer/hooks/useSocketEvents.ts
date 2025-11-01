@@ -337,7 +337,7 @@ export const useSocketEvents = (props: SocketEventProps) => {
           setAutoExitCountdown(null);
           if (meId) socket.emit('ranked:leave', meId);
           cleanupWebRTC('auto-exit');
-          navigate('/');
+          navigate('/?modes=1');
         }
       }, 1000);
     };

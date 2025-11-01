@@ -14,7 +14,8 @@ const io = new Server(server, {
       if (!origin) return callback(null, true);
 
       // ✅ Cho phép tất cả IP thuộc mạng nội bộ + localhost
-      const allowedPattern = /^http:\/\/(localhost|127\.0\.0\.1|(10|172\.(1[6-9]|2\d|3[0-1])|192\.168)\.\d+\.\d+)(:\d+)?$/;
+      // Đã SỬA: RegExp này xử lý đúng 10.x.x.x, 172.16-31.x.x, và 192.168.x.x
+      const allowedPattern = /^http:\/\/(localhost|127\.0\.0\.1|10(\.\d+){3}|172\.(1[6-9]|2\d|3[0-1])(\.\d+){2}|192\.168(\.\d+){2})(:\d+)?$/;
 
       if (allowedPattern.test(origin)) {
         // Dòng log này sẽ xác nhận điện thoại của bạn được phép
@@ -31,7 +32,7 @@ const io = new Server(server, {
 });
 
 // ===============================
-// ?? Middleware x�c th?c socket
+// ?? Middleware xc th?c socket
 // ===============================
 io.use((socket, next) => {
   const { token, accountId, username } = socket.handshake.auth || {};
@@ -41,7 +42,7 @@ io.use((socket, next) => {
     return next(new Error('Authentication error'));
   }
 
-  // G?n d? li?u user l�n socket
+  // G?n d? li?u user ln socket
   (socket as any).accountId = Number(accountId);
   (socket as any).username = username || `User${accountId}`;
 
