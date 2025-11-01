@@ -21,7 +21,8 @@ const corsOptions = {
     // - 172.16.0.0 – 172.31.255.255
     // - 192.168.0.0 – 192.168.255.255
     // - localhost, 127.0.0.1
-    const allowedPattern = /^http:\/\/(localhost|127\.0\.0\.1|(10|172\.(1[6-9]|2\d|3[0-1])|192\.168)\.\d+\.\d+)(:\d+)?$/;
+    // Đã SỬA: RegExp này xử lý đúng 10.x.x.x, 172.16-31.x.x, và 192.168.x.x
+    const allowedPattern = /^http:\/\/(localhost|127\.0\.0\.1|10(\.\d+){3}|172\.(1[6-9]|2\d|3[0-1])(\.\d+){2}|192\.168(\.\d+){2})(:\d+)?$/;
 
     if (allowedPattern.test(origin)) {
       console.log('[CORS] ✅ Allowed origin:', origin);

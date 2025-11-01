@@ -902,7 +902,7 @@ export const useVersusState = (urlRoomId: string | undefined) => {
           
           if (meId) socket.emit('ranked:leave', meId);
           cleanupWebRTC('auto-exit');
-          navigate('/');
+          navigate('/?mode=1');
         }
       }, 1000);
     };
