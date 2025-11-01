@@ -236,7 +236,9 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
     // ====================================================================
     // Client 'Versus.tsx' gửi 'game:topout', không phải 'player:topout'.
     // Client cũng lắng nghe 'game:over', không phải 'match:end'.
-       socket.on('game:topout', async (roomId: string, reason: string) => {
+     // File: src/handles/socketHandlers.ts
+
+    socket.on('game:topout', async (roomId: string, reason: string) => {
       if (!roomId) {
         console.warn(`[Socket] ⚠️ ${socket.id} sent 'game:topout' without a roomId.`);
         return;
@@ -245,22 +247,34 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
       console.log(`[Socket] 🛑 Player ${socket.id} topped out in room ${roomId}. Reason: ${reason}`);
 
       try {
-        const result = await matchManager.resolveTopout(roomId, socket.id);
-        if (!result) {
-          console.warn(`[Socket] ⚠️ Unable to resolve topout for room ${roomId}`);
-          return;
-        }
+        // [SỬA LỖI BO3] - Bước 1: Kiểm tra xem đây có phải là trận BO3 không
+        const bo3Match = matchmaking.bo3MatchManager.getMatch(roomId); // Tên hàm đúng là 'getMatch'
 
-        io.to(roomId).emit('game:over', {
-          winner: result.winnerId ?? null,
-          loser: result.loserId,
-          reason: reason || 'Topout',
-        });
+        if (bo3Match) {
+          // [SỬA LỖI BO3] - Bước 2: Nếu ĐÚNG, để BO3 manager xử lý
+          console.log(`[Socket] 🏆 Resolving topout via BO3MatchManager for room ${roomId}`);
+          // Gọi hàm 'handleGameTopout' MỚI mà chúng ta vừa thêm
+          matchmaking.bo3MatchManager.handleGameTopout(roomId, socket.id, reason);
+        } else {
+          // [SỬA LỖI BO3] - Bước 3: Nếu KHÔNG, dùng logic BO1 cũ (ví dụ: trận casual)
+          console.log(`[Socket] 🏁 Resolving topout via generic matchManager (BO1) for room ${roomId}`);
+          const result = await matchManager.resolveTopout(roomId, socket.id);
+          if (!result) {
+            console.warn(`[Socket] ⚠️ Unable to resolve topout for room ${roomId}`);
+            return;
+          }
+
+          // Gửi 'game:over' (sự kiện BO1)
+          io.to(roomId).emit('game:over', {
+            winner: result.winnerId ?? null,
+            loser: result.loserId,
+            reason: reason || 'Topout',
+          });
+        }
       } catch (error) {
         console.error(`[Socket] ❌ Error resolving topout in ${roomId}:`, error);
       }
     });
-
     socket.on('disconnect', async (reason) => {
       console.log(`\n[Socket] ⛔ User disconnected: ${username} (${accountId})`);
       console.log(`[Socket] Reason: ${reason}`);

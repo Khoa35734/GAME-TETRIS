@@ -65,6 +65,20 @@ export const useVersusState = (urlRoomId: string | undefined) => {
   const playerRoleRef = useRef<'player1' | 'player2' | null>(playerRole);
   const seriesCurrentGameRef = useRef(seriesCurrentGame);
   
+  // Seed role from localStorage early to avoid null during first results
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('tetris:playerRole');
+      if (stored === 'player1' || stored === 'player2') {
+        if (!playerRoleRef.current) {
+          setPlayerRole(stored);
+          playerRoleRef.current = stored;
+          console.log('[Versus] Restored playerRole from storage:', stored);
+        }
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     let resolvedId: string | null = null;
     let resolvedName = 'Bạn';

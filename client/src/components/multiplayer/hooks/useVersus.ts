@@ -1,3 +1,4 @@
+// File: src/hooks/useVersus/hooks/useVersus.ts
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import socket from '../../../socket';
@@ -11,6 +12,16 @@ import { useSeriesState } from './useSeriesState';
 import { useMechanics } from './useMechanics';
 import { useNetwork } from './useNetwork';
 import { useSocketEvents } from './useSocketEvents';
+
+/**
+ * 🔽 ĐỊNH NGHĨA STATE MỚI CHO ROUND 🔽
+ * State này sẽ lưu kết quả của 1 game (ví dụ: 1-0)
+ * và sẽ bị xóa (thành null) trước game tiếp theo.
+ */
+export type RoundResult = {
+  outcome: 'win' | 'lose';
+  score: { me: number; opp: number };
+} | null;
 
 /**
  * Hook tổng hợp cho Versus mode - kết hợp tất cả các hook con
@@ -29,7 +40,11 @@ export const useVersus = (urlRoomId: string | undefined) => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [timerOn, setTimerOn] = useState(false);
+  
+  // State cho KẾT QUẢ TRẬN ĐẤU CUỐI CÙNG (BO3)
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+  // 🔽 STATE MỚI: KẾT QUẢ CỦA 1 GAME (ví dụ: 1-0) 🔽
+  const [roundResult, setRoundResult] = useState<RoundResult>(null);
   
   // Game over animation state
   const [myFillWhiteProgress, setMyFillWhiteProgress] = useState(0);
@@ -79,6 +94,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
   });
   
   // === 3. SERIES STATE ===
+  // 🔽 LẤY TẤT CẢ STATE VÀ SETTERS TỪ HOOK NÀY 🔽
   const series = useSeriesState();
   
   // === 4. NETWORK (WebRTC, UDP, Ping) ===
@@ -89,8 +105,9 @@ export const useVersus = (urlRoomId: string | undefined) => {
     nextFour,
     hold,
     onOpponentTopout: (reason) => {
+      // Logic này chỉ dành cho UDP, logic BO3 sẽ do useSocketEvents xử lý
       setOppGameOver(true);
-      setMatchResult({ outcome: 'win', reason });
+      // setMatchResult({ outcome: 'win', reason }); // 🔽 BỎ COMMENT NÀY NẾU CẦN
     },
     onGarbageReceived: (lines) => {
       garbage.receiveGarbage(lines);
@@ -142,6 +159,13 @@ export const useVersus = (urlRoomId: string | undefined) => {
     
     setIncomingGarbage: garbage.setIncomingGarbage,
     setGarbageToSend: garbage.setGarbageToSend,
+    
+    // 🔽 TRUYỀN CÁC SETTERS CẦN THIẾT CHO LOGIC BO3 🔽
+    setRoundResult,
+    setSeriesScore: series.applySeriesScore, // Đổi tên để khớp với hàm trong useSeriesState
+    setSeriesCurrentGame: series.setSeriesCurrentGame,
+    setPlayerRole: series.setPlayerRole,
+    playerRoleRef: series.playerRoleRef, // Truyền ref để listener luôn có giá trị mới nhất
   });
   
   // === 6. MECHANICS (Movement, Rotation, Lock) ===
@@ -150,7 +174,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
     setters: coreSetters,
     sendInput: network.sendInput,
     sendGarbage: network.sendGarbage,
-    sendTopout: network.sendTopout,
+    sendTopout: network.sendTopout, // Hàm này sẽ kích hoạt 'game:topout' -> server xử lý BO3
     cancelGarbage: garbage.cancelGarbage,
     triggerGarbageApply: garbage.triggerGarbageApply,
     resetAFKTimer: socketEvents.resetAFKTimer,
@@ -196,7 +220,8 @@ export const useVersus = (urlRoomId: string | undefined) => {
     meId,
     debugInfo,
     isRtcReady: network.isRtcReady,
-    matchResult,
+    matchResult,       // 🔽 Kết quả CUỐI CÙNG
+    roundResult,       // 🔽 Kết quả 1 GAME
     autoExitCountdown: socketEvents.autoExitCountdown,
     countdown,
     disconnectCountdown: socketEvents.disconnectCountdown,

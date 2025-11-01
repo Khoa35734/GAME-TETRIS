@@ -6,6 +6,7 @@ import { useVersus } from './hooks/useVersus'; // 👈 IMPORT HOOK MỚI ĐÃ T�
 import Stage from '../Stage';
 import { HoldPanel, NextPanel } from '../SidePanels';
 import GarbageQueueBar from '../GarbageQueueBar'; // Giả sử file này cũng ở root components
+import { ScoreUpdateOverlay } from './ScoreUpdateOverlay'; // 👈 IMPORT OVERLAY MỚI
 
 // Import tài nguyên (với đường dẫn đã sửa)
 import bgImg from '../../../img/bg.jpg'; // 👈 ĐÃ SỬA ĐƯỜNG DẪN
@@ -30,6 +31,7 @@ const Versus: React.FC = () => {
     udpStatsRef,
     autoExitTimerRef,
     matchResult,
+    roundResult, // 👈 THÊM ROUND RESULT
     autoExitCountdown,
     countdown,
     disconnectCountdown,
@@ -402,6 +404,42 @@ const Versus: React.FC = () => {
               {result.outcome === 'win' ? '🎉 CHIẾN THẮNG!' : result.outcome === 'lose' ? '😢 THẤT BẠI' : '🤝 HÒA TRẬN'}
             </div>
 
+            {/* Series Score Display */}
+            <div style={{
+              fontSize: 32,
+              fontWeight: 800,
+              marginBottom: 16,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 16,
+            }}>
+              <span style={{ 
+                color: result.outcome === 'win' ? '#4CAF50' : '#fff',
+                textShadow: '2px 2px 8px rgba(0,0,0,0.4)'
+              }}>
+                {seriesScore.me}
+              </span>
+              <span style={{ opacity: 0.5, fontSize: 24 }}>-</span>
+              <span style={{ 
+                color: result.outcome === 'lose' ? '#F44336' : '#fff',
+                textShadow: '2px 2px 8px rgba(0,0,0,0.4)'
+              }}>
+                {seriesScore.opponent}
+              </span>
+            </div>
+
+            {/* Best of X indicator */}
+            <div style={{
+              fontSize: 14,
+              opacity: 0.7,
+              marginBottom: 24,
+              fontWeight: 600,
+            }}>
+              Best of {seriesBestOf}
+            </div>
+
             {/* Reason */}
             {result.reason && (
               <div style={{ 
@@ -569,6 +607,19 @@ const Versus: React.FC = () => {
         </div>
         );
       })()}
+
+      {/* Score Update Overlay - Hiển thị khi thắng/thua 1 ván */}
+      {roundResult && (
+        <ScoreUpdateOverlay
+          show={true}
+          outcome={roundResult.outcome}
+          newScore={roundResult.score}
+          winsRequired={seriesWinsRequired}
+          onComplete={() => {
+            // Overlay sẽ tự đóng, không cần làm gì
+          }}
+        />
+      )}
     </div>
   );
 };

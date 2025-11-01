@@ -44,7 +44,7 @@ interface PenaltyRecord {
 
 class MatchmakingSystem {
   private io: Server;
-  private bo3MatchManager: BO3MatchManager;
+  public bo3MatchManager: BO3MatchManager;
   private casualQueue: Player[] = [];
   private rankedQueue: Player[] = [];
   private activeMatches: Map<string, Match> = new Map();
