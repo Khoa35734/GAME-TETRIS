@@ -158,7 +158,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
     countdown,
     matchResult,
     onOpponentGarbageSent: (lines) => {
-      garbage.setOpponentIncomingGarbage(prev => prev + lines);
+      garbage.setGarbageToSend(prev => prev + lines);
       setTimeout(() => {
         garbage.setOpponentIncomingGarbage(prev => Math.max(0, prev - lines));
       }, 500);
