@@ -17,13 +17,9 @@ import OnlineCreateRoom from './components/OnlineCreateRoom';
 import OnlineJoinRoom from './components/menu/OnlineJoinRoom';
 import RoomLobby from './components/menu/RoomLobby';
 import Inbox from './components/menu/Inbox';
-import OnlineJoinRoom from './components/OnlineJoinRoom';
-import RoomLobby from './components/RoomLobby';
 import SinglePlayerSettings from './components/SinglePlayerSettings';
 import OnlineRanked from './components/OnlineRanked';
 import OnlineCasual from './components/menu/OnlineCasual';
-import OnlineCasual from './components/OnlineCasual';
-import Inbox from './components/Inbox'; // 📬 Inbox component
 import Leaderboard from './components/Leaderboard'; // 🏆 Leaderboard component
 
 const Home: React.FC = () => {
