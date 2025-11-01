@@ -12,7 +12,7 @@ import BroadcastMessages from './components/admin/BroadcastMessages';
 import Tetris from './components/singleplayer/Tetris';
 import HomeMenu from './components/menu/HomeMenu';
 import OnlineMenu from './components/menu/OnlineMenu';
-import Versus from './components/Versus';
+import Versus from './components/multiplayer/Versus';
 import OnlineCreateRoom from './components/OnlineCreateRoom';
 import OnlineJoinRoom from './components/menu/OnlineJoinRoom';
 import RoomLobby from './components/menu/RoomLobby';

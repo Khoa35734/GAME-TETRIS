@@ -3,7 +3,7 @@ import styled from "styled-components";
 type Props = {
   height: number;
   width: number;
-  showGhost?: boolean;
+  $showGhost?: boolean;
 };
 
 export const StyledStage = styled.div<Props>`
@@ -43,7 +43,7 @@ export const StyledStage = styled.div<Props>`
   }
 
   ${(props) =>
-    !props.showGhost &&
+    !props.$showGhost &&
     `
       div[data-ghost="true"] {
         opacity: 0 !important;

@@ -6,7 +6,7 @@ import { useGameStatus } from '../../hooks/useGameStatus';
 import { useInterval } from '../../hooks/useInterval';
 import { getFallSpeed } from './getFallSpeed'; // Tách hàm getFallSpeed ra file riêng
 const MAX_LEVEL = 29; // Define locally since MAX_LEVEL is not exported from getFallSpeed.ts
-import { DAS_DELAY, MOVE_INTERVAL, INACTIVITY_LOCK_MS, HARD_CAP_MS, HARD_DROP_DELAY, DCD } from './constants'; // Tách hằng số ra file riêng
+import { DAS_DELAY, MOVE_INTERVAL, INACTIVITY_LOCK_MS, HARD_CAP_MS, HARD_DROP_DELAY } from './constants'; // Tách hằng số ra file riêng
 
 // (Bạn có thể cần định nghĩa lại kiểu Player/Stage hoặc import từ nơi khác nếu cần)
 type GameSettings = {
@@ -37,7 +37,6 @@ export const useSinglePlayerLogic = (gameSettings: GameSettings) => {
   const [inputs, setInputs] = useState(0);
   const [holds, setHolds] = useState(0);
   const [isSoftDropping, setIsSoftDropping] = useState(false);
-  const softDropTimeoutRef = useRef<number | null>(null);
   const inactivityTimeoutRef = useRef<number | null>(null);
   const capTimeoutRef = useRef<number | null>(null);
   const capExpiredRef = useRef<boolean>(false);
@@ -261,7 +260,6 @@ const movePlayer = useCallback((dir: number): boolean => {
     // Lấy player hiện tại để tính toán
     const currentPiece = player.tetromino;
     const currentX = player.pos.x;
-    const currentY = player.pos.y;
     const stageWidth = stage[0]?.length; // Lấy chiều rộng stage
 
     // Tính vị trí X mới dự định

@@ -2,9 +2,10 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createStage, checkCollision } from '../../game/gamehelper';
+import { createStage } from '../../game/gamehelper';
 // Styled Components
 import { StyledTetris, StyledTetrisWrapper } from '../styles/StyledTetris'; // Sửa đường dẫn nếu cần
+import bg2 from '../../../img/bg2.gif';
 
 // Custom Hook mới
 import { useSinglePlayerLogic } from './useSinglePlayerLogic';
@@ -70,7 +71,7 @@ const Tetris: React.FC = () => {
     rows, level, elapsedMs, piecesPlaced, inputs, holds,
     // gameSettings đã có ở trên
     startGame: startGameLogic, movePlayer, rotatePlayer, hardDrop, holdPiece,
-    setMoveIntent, setDropTime, updatePlayerPos, setIsSoftDropping,
+    setMoveIntent, setDropTime, setIsSoftDropping,
   } = useSinglePlayerLogic(gameSettings);
 
   // State và ref cho whiteout animation (UI state)
@@ -256,19 +257,23 @@ useEffect(() => {
 
   // --- RENDER UI ---
   return (
-    <StyledTetrisWrapper
+      <StyledTetrisWrapper
       ref={wrapperRef}
       role="button"
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
       style={{
-        background: `url('/img/bg2.gif') center/cover, #000`, // Giữ lại background
+        backgroundImage: `url(${bg2})`, // Giữ lại background
+        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+        backgroundRepeat: 'no-repeat',
+        backgroundColor: '#000',
         backgroundAttachment: 'fixed',
       }}
     >
       {/* Nút Thoát */}
-      <button onClick={() => navigate('/')} style={{ position: 'fixed', top: 12, left: 12, zIndex: 999, /* ... */ }}>
+      <button onClick={() => navigate('/?modes=1')} style={{ position: 'fixed', top: 12, left: 12, zIndex: 999, /* ... */ }}>
         ← Thoát
       </button>
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MatchmakingUI from '../MatchmakingUI';
+import bg2 from '../../../img/bg2.gif';
 
 const OnlineCasual: React.FC = () => {
   const navigate = useNavigate();
@@ -22,7 +23,11 @@ const OnlineCasual: React.FC = () => {
     <div
       style={{
         minHeight: '100vh',
-        background: `url('/img/bg2.gif') center/cover, #000`,
+        backgroundImage: `url(${bg2})`,
+        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+        backgroundRepeat: 'no-repeat',
+        backgroundColor: '#000',
         backgroundAttachment: 'fixed',
         display: 'flex',
         flexDirection: 'column',
@@ -32,7 +37,7 @@ const OnlineCasual: React.FC = () => {
       }}
     >
       <button
-        onClick={() => navigate('/')}
+        onClick={() => navigate('/?modes=1')}
         style={{
           position: 'fixed',
           top: 12,

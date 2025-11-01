@@ -66,7 +66,7 @@ const Cell: React.FC<CellProps> = ({ type, isBuffer }) => {
       type={cellTypeForStyle} // Truyền type đã xử lý ('ghost', 'W', 0, 'T', 'garbage'...)
       color={color}           // Có thể là string (màu RGB) hoặc undefined
       texture={textureUrl}      // Có thể là 'url(...)' hoặc undefined
-      isBuffer={isBuffer}
+      $isBuffer={isBuffer}
     />
   );
 };

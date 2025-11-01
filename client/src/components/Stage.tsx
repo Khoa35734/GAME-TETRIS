@@ -21,7 +21,7 @@ const Stage: React.FC<Props> = ({
   const height = stage.length;
 
   return (
-    <StyledStage width={width} height={height} showGhost={showGhost}>
+    <StyledStage width={width} height={height} $showGhost={showGhost}>
       {/* 🧱 Nền texture board (brick, metal, v.v.) */}
       <BoardBackground />
 

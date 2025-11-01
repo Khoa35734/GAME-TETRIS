@@ -8,7 +8,7 @@ type Props = {
   type: string | number;
   color?: string;      // Color giờ là optional
   texture?: string;   // Thêm texture prop
-  isBuffer?: boolean;
+  $isBuffer?: boolean; // transient prop to avoid forwarding to DOM
 };
 
 export const StyledCell = styled.div<Props>`
@@ -23,7 +23,7 @@ export const StyledCell = styled.div<Props>`
     const isEmpty = props.type === 0 || props.type === "0";
 
     /* Buffer + ô trống -> transparent */
-    if (props.isBuffer && isEmpty) return "transparent";
+    if (props.$isBuffer && isEmpty) return "transparent";
 
     /* Ô trống trong board -> transparent */
     if (isEmpty) return "transparent"; // Hoặc màu nền nhẹ: "rgba(0, 0, 0, 0.3)"
@@ -71,7 +71,7 @@ export const StyledCell = styled.div<Props>`
     const isEmpty = props.type === 0 || props.type === "0";
     const typeStr = String(props.type); // typeStr giờ có thể là 'garbage'
 
-    if ((props.isBuffer && isEmpty) || isEmpty) return "none";
+  if ((props.$isBuffer && isEmpty) || isEmpty) return "none";
     if (props.type === "ghost") {
       return `
         0 0 4px rgba(255,255,255,0.6),
@@ -90,5 +90,5 @@ export const StyledCell = styled.div<Props>`
   }};
 
   /* KHÔNG dùng visibility nữa để giữ logic buffer gốc của bạn */
-  /* visibility: ${props => props.isBuffer ? 'hidden' : 'visible'}; */
+  /* visibility: ${props => props.$isBuffer ? 'hidden' : 'visible'}; */
 `;

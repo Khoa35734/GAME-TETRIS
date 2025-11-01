@@ -60,18 +60,20 @@ export default function MinoPreview({ type, size = 24, placeholder = false }: Pr
       {shape.map((row, y) =>
         row.map((cell, x) => {
           const filled = cell !== 0;
+          const background = filled
+            ? texture
+              ? `url(${texture})`
+              : "rgba(255,255,255,0.2)"
+            : "transparent";
           return (
             <div
               key={`${y}-${x}`}
               style={{
                 width: size,
                 height: size,
-                background: filled
-  ? `url(${getTetrominoTexture(type) || '/img/texture/iron.jpg'})`
-  : "transparent",
-backgroundSize: "cover",
-backgroundPosition: "center",
-
+                background,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
               }}
             />
           );
