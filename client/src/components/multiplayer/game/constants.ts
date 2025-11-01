@@ -15,7 +15,7 @@ export const HARD_CAP_MS = 3000; // Sau 3s từ lúc chạm đất đầu tiên 
 
 // --- AFK Detection ---
 export const AFK_TIMEOUT_MS = 300000; // 300 seconds (5 minutes)
-export const AFK_ENABLED = true; // Enable AFK detection
+export const AFK_ENABLED = false; // Enable AFK detection
 
 // --- Hard Drop Spam ---
 export const HARD_DROP_SPAM_INTERVAL = 200; // 200ms between drops = 5 drops/second

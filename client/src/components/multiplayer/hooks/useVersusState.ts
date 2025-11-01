@@ -150,6 +150,10 @@ export const useVersusState = (urlRoomId: string | undefined) => {
   const [myStats, setMyStats] = useState({ rows: 0, level: 1, score: 0 });
   const [oppStats, _setOppStats] = useState({ rows: 0, level: 1, score: 0 });
   
+  // 📊 Live game performance stats (PPS, APM)
+  const [piecesPlaced, setPiecesPlaced] = useState(0);
+  const [attacksSent, setAttacksSent] = useState(0);
+  
   // Ping tracking
   const [myPing, setMyPing] = useState<number | null>(null);
   const [oppPing, setOppPing] = useState<number | null>(null);
@@ -654,6 +658,10 @@ export const useVersusState = (urlRoomId: string | undefined) => {
     setOpponentIncomingGarbage(0);
     setCombo(0);
     setB2b(0);
+    
+    // 📊 Reset performance stats
+    setPiecesPlaced(0);
+    setAttacksSent(0);
     
     setMoveIntent(null);
     
@@ -1462,6 +1470,7 @@ export const useVersusState = (urlRoomId: string | undefined) => {
         const garbageLines = U.calculateGarbageLines(lines, tspinType, pc, newCombo, newB2b);
         if (garbageLines > 0) {
             sendGarbage(garbageLines);
+            setAttacksSent(prev => prev + garbageLines); // 📊 Track attacks
             setOpponentIncomingGarbage(prev => prev + garbageLines);
             setTimeout(() => {
                 setOpponentIncomingGarbage(prev => Math.max(0, prev - garbageLines));
@@ -1472,6 +1481,9 @@ export const useVersusState = (urlRoomId: string | undefined) => {
     // 3. Cập nhật state
     setCombo(newCombo);
     setB2b(newB2b);
+    
+    // 📊 Increment pieces placed counter
+    setPiecesPlaced(prev => prev + 1);
 
     // 4. Check Game Over
     if (isGameOverFromBuffer(stage)) {
@@ -1591,6 +1603,10 @@ export const useVersusState = (urlRoomId: string | undefined) => {
     isApplyingGarbage,
     garbageToSend,
     myStats,
+    
+    // 📊 Live performance stats
+    piecesPlaced,
+    attacksSent,
     
     // Opponent Info
     opponentName,
