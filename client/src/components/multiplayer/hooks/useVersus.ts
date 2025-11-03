@@ -1,3 +1,4 @@
+// File: src/hooks/useVersus/hooks/useVersus.ts
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import socket from '../../../socket';
@@ -11,6 +12,16 @@ import { useSeriesState } from './useSeriesState';
 import { useMechanics } from './useMechanics';
 import { useNetwork } from './useNetwork';
 import { useSocketEvents } from './useSocketEvents';
+
+/**
+ * 🔽 ĐỊNH NGHĨA STATE MỚI CHO ROUND 🔽
+ * State này sẽ lưu kết quả của 1 game (ví dụ: 1-0)
+ * và sẽ bị xóa (thành null) trước game tiếp theo.
+ */
+export type RoundResult = {
+  outcome: 'win' | 'lose';
+  score: { me: number; opp: number };
+} | null;
 
 /**
  * Hook tổng hợp cho Versus mode - kết hợp tất cả các hook con
@@ -29,7 +40,11 @@ export const useVersus = (urlRoomId: string | undefined) => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [timerOn, setTimerOn] = useState(false);
+  
+  // State cho KẾT QUẢ TRẬN ĐẤU CUỐI CÙNG (BO3)
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
+  // 🔽 STATE MỚI: KẾT QUẢ CỦA 1 GAME (ví dụ: 1-0) 🔽
+  const [roundResult, setRoundResult] = useState<RoundResult>(null);
   
   // Game over animation state
   const [myFillWhiteProgress, setMyFillWhiteProgress] = useState(0);
@@ -38,6 +53,26 @@ export const useVersus = (urlRoomId: string | undefined) => {
   // Game stats
   const [myStats, setMyStats] = useState({ rows: 0, level: 1, score: 0 });
   const [oppStats, _setOppStats] = useState({ rows: 0, level: 1, score: 0 });
+  // Opponent live performance stats (synced via server)
+  const [oppPiecesPlaced, setOppPiecesPlaced] = useState(0);
+  const [oppAttacksSent, setOppAttacksSent] = useState(0);
+  const [oppElapsedMs, setOppElapsedMs] = useState(0);
+  
+  // 📊 Live performance stats
+  const [piecesPlaced, setPiecesPlaced] = useState(0);
+  const [attacksSent, setAttacksSent] = useState(0);
+
+  // 🔽 [SỬA LỖI 1A] Tạo refs để lưu giá trị state mới nhất cho interval
+  // Điều này ngăn việc interval bị "stale closure" (dùng giá trị cũ)
+  const piecesPlacedRef = useRef(piecesPlaced);
+  const attacksSentRef = useRef(attacksSent);
+  const elapsedMsRef = useRef(elapsedMs);
+
+  // 🔽 [SỬA LỖI 1B] Cập nhật refs mỗi khi state thay đổi
+  // Các useEffect này nhẹ hơn nhiều so với việc tạo lại interval
+  useEffect(() => { piecesPlacedRef.current = piecesPlaced; }, [piecesPlaced]);
+  useEffect(() => { attacksSentRef.current = attacksSent; }, [attacksSent]);
+  useEffect(() => { elapsedMsRef.current = elapsedMs; }, [elapsedMs]);
   
   // Opponent board state
   const [oppStage, setOppStage] = useState<any[][]>(() => createStage());
@@ -79,6 +114,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
   });
   
   // === 3. SERIES STATE ===
+  // 🔽 LẤY TẤT CẢ STATE VÀ SETTERS TỪ HOOK NÀY 🔽
   const series = useSeriesState();
   
   // === 4. NETWORK (WebRTC, UDP, Ping) ===
@@ -89,8 +125,9 @@ export const useVersus = (urlRoomId: string | undefined) => {
     nextFour,
     hold,
     onOpponentTopout: (reason) => {
+      // Logic này chỉ dành cho UDP, logic BO3 sẽ do useSocketEvents xử lý
       setOppGameOver(true);
-      setMatchResult({ outcome: 'win', reason });
+      // setMatchResult({ outcome: 'win', reason }); // 🔽 BỎ COMMENT NÀY NẾU CẦN
     },
     onGarbageReceived: (lines) => {
       garbage.receiveGarbage(lines);
@@ -142,6 +179,13 @@ export const useVersus = (urlRoomId: string | undefined) => {
     
     setIncomingGarbage: garbage.setIncomingGarbage,
     setGarbageToSend: garbage.setGarbageToSend,
+    
+    // 🔽 TRUYỀN CÁC SETTERS CẦN THIẾT CHO LOGIC BO3 🔽
+    setRoundResult,
+    setSeriesScore: series.applySeriesScore, // Đổi tên để khớp với hàm trong useSeriesState
+    setSeriesCurrentGame: series.setSeriesCurrentGame,
+    setPlayerRole: series.setPlayerRole,
+    playerRoleRef: series.playerRoleRef, // Truyền ref để listener luôn có giá trị mới nhất
   });
   
   // === 6. MECHANICS (Movement, Rotation, Lock) ===
@@ -150,7 +194,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
     setters: coreSetters,
     sendInput: network.sendInput,
     sendGarbage: network.sendGarbage,
-    sendTopout: network.sendTopout,
+    sendTopout: network.sendTopout, // Hàm này sẽ kích hoạt 'game:topout' -> server xử lý BO3
     cancelGarbage: garbage.cancelGarbage,
     triggerGarbageApply: garbage.triggerGarbageApply,
     resetAFKTimer: socketEvents.resetAFKTimer,
@@ -165,6 +209,34 @@ export const useVersus = (urlRoomId: string | undefined) => {
     },
   });
   
+  // 📊 Track piece placements (detect via lastPlacement change)
+  const lastPlacementRef = useRef(coreState.lastPlacement);
+  useEffect(() => {
+    if (coreState.lastPlacement !== lastPlacementRef.current && coreState.lastPlacement) {
+      lastPlacementRef.current = coreState.lastPlacement;
+      setPiecesPlaced(prev => prev + 1);
+    }
+  }, [coreState.lastPlacement]);
+  
+  // 📊 Track attacks sent (via garbageToSend increases)
+  const prevGarbageSentRef = useRef(0);
+  useEffect(() => {
+    const current = garbage.garbageToSend;
+    if (current > prevGarbageSentRef.current) {
+      const delta = current - prevGarbageSentRef.current;
+      setAttacksSent(prev => prev + delta);
+    }
+    prevGarbageSentRef.current = current;
+  }, [garbage.garbageToSend]);
+  
+  // Reset stats on new game
+  useEffect(() => {
+    if (countdown === 3) {
+      setPiecesPlaced(0);
+      setAttacksSent(0);
+    }
+  }, [countdown]);
+  
   // Timer for elapsed time
   useEffect(() => {
     if (!timerOn) return;
@@ -178,6 +250,45 @@ export const useVersus = (urlRoomId: string | undefined) => {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [timerOn]);
+
+  // 📡 Emit my live stats periodically and receive opponent's live stats
+  useEffect(() => {
+    // Receive opponent stats
+    const onStatsUpdate = (payload: { from: string; piecesPlaced: number; attacksSent: number; elapsedMs: number }) => {
+      if (!payload) return;
+
+      // 🔽 [SỬA LỖI 2] Chỉ cập nhật state nếu data đến từ ĐỐI THỦ (opponentId)
+      // Điều này ngăn bạn tự cập nhật stats của mình nếu server gửi nhầm
+      if (opponentId && payload.from === opponentId) {
+        setOppPiecesPlaced(Number(payload.piecesPlaced) || 0);
+        setOppAttacksSent(Number(payload.attacksSent) || 0);
+        setOppElapsedMs(Number(payload.elapsedMs) || 0);
+      }
+    };
+    socket.on('stats:update', onStatsUpdate);
+
+    return () => {
+      socket.off('stats:update', onStatsUpdate);
+    };
+  }, [socket, opponentId]); // 🔽 [SỬA LỖI 2] Thêm opponentId vào dependency array
+
+  useEffect(() => {
+    // 🔽 [SỬA LỖI 1C] Sửa logic gửi stats
+    // Chỉ chạy effect này khi timerOn, roomId, hoặc socket thay đổi
+    if (!roomId || !timerOn || !socket) return;
+    
+    // Throttle to ~2 updates per second
+    const interval = window.setInterval(() => {
+      // Gửi giá trị từ refs (luôn là mới nhất)
+      socket.emit('stats:update', roomId, { 
+        piecesPlaced: piecesPlacedRef.current, 
+        attacksSent: attacksSentRef.current, 
+        elapsedMs: elapsedMsRef.current 
+      });
+    }, 500); // Gửi 2 lần/giây
+    
+    return () => clearInterval(interval);
+  }, [roomId, timerOn, socket]); // 🔽 [SỬA LỖI 1D] XÓA stats khỏi dependency array
   
   // === RETURN ALL STATE & HANDLERS ===
   return {
@@ -196,7 +307,8 @@ export const useVersus = (urlRoomId: string | undefined) => {
     meId,
     debugInfo,
     isRtcReady: network.isRtcReady,
-    matchResult,
+    matchResult,       // 🔽 Kết quả CUỐI CÙNG
+    roundResult,       // 🔽 Kết quả 1 GAME
     autoExitCountdown: socketEvents.autoExitCountdown,
     countdown,
     disconnectCountdown: socketEvents.disconnectCountdown,
@@ -220,6 +332,10 @@ export const useVersus = (urlRoomId: string | undefined) => {
     garbageToSend: garbage.garbageToSend,
     myStats,
     
+    // 📊 Live performance stats
+    piecesPlaced,
+    attacksSent,
+    
     // Opponent Info
     opponentName,
     opponentId,
@@ -232,6 +348,10 @@ export const useVersus = (urlRoomId: string | undefined) => {
     oppGameOver,
     oppPing: network.oppPing,
     oppStats,
+  // Opponent live stats
+  oppPiecesPlaced,
+  oppAttacksSent,
+  oppElapsedMs,
     
     // Series Info
     seriesScore: series.seriesScore,

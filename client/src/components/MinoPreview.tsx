@@ -60,20 +60,21 @@ export default function MinoPreview({ type, size = 24, placeholder = false }: Pr
       {shape.map((row, y) =>
         row.map((cell, x) => {
           const filled = cell !== 0;
-          const background = filled
-            ? texture
-              ? `url(${texture})`
-              : "rgba(255,255,255,0.2)"
-            : "transparent";
+          const backgroundImage =
+            filled && texture ? `url(${texture})` : undefined;
+          const backgroundColor =
+            filled && !texture ? "rgba(255,255,255,0.2)" : "transparent";
           return (
             <div
               key={`${y}-${x}`}
               style={{
                 width: size,
                 height: size,
-                background,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
+                backgroundColor,
+                backgroundImage,
+                backgroundSize: backgroundImage ? "cover" : undefined,
+                backgroundPosition: backgroundImage ? "center" : undefined,
+                backgroundRepeat: backgroundImage ? "no-repeat" : undefined,
               }}
             />
           );

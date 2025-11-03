@@ -230,13 +230,25 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
     // [END] SỬA LỖI ĐỒNG BỘ BOARD
     // ====================================================================
 
+    // ====================================================================
+    // 📊 LIVE STATS RELAY (PPS/APM/Time)
+    // ====================================================================
+    // Client A emits: socket.emit('stats:update', roomId, { piecesPlaced, attacksSent, elapsedMs })
+    // Server relays to other clients in room: socket.to(roomId).emit('stats:update', { from, ...stats })
+    socket.on('stats:update', (roomId: string, stats: { piecesPlaced: number; attacksSent: number; elapsedMs: number }) => {
+      if (!roomId || !stats) return;
+      socket.to(roomId).emit('stats:update', { from: socket.id, ...stats });
+    });
+
 
     // ====================================================================
     // [START] SỬA LỖI GAME OVER
     // ====================================================================
     // Client 'Versus.tsx' gửi 'game:topout', không phải 'player:topout'.
     // Client cũng lắng nghe 'game:over', không phải 'match:end'.
-       socket.on('game:topout', async (roomId: string, reason: string) => {
+     // File: src/handles/socketHandlers.ts
+
+    socket.on('game:topout', async (roomId: string, reason: string) => {
       if (!roomId) {
         console.warn(`[Socket] ⚠️ ${socket.id} sent 'game:topout' without a roomId.`);
         return;
@@ -245,22 +257,95 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
       console.log(`[Socket] 🛑 Player ${socket.id} topped out in room ${roomId}. Reason: ${reason}`);
 
       try {
-        const result = await matchManager.resolveTopout(roomId, socket.id);
-        if (!result) {
-          console.warn(`[Socket] ⚠️ Unable to resolve topout for room ${roomId}`);
-          return;
-        }
+        // [SỬA LỖI BO3] - Bước 1: Kiểm tra xem đây có phải là trận BO3 không
+        const bo3Match = matchmaking.bo3MatchManager.getMatch(roomId); // Tên hàm đúng là 'getMatch'
 
-        io.to(roomId).emit('game:over', {
-          winner: result.winnerId ?? null,
-          loser: result.loserId,
-          reason: reason || 'Topout',
-        });
+        if (bo3Match) {
+          // [SỬA LỖI BO3] - Bước 2: Nếu ĐÚNG, để BO3 manager xử lý
+          console.log(`[Socket] 🏆 Resolving topout via BO3MatchManager for room ${roomId}`);
+          // Gọi hàm 'handleGameTopout' MỚI mà chúng ta vừa thêm
+          matchmaking.bo3MatchManager.handleGameTopout(roomId, socket.id, reason);
+        } else {
+          // [SỬA LỖI BO3] - Bước 3: Nếu KHÔNG, dùng logic BO1 cũ (ví dụ: trận casual)
+          console.log(`[Socket] 🏁 Resolving topout via generic matchManager (BO1) for room ${roomId}`);
+          const result = await matchManager.resolveTopout(roomId, socket.id);
+          if (!result) {
+            console.warn(`[Socket] ⚠️ Unable to resolve topout for room ${roomId}`);
+            return;
+          }
+
+          // Gửi 'game:over' (sự kiện BO1)
+          io.to(roomId).emit('game:over', {
+            winner: result.winnerId ?? null,
+            loser: result.loserId,
+            reason: reason || 'Topout',
+          });
+        }
       } catch (error) {
         console.error(`[Socket] ❌ Error resolving topout in ${roomId}:`, error);
       }
     });
+    
+    // ====================================================================
+    // 🚪 FORFEIT HANDLER - Player voluntarily exits match (0-2 loss)
+    // ====================================================================
+    socket.on('match:forfeit', async (data: { roomId: string }) => {
+      const { roomId } = data;
+      if (!roomId) {
+        console.warn(`[Socket] ⚠️ ${socket.id} sent 'match:forfeit' without roomId`);
+        return;
+      }
+      
+      console.log(`[Socket] 🏳️ Player ${socket.id} forfeited match in room ${roomId}`);
+      
+      try {
+        const bo3Match = matchmaking.bo3MatchManager.getMatch(roomId);
+        
+        if (bo3Match) {
+          // BO3 match: forfeit gives opponent 2-0 win
+          const forfeiter = bo3Match.player1.socketId === socket.id ? 'player1' : 'player2';
+          const winner = forfeiter === 'player1' ? 'player2' : 'player1';
+          
+          console.log(`[Socket] 🏆 BO3 forfeit: ${winner} wins 2-0`);
+          
+          // Emit match end with 2-0 score (to room and directly to both sockets for robustness)
+          const payload = {
+            winner,
+            score: winner === 'player1' 
+              ? { player1Wins: 2, player2Wins: 0 }
+              : { player1Wins: 0, player2Wins: 2 },
+            finalScore: winner === 'player1' ? '2-0' : '0-2',
+            reason: 'forfeit',
+            bestOf: bo3Match.bestOf,
+            winsRequired: bo3Match.winsRequired,
+          } as const;
 
+          io.to(roomId).emit('bo3:match-end', payload);
+          // Emit directly to individual sockets in case room membership is inconsistent
+          io.to(bo3Match.player1.socketId).emit('bo3:match-end', payload);
+          io.to(bo3Match.player2.socketId).emit('bo3:match-end', payload);
+          
+          // Clean up match
+          setTimeout(() => {
+            matchmaking.bo3MatchManager['activeMatches'].delete(roomId);
+            console.log(`[Socket] 🗑️ Cleaned up forfeited match ${roomId}`);
+          }, 5000);
+        } else {
+          // BO1/casual match
+          const result = await matchManager.resolveTopout(roomId, socket.id);
+          if (result) {
+            io.to(roomId).emit('game:over', {
+              winner: result.winnerId,
+              loser: result.loserId,
+              reason: 'forfeit',
+            });
+          }
+        }
+      } catch (error) {
+        console.error(`[Socket] ❌ Error handling forfeit in ${roomId}:`, error);
+      }
+    });
+    
     socket.on('disconnect', async (reason) => {
       console.log(`\n[Socket] ⛔ User disconnected: ${username} (${accountId})`);
       console.log(`[Socket] Reason: ${reason}`);

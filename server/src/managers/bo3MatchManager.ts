@@ -317,7 +317,51 @@ class BO3MatchManager {
       status: match.status
     });
   }
+public handleGameTopout(roomId: string, loserSocketId: string, reason: string) {
+    const match = this.activeMatches.get(roomId);
+    if (!match) {
+      console.warn(`[BO3] handleGameTopout: Không tìm thấy trận đấu ${roomId}`);
+      return;
+    }
 
+    if (match.status === 'completed') {
+      console.warn(`[BO3] handleGameTopout: Trận đấu ${roomId} đã kết thúc`);
+      return;
+    }
+
+    let winner: 'player1' | 'player2';
+
+    // Xác định người thắng
+    if (match.player1.socketId === loserSocketId) {
+      winner = 'player2';
+    } else if (match.player2.socketId === loserSocketId) {
+      winner = 'player1';
+    } else {
+      console.error(`[BO3] handleGameTopout: loserSocketId ${loserSocketId} không có trong trận ${roomId}`);
+      return;
+    }
+
+    console.log(`[BO3] handleGameTopout: ${winner} thắng game ${match.currentGame} (do ${loserSocketId} top-out)`);
+
+    // Tạo stats giả vì 'game:topout' không cung cấp
+    const dummyStats: GameStats = {
+      lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0
+    };
+
+    // Gọi hàm logic chính để xử lý kết quả
+    // (Chúng ta truyền một 'dummy socket' vì hàm private này yêu cầu nó)
+    this.handleGameFinished(
+      { emit: (event, payload) => console.log(`[BO3] Dummy socket emit: ${event}`) } as Socket,
+      {
+        roomId,
+        winner,
+        stats: {
+          player1: dummyStats,
+          player2: dummyStats,
+        }
+      }
+    );
+  }
   // Get match by room ID
   public getMatch(roomId: string): BO3Match | undefined {
     return this.activeMatches.get(roomId);

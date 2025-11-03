@@ -6,6 +6,8 @@ import { useVersus } from './hooks/useVersus'; // 👈 IMPORT HOOK MỚI ĐÃ T�
 import Stage from '../Stage';
 import { HoldPanel, NextPanel } from '../SidePanels';
 import GarbageQueueBar from '../GarbageQueueBar'; // Giả sử file này cũng ở root components
+import { ScoreUpdateOverlay } from './ScoreUpdateOverlay'; // 👈 IMPORT OVERLAY MỚI
+import StatsPanel from './StatsPanel'; // 📊 Import Stats Panel
 
 // Import tài nguyên (với đường dẫn đã sửa)
 import bgImg from '../../../img/bg.jpg'; // 👈 ĐÃ SỬA ĐƯỜNG DẪN
@@ -16,6 +18,9 @@ import bgImg from '../../../img/bg.jpg'; // 👈 ĐÃ SỬA ĐƯỜNG DẪN
 const Versus: React.FC = () => {
   // Lấy urlRoomId để truyền vào hook logic
   const { roomId: urlRoomId } = useParams<{ roomId?: string }>();
+  
+  // 🚪 State for exit confirmation
+  const [showExitConfirm, setShowExitConfirm] = React.useState(false);
   
   // ‼️ GỌI HOOK LOGIC: Lấy tất cả state và hàm xử lý
   const {
@@ -30,6 +35,7 @@ const Versus: React.FC = () => {
     udpStatsRef,
     autoExitTimerRef,
     matchResult,
+    roundResult, // 👈 THÊM ROUND RESULT
     autoExitCountdown,
     countdown,
     disconnectCountdown,
@@ -40,15 +46,11 @@ const Versus: React.FC = () => {
     nextFour,
     myFillWhiteProgress,
     incomingGarbage,
-    rows,
-    level,
-    elapsedMs,
-    combo,
-    b2b,
+    elapsedMs, // ⏱️ Still needed for StatsPanel
     myPing,
-    isApplyingGarbage,
-    garbageToSend,
     myStats,
+    piecesPlaced, // 📊
+    attacksSent, // 📊
     opponentName,
     opponentId,
     oppStage,
@@ -57,14 +59,16 @@ const Versus: React.FC = () => {
     oppNextFour,
     oppFillWhiteProgress,
     opponentIncomingGarbage,
-    oppGameOver,
-    oppPing,
+    // oppGameOver, oppPing - removed (not needed in UI)
     oppStats,
+  oppPiecesPlaced,
+  oppAttacksSent,
+  oppElapsedMs,
     seriesScore,
     seriesBestOf,
     seriesWinsRequired,
     seriesCurrentGame,
-    sendTopout,
+    // sendTopout - removed (only used in forfeit handler)
     cleanupWebRTC,
     navigate,
     socket,
@@ -93,23 +97,120 @@ const Versus: React.FC = () => {
     >
       <button
         onClick={() => {
-          console.log('🚪 Exit button clicked:', { roomId, matchResult });
-          if (roomId && matchResult === null) {
-            console.log('📤 Sending topout (manual exit) via UDP/TCP');
-            sendTopout('manual_exit');
+          // Only show confirm if match is still in progress
+          if (roomId && matchResult === null && !waiting) {
+            setShowExitConfirm(true);
+          } else {
+            // Direct exit if not in active match
+            if (meId) socket.emit('ranked:leave', meId);
+            if (autoExitTimerRef.current) {
+              clearInterval(autoExitTimerRef.current);
+              autoExitTimerRef.current = null;
+            }
+            cleanupWebRTC('manual-exit');
+            navigate('/?modes=1');
           }
-          if (meId) socket.emit('ranked:leave', meId);
-          if (autoExitTimerRef.current) {
-            clearInterval(autoExitTimerRef.current);
-            autoExitTimerRef.current = null;
-          }
-          cleanupWebRTC('manual-exit');
-          navigate('/?modes=1');
         }}
         style={{ position: 'fixed', top: 12, left: 12, zIndex: 999, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}
       >
         ← Thoát
       </button>
+      
+      {/* 🚪 Exit Confirmation Dialog */}
+      {showExitConfirm && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'grid',
+          placeItems: 'center',
+          zIndex: 10000,
+          backdropFilter: 'blur(8px)'
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(30,30,35,0.98) 0%, rgba(20,20,25,0.98) 100%)',
+            padding: '32px 40px',
+            borderRadius: 16,
+            border: '2px solid rgba(255, 107, 107, 0.5)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
+            maxWidth: 480,
+            textAlign: 'center',
+            color: '#fff'
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 12, color: '#ff6b6b' }}>
+              XÁC NHẬN THOÁT TRẬN
+            </div>
+            <div style={{ fontSize: 15, marginBottom: 24, lineHeight: 1.6, color: '#ccc' }}>
+              Nếu bạn thoát bây giờ, bạn sẽ <strong style={{ color: '#ff6b6b' }}>chấp nhận thua 0-2</strong>.
+              <br />
+              Bạn có chắc chắn muốn tiếp tục?
+            </div>
+            <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  // Forfeit: emit special event to give opponent 2-0 win
+                  console.log('🏳️ Player forfeited match');
+                  socket.emit('match:forfeit', { roomId });
+                  // DON'T navigate immediately - wait for server to emit bo3:match-end
+                  // which will show the overlay to the opponent and then auto-exit
+                  setShowExitConfirm(false);
+                  if (meId) socket.emit('ranked:leave', meId);
+                  if (autoExitTimerRef.current) {
+                    clearInterval(autoExitTimerRef.current);
+                    autoExitTimerRef.current = null;
+                  }
+                  cleanupWebRTC('forfeit');
+                  // Delay navigation to allow server to broadcast result
+                  setTimeout(() => {
+                    navigate('/?modes=1');
+                  }, 1000);
+                }}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%)',
+                  color: '#fff',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 16px rgba(255,107,107,0.4)',
+                  transition: 'transform 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+              >
+                Có, thoát ngay (Thua 0-2)
+              </button>
+              <button
+                onClick={() => setShowExitConfirm(false)}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: 10,
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  background: 'transparent',
+                  color: '#fff',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)';
+                }}
+              >
+                Không, tiếp tục chơi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* ⚡ UDP CONNECTION STATUS INDICATOR */}
       {!waiting && (
@@ -264,53 +365,32 @@ const Versus: React.FC = () => {
             <HoldPanel hold={hold as any} />
             
             {/* Stage with Garbage Queue Bar beside it */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-              <div style={{ 
-                border: '4px solid #4ecdc4', 
-                borderRadius: '8px',
-                boxShadow: '0 0 20px rgba(78, 205, 196, 0.5), inset 0 0 10px rgba(78, 205, 196, 0.1)',
-                padding: '4px',
-                background: 'transparent'
-              }}>
-                <Stage stage={stage} fillWhiteProgress={myFillWhiteProgress} player={player} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                <div style={{ 
+                  border: '4px solid #4ecdc4', 
+                  borderRadius: '8px',
+                  boxShadow: '0 0 20px rgba(78, 205, 196, 0.5), inset 0 0 10px rgba(78, 205, 196, 0.1)',
+                  padding: '4px',
+                  background: 'transparent'
+                }}>
+                  <Stage stage={stage} fillWhiteProgress={myFillWhiteProgress} player={player} />
+                </div>
+                
+                {/* Garbage Queue Bar - using the new component */}
+                <GarbageQueueBar count={incomingGarbage} />
               </div>
-              
-              {/* Garbage Queue Bar - using the new component */}
-              <GarbageQueueBar count={incomingGarbage} />
             </div>
             
             <div style={{ display: 'grid', gap: 12 }}>
               <NextPanel queue={nextFour as any} />
-              <div style={{ background: 'rgba(20,20,22,0.75)', padding: 8, borderRadius: 10, color: '#fff' }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>STATUS</div>
-                <div>Rows: {rows}</div>
-                <div>Level: {level}</div>
-                <div>Time: {(elapsedMs/1000).toFixed(2)}s</div>
-                <div>Combo: {combo}</div>
-                <div>B2B: {b2b}</div>
-                {typeof myPing === 'number' && (
-                  <div style={{ color: myPing < 50 ? '#4ecdc4' : myPing < 100 ? '#ffb800' : '#ff6b6b' }}>
-                    📶 Ping: {myPing}ms
-                  </div>
-                )}
-                {isApplyingGarbage && (
-                  <div style={{ 
-                    color: '#ff6b6b', 
-                    fontWeight: 'bold',
-                    animation: 'pulse 0.5s ease-in-out infinite',
-                    textShadow: '0 0 8px rgba(255, 107, 107, 0.8)'
-                  }}>
-                    ⚡ Applying...
-                  </div>
-                )}
-                <div style={{ color: incomingGarbage > 0 ? '#ff6b6b' : '#888' }}>
-                  ⚠️ Incoming: {incomingGarbage}
-                </div>
-                <div style={{ color: '#4ecdc4' }}>💣 Sent: {garbageToSend}</div>
-                <div style={{ fontSize: '10px', color: '#888', marginTop: 4 }}>
-                  Debug: Bar={incomingGarbage}
-                </div>
-              </div>
+              {/* 📊 Replaced STATUS with StatsPanel */}
+              <StatsPanel 
+                elapsedMs={elapsedMs} 
+                piecesPlaced={piecesPlaced} 
+                attacksSent={attacksSent} 
+                side="left" 
+              />
             </div>
           </div>
 
@@ -322,36 +402,34 @@ const Versus: React.FC = () => {
             <HoldPanel hold={oppHold} />
             
             {/* Stage with Garbage Queue Bar beside it */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-              <div style={{ 
-                border: '4px solid #ff6b6b', 
-                borderRadius: '8px',
-                boxShadow: '0 0 20px rgba(255, 107, 107, 0.5), inset 0 0 10px rgba(255, 107, 107, 0.1)',
-                padding: '4px',
-                background: 'transparent'
-              }}>
-                <Stage stage={(netOppStage as any) ?? oppStage} fillWhiteProgress={oppFillWhiteProgress} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                <div style={{ 
+                  border: '4px solid #ff6b6b', 
+                  borderRadius: '8px',
+                  boxShadow: '0 0 20px rgba(255, 107, 107, 0.5), inset 0 0 10px rgba(255, 107, 107, 0.1)',
+                  padding: '4px',
+                  background: 'transparent'
+                }}>
+                  <Stage stage={(netOppStage as any) ?? oppStage} fillWhiteProgress={oppFillWhiteProgress} />
+                </div>
+                
+                {/* Opponent's Garbage Queue Bar */}
+                <GarbageQueueBar count={opponentIncomingGarbage} />
               </div>
               
-              {/* Opponent's Garbage Queue Bar */}
-              <GarbageQueueBar count={opponentIncomingGarbage} />
+              {/* (Requested) Removed live stats under opponent board */}
             </div>
             
             <div style={{ display: 'grid', gap: 12 }}>
               {countdown === null && <NextPanel queue={oppNextFour as any} />}
-              <div style={{ background: 'rgba(20,20,22,0.35)', padding: 8, borderRadius: 10, color: '#fff' }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>OPP STATUS</div>
-                <div>GameOver: {oppGameOver ? 'YES' : 'NO'}</div>
-                <div>Hold: {oppHold ? oppHold.shape || 'None' : 'None'}</div>
-                {typeof oppPing === 'number' && (
-                  <div style={{ color: oppPing < 50 ? '#4ecdc4' : oppPing < 100 ? '#ffb800' : '#ff6b6b' }}>
-                    📶 Ping: {oppPing}ms
-                  </div>
-                )}
-                <div style={{ fontSize: '10px', color: '#888', marginTop: 4 }}>
-                  Debug: Bar={opponentIncomingGarbage}
-                </div>
-              </div>
+              {/* 📊 Opponent Live Stats (under Next) */}
+              <StatsPanel 
+                elapsedMs={oppElapsedMs}
+                piecesPlaced={oppPiecesPlaced}
+                attacksSent={oppAttacksSent}
+                side="right"
+              />
             </div>
           </div>
         </div>
@@ -400,6 +478,42 @@ const Versus: React.FC = () => {
               letterSpacing: '2px'
             }}>
               {result.outcome === 'win' ? '🎉 CHIẾN THẮNG!' : result.outcome === 'lose' ? '😢 THẤT BẠI' : '🤝 HÒA TRẬN'}
+            </div>
+
+            {/* Series Score Display */}
+            <div style={{
+              fontSize: 32,
+              fontWeight: 800,
+              marginBottom: 16,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 16,
+            }}>
+              <span style={{ 
+                color: result.outcome === 'win' ? '#4CAF50' : '#fff',
+                textShadow: '2px 2px 8px rgba(0,0,0,0.4)'
+              }}>
+                {seriesScore.me}
+              </span>
+              <span style={{ opacity: 0.5, fontSize: 24 }}>-</span>
+              <span style={{ 
+                color: result.outcome === 'lose' ? '#F44336' : '#fff',
+                textShadow: '2px 2px 8px rgba(0,0,0,0.4)'
+              }}>
+                {seriesScore.opponent}
+              </span>
+            </div>
+
+            {/* Best of X indicator */}
+            <div style={{
+              fontSize: 14,
+              opacity: 0.7,
+              marginBottom: 24,
+              fontWeight: 600,
+            }}>
+              Best of {seriesBestOf}
             </div>
 
             {/* Reason */}
@@ -569,6 +683,19 @@ const Versus: React.FC = () => {
         </div>
         );
       })()}
+
+      {/* Score Update Overlay - Hiển thị khi thắng/thua 1 ván */}
+      {roundResult && (
+        <ScoreUpdateOverlay
+          show={true}
+          outcome={roundResult.outcome}
+          newScore={roundResult.score}
+          winsRequired={seriesWinsRequired}
+          onComplete={() => {
+            // Overlay sẽ tự đóng, không cần làm gì
+          }}
+        />
+      )}
     </div>
   );
 };
