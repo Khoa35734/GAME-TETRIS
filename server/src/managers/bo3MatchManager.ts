@@ -220,14 +220,27 @@ class BO3MatchManager {
 
     console.log(`[BO3] Match ${match.matchId} completed: ${overallWinner} wins (${finalScore})`);
 
-    // Notify players
-    this.io.to(match.roomId).emit('bo3:match-end', {
+    // Emit different payload to each player (include opponent's user_id)
+    const basePayload = {
       winner: overallWinner,
       score: match.score,
       finalScore,
       games: match.games,
       bestOf: match.bestOf,
       winsRequired: match.winsRequired,
+      sessionUuid: match.matchId, // Use matchId as session UUID
+    };
+
+    // Send to player1 with player2's info
+    this.io.to(match.player1.socketId).emit('bo3:match-end', {
+      ...basePayload,
+      opponentUserId: match.player2.accountId,
+    });
+
+    // Send to player2 with player1's info
+    this.io.to(match.player2.socketId).emit('bo3:match-end', {
+      ...basePayload,
+      opponentUserId: match.player1.accountId,
     });
 
     // Save match history to database

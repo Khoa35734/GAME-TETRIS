@@ -60,17 +60,26 @@ const Leaderboard: React.FC = () => {
         offset: offset.toString()
       });
       
-      const response = await fetch(`${API_BASE}/leaderboard?${params}`);
+      console.log('[Leaderboard] Fetching:', `${API_BASE}/leaderboard?${params.toString()}`);
+      
+      const response = await fetch(`${API_BASE}/leaderboard?${params.toString()}`);
+      
+      console.log('[Leaderboard] Response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log('[Leaderboard] Data received:', data);
         setPlayers(data.data || []);
         setHasMore(data.pagination?.hasMore || false);
       } else {
-        throw new Error('Không thể tải bảng xếp hạng');
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[Leaderboard] Error response:', errorData);
+        throw new Error(errorData.message || 'Không thể tải bảng xếp hạng');
       }
     } catch (err) {
-      setError('Không thể kết nối đến máy chủ');
-      console.error(err);
+      const errorMessage = err instanceof Error ? err.message : 'Không thể kết nối đến máy chủ';
+      setError(errorMessage);
+      console.error('[Leaderboard] Error:', err);
     } finally {
       setLoading(false);
     }
