@@ -264,7 +264,7 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
           // [SỬA LỖI BO3] - Bước 2: Nếu ĐÚNG, để BO3 manager xử lý
           console.log(`[Socket] 🏆 Resolving topout via BO3MatchManager for room ${roomId}`);
           // Gọi hàm 'handleGameTopout' MỚI mà chúng ta vừa thêm
-          matchmaking.bo3MatchManager.handleGameTopout(roomId, socket.id, reason);
+          await matchmaking.bo3MatchManager.handleGameTopout(roomId, socket.id, reason);
         } else {
           // [SỬA LỖI BO3] - Bước 3: Nếu KHÔNG, dùng logic BO1 cũ (ví dụ: trận casual)
           console.log(`[Socket] 🏁 Resolving topout via generic matchManager (BO1) for room ${roomId}`);

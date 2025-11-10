@@ -684,8 +684,8 @@ const Versus: React.FC = () => {
         );
       })()}
 
-      {/* Score Update Overlay - Hiển thị khi thắng/thua 1 ván */}
-      {roundResult && (
+      {/* Score Update Overlay - CHỈ hiển thị khi thắng/thua 1 ván VÀ trận chưa kết thúc */}
+      {roundResult && !matchResult && (
         <ScoreUpdateOverlay
           show={true}
           outcome={roundResult.outcome}

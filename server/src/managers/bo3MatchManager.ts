@@ -2,19 +2,29 @@
 // File: server/src/bo3MatchManager.ts
 
 import { Server, Socket } from 'socket.io';
+import { saveMatchData, calculatePPS, calculateAPM } from '../services/matchHistoryService';
+import type { MatchData, GameData, PlayerGameStats } from '../services/matchHistoryService';
 
 const DEFAULT_BEST_OF = 3;
 
 const calculateWinsRequired = (bestOf: number): number => Math.floor(bestOf / 2) + 1;
 
 interface GameStats {
-  lines: number;
+  lines: number;          // Lines cleared (deprecated, use lines_cleared)
   pps: number;
   finesse: number;
-  pieces: number;
+  pieces: number;         // Pieces placed (deprecated, use pieces_placed)
   holds: number;
   inputs: number;
-  time: number;
+  time: number;           // Time in seconds (deprecated, use elapsed_ms)
+  // 🔽 THÊM CÁC FIELD MỚI CHO DATABASE 🔽
+  attack_lines?: number;      // Số dòng rác đã gửi
+  apm?: number;               // Attack Per Minute
+  lines_cleared?: number;     // Số dòng đã xóa (new format)
+  pieces_placed?: number;     // Số Tetromino đã đặt (new format)
+  attacks_sent?: number;      // Số dòng rác đã gửi (new format)
+  garbage_received?: number;  // Số dòng rác đã nhận
+  elapsed_ms?: number;        // Thời gian chơi (milliseconds)
 }
 
 interface GameResult {
@@ -49,11 +59,53 @@ interface BO3Match {
   games: GameResult[];
   status: 'in-progress' | 'completed';
   createdAt: number;
+  roundActive: boolean;
+  tempPlayer1Stats?: GameStats;
+  tempPlayer2Stats?: GameStats;
 }
 
 class BO3MatchManager {
   private io: Server;
   private activeMatches: Map<string, BO3Match> = new Map();
+
+  private createEmptyStats(): GameStats {
+    return {
+      lines: 0,
+      pps: 0,
+      finesse: 0,
+      pieces: 0,
+      holds: 0,
+      inputs: 0,
+      time: 0,
+      attack_lines: 0,
+      apm: 0,
+    };
+  }
+
+  private async waitForTempStats(
+    match: BO3Match,
+    key: 'tempPlayer1Stats' | 'tempPlayer2Stats',
+    label: string,
+  ): Promise<GameStats> {
+    const existing = match[key];
+    if (existing) {
+      return existing;
+    }
+
+    const attempts = 6;
+    const delayMs = 50;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const stats = match[key];
+      if (stats) {
+        console.log(`[BO3] ⏱️ Received ${label} stats after ${(attempt + 1) * delayMs}ms delay`);
+        return stats;
+      }
+    }
+
+    console.warn(`[BO3] ⚠️ Missing ${label} stats after waiting ${attempts * delayMs}ms – using zero stats.`);
+    return this.createEmptyStats();
+  }
 
   constructor(io: Server) {
     this.io = io;
@@ -62,15 +114,42 @@ class BO3MatchManager {
 
   private setupSocketHandlers() {
     this.io.on('connection', (socket: Socket) => {
-      // Game finished in current round
+      // 🔽 NHẬN STATS TỪ MỖI PLAYER 🔽
+      socket.on('bo3:player-stats', (data: {
+        roomId: string;
+        stats: GameStats;
+      }) => {
+        const match = this.activeMatches.get(data.roomId);
+        if (!match) {
+          console.warn(`[BO3] ⚠️ Received stats for unknown room ${data.roomId}`);
+          return;
+        }
+
+        console.log(`[BO3] 📊 Received stats from ${socket.id}:`, JSON.stringify(data.stats));
+
+        // Lưu stats vào match object
+        if (socket.id === match.player1.socketId) {
+          match.tempPlayer1Stats = data.stats;
+          console.log(`[BO3] ✅ Saved Player1 stats (socketId: ${socket.id}, username: ${match.player1.username})`);
+        } else if (socket.id === match.player2.socketId) {
+          match.tempPlayer2Stats = data.stats;
+          console.log(`[BO3] ✅ Saved Player2 stats (socketId: ${socket.id}, username: ${match.player2.username})`);
+        } else {
+          console.warn(`[BO3] ⚠️ Stats from unknown socket ${socket.id} in room ${data.roomId}`);
+          console.warn(`[BO3] ⚠️ Expected sockets: P1=${match.player1.socketId}, P2=${match.player2.socketId}`);
+        }
+      });
+
+      // Game finished in current round (DEPRECATED - chỉ dùng để backward compatibility)
       socket.on('bo3:game-finished', (data: {
         roomId: string;
-        winner: 'player1' | 'player2';
-        stats: {
-          player1: GameStats;
-          player2: GameStats;
+        winner?: 'player1' | 'player2' | 'opponent';
+        stats?: {
+          player1?: GameStats;
+          player2?: GameStats;
         };
       }) => {
+        console.log('[BO3] 📥 Received bo3:game-finished from client:', socket.id, data);
         this.handleGameFinished(socket, data);
       });
 
@@ -113,7 +192,8 @@ class BO3MatchManager {
       },
       games: [],
       status: 'in-progress',
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      roundActive: true,
     };
 
     this.activeMatches.set(roomId, match);
@@ -146,10 +226,10 @@ class BO3MatchManager {
     socket: Socket,
     data: {
       roomId: string;
-      winner: 'player1' | 'player2';
-      stats: {
-        player1: GameStats;
-        player2: GameStats;
+      winner?: 'player1' | 'player2' | 'opponent';
+      stats?: {
+        player1?: GameStats;
+        player2?: GameStats;
       };
     }
   ) {
@@ -159,25 +239,63 @@ class BO3MatchManager {
       return;
     }
 
+      if (match.roundActive === false) {
+        console.warn(`[BO3] ⚠️ Duplicate finish detected for room ${data.roomId}, current game ${match.currentGame}. Ignoring.`);
+        return;
+      }
+
+      match.roundActive = false;
+
+    // === XÁC ĐỊNH WINNER ===
+    // Nếu client gửi 'opponent', nghĩa là người gọi đã thua
+    let winner: 'player1' | 'player2';
+    
+    if (data.winner === 'opponent' || !data.winner) {
+      // Client gửi 'opponent' hoặc không gửi winner -> xác định từ socketId
+      if (socket.id === match.player1.socketId) {
+        winner = 'player2'; // Player 1 thua -> Player 2 thắng
+      } else if (socket.id === match.player2.socketId) {
+        winner = 'player1'; // Player 2 thua -> Player 1 thắng
+      } else {
+        console.error(`[BO3] Unknown socket ${socket.id} sent game-finished for room ${data.roomId}`);
+        return;
+      }
+    } else {
+      winner = data.winner;
+    }
+
+    console.log(`[BO3] 📊 Game ${match.currentGame} finished: Winner = ${winner}`);
+
+    // === LẤY STATS TỪ CLIENT HOẶC TẠO DUMMY ===
+    const player1Stats: GameStats = data.stats?.player1 || {
+      lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0,
+      attack_lines: 0, apm: 0
+    };
+
+    const player2Stats: GameStats = data.stats?.player2 || {
+      lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0,
+      attack_lines: 0, apm: 0
+    };
+
     // Record game result
     const gameResult: GameResult = {
       gameNumber: match.currentGame,
-      winner: data.winner,
-      player1Stats: data.stats.player1,
-      player2Stats: data.stats.player2,
+      winner: winner,
+      player1Stats: player1Stats,
+      player2Stats: player2Stats,
       timestamp: Date.now()
     };
 
     match.games.push(gameResult);
 
     // Update score
-    if (data.winner === 'player1') {
+    if (winner === 'player1') {
       match.score.player1Wins++;
     } else {
       match.score.player2Wins++;
     }
 
-    console.log(`[BO3] Game ${match.currentGame} finished in ${data.roomId}: ${data.winner} wins`);
+    console.log(`[BO3] Game ${match.currentGame} finished in ${data.roomId}: ${winner} wins`);
     console.log(`[BO3] Score: ${match.score.player1Wins}-${match.score.player2Wins}`);
 
     // Check if match is over (someone reached required wins)
@@ -193,7 +311,7 @@ class BO3MatchManager {
       
       this.io.to(data.roomId).emit('bo3:game-result', {
         gameNumber: gameResult.gameNumber,
-        winner: data.winner,
+        winner: winner,
         score: match.score,
         nextGame: match.currentGame,
         bestOf: match.bestOf,
@@ -202,6 +320,7 @@ class BO3MatchManager {
 
       // Start countdown for next game (e.g., 5 seconds)
       setTimeout(() => {
+    match.roundActive = true;
         this.io.to(data.roomId).emit('bo3:next-game-start', {
           gameNumber: match.currentGame,
           score: match.score,
@@ -242,51 +361,106 @@ class BO3MatchManager {
 
   private async saveMatchHistory(match: BO3Match, winner: 'player1' | 'player2') {
     try {
-      const player1Result = winner === 'player1' ? 'WIN' : 'LOSE';
-      const player2Result = winner === 'player2' ? 'WIN' : 'LOSE';
-      const player1Score = `${match.score.player1Wins}-${match.score.player2Wins}`;
-      const player2Score = `${match.score.player2Wins}-${match.score.player1Wins}`;
+      console.log(`[BO3] 💾 Saving match history to database...`);
+      console.log(`[BO3] 💾 Match ID: ${match.matchId}, Room: ${match.roomId}`);
+      console.log(`[BO3] 💾 Player 1: ${match.player1.username} (ID: ${match.player1.accountId})`);
+      console.log(`[BO3] 💾 Player 2: ${match.player2.username} (ID: ${match.player2.accountId})`);
+      console.log(`[BO3] 💾 Score: ${match.score.player1Wins}-${match.score.player2Wins}`);
+      console.log(`[BO3] 💾 Winner: ${winner}`);
+      console.log(`[BO3] 💾 Total games: ${match.games.length}`);
 
-      // Convert games data for player1 perspective
-      const player1Games = match.games.map(game => ({
-        playerScore: 0, // Not used in BO3
-        opponentScore: 0, // Not used in BO3
-        winner: game.winner === 'player1' ? 'player' : 'opponent',
-        playerStats: game.player1Stats,
-        opponentStats: game.player2Stats
-      }));
+      // === XÁC ĐỊNH WINNER_ID ===
+      const winnerId = winner === 'player1' ? match.player1.accountId : match.player2.accountId;
 
-      // Convert games data for player2 perspective
-      const player2Games = match.games.map(game => ({
-        playerScore: 0,
-        opponentScore: 0,
-        winner: game.winner === 'player2' ? 'player' : 'opponent',
-        playerStats: game.player2Stats,
-        opponentStats: game.player1Stats
-      }));
+      // === CHUẨN BỊ DỮ LIỆU CHO DATABASE ===
+      const gamesData: GameData[] = match.games.map((game) => {
+        // Tính toán stats nếu chưa có
+        const p1Stats = game.player1Stats;
+        const p2Stats = game.player2Stats;
 
-      // Save to database via API
-      const response = await fetch('http://localhost:4000/api/matches/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          playerId: match.player1.accountId,
-          opponentId: match.player2.accountId,
-          opponentName: match.player2.username,
-          mode: match.mode,
-          result: player1Result,
-          score: player1Score,
-          games: player1Games,
-          playerWins: match.score.player1Wins,
-          opponentWins: match.score.player2Wins
-        })
+        const p1Time = p1Stats.time || 0;
+        const p2Time = p2Stats.time || 0;
+        
+        // TIME CHUNG CHO CẢ 2 PLAYER (thời gian dài hơn = thời gian thực của ván)
+        const gameTime = Math.max(p1Time, p2Time);
+        const gameTimeMs = Math.round(gameTime * 1000);
+
+        const player1Stats: PlayerGameStats = {
+          // Old fields for backward compatibility
+          pieces: p1Stats.pieces || 0,
+          attack_lines: p1Stats.attack_lines || p1Stats.attacks_sent || 0,
+          time_seconds: gameTime, // Dùng time chung
+          pps: p1Stats.pps || calculatePPS(p1Stats.pieces || 0, gameTime),
+          apm: p1Stats.apm || calculateAPM(p1Stats.attack_lines || 0, gameTime),
+          // New detailed fields
+          lines_cleared: p1Stats.lines_cleared || p1Stats.lines || 0,
+          pieces_placed: p1Stats.pieces_placed || p1Stats.pieces || 0,
+          attacks_sent: p1Stats.attacks_sent || p1Stats.attack_lines || 0,
+          garbage_received: p1Stats.garbage_received || 0,
+          holds: p1Stats.holds || 0,
+          inputs: p1Stats.inputs || 0,
+          elapsed_ms: gameTimeMs, // Dùng time chung
+        };
+
+        const player2Stats: PlayerGameStats = {
+          // Old fields for backward compatibility
+          pieces: p2Stats.pieces || 0,
+          attack_lines: p2Stats.attack_lines || p2Stats.attacks_sent || 0,
+          time_seconds: gameTime, // Dùng time chung
+          pps: p2Stats.pps || calculatePPS(p2Stats.pieces || 0, gameTime),
+          apm: p2Stats.apm || calculateAPM(p2Stats.attack_lines || 0, gameTime),
+          // New detailed fields
+          lines_cleared: p2Stats.lines_cleared || p2Stats.lines || 0,
+          pieces_placed: p2Stats.pieces_placed || p2Stats.pieces || 0,
+          attacks_sent: p2Stats.attacks_sent || p2Stats.attack_lines || 0,
+          garbage_received: p2Stats.garbage_received || 0,
+          holds: p2Stats.holds || 0,
+          inputs: p2Stats.inputs || 0,
+          elapsed_ms: gameTimeMs, // Dùng time chung
+        };
+
+        // Xác định winner_id của ván này
+        const gameWinnerId = game.winner === 'player1' 
+          ? match.player1.accountId 
+          : match.player2.accountId;
+
+        return {
+          game_number: game.gameNumber,
+          winner_id: gameWinnerId,
+          time_seconds: gameTime, // Time chung cho GameData
+          player1_stats: player1Stats,
+          player2_stats: player2Stats,
+        };
       });
 
-      if (response.ok) {
-        console.log(`[BO3] Match history saved for ${match.player1.username}`);
-      }
+      // === TẠO PAYLOAD ===
+      const matchData: MatchData = {
+        player1_id: match.player1.accountId,
+        player2_id: match.player2.accountId,
+        player1_wins: match.score.player1Wins,
+        player2_wins: match.score.player2Wins,
+        winner_id: winnerId,
+        mode: match.mode,
+        games: gamesData,
+      };
+
+      // === LƯU VÀO DATABASE ===
+      console.log('[BO3] 🔄 Calling saveMatchData with payload:', JSON.stringify(matchData, null, 2));
+      const matchId = await saveMatchData(matchData);
+      
+      console.log(`[BO3] ✅ Match history saved successfully! DB Match ID: ${matchId}`);
+      console.log(`[BO3] 📊 Player 1: ${match.player1.username} (ID: ${match.player1.accountId}) - ${match.score.player1Wins} wins`);
+      console.log(`[BO3] 📊 Player 2: ${match.player2.username} (ID: ${match.player2.accountId}) - ${match.score.player2Wins} wins`);
+      console.log(`[BO3] 🏆 Winner: ${winner === 'player1' ? match.player1.username : match.player2.username}`);
+      console.log(`[BO3] 📝 Total games played: ${match.games.length}`);
+
     } catch (error) {
-      console.error('[BO3] Failed to save match history:', error);
+      console.error('[BO3] ❌ Failed to save match history:', error);
+      if (error instanceof Error) {
+        console.error('[BO3] ❌ Error details:', error.message);
+        console.error('[BO3] ❌ Error stack:', error.stack);
+      }
+      // Không throw error để không làm crash server
     }
   }
 
@@ -317,7 +491,7 @@ class BO3MatchManager {
       status: match.status
     });
   }
-public handleGameTopout(roomId: string, loserSocketId: string, reason: string) {
+  public async handleGameTopout(roomId: string, loserSocketId: string, reason: string) {
     const match = this.activeMatches.get(roomId);
     if (!match) {
       console.warn(`[BO3] handleGameTopout: Không tìm thấy trận đấu ${roomId}`);
@@ -343,21 +517,31 @@ public handleGameTopout(roomId: string, loserSocketId: string, reason: string) {
 
     console.log(`[BO3] handleGameTopout: ${winner} thắng game ${match.currentGame} (do ${loserSocketId} top-out)`);
 
-    // Tạo stats giả vì 'game:topout' không cung cấp
-    const dummyStats: GameStats = {
-      lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0
-    };
+    // 🔽 CHECK STATS CÓ TỒN TẠI KHÔNG 🔽
+    console.log(`[BO3] 🔍 Checking temp stats...`);
+  console.log(`[BO3] 🔍 tempPlayer1Stats exists:`, !!match.tempPlayer1Stats);
+  console.log(`[BO3] 🔍 tempPlayer2Stats exists:`, !!match.tempPlayer2Stats);
+
+    // 🔽 SỬ DỤNG STATS THỰC TẾ TỪ CẢ 2 PLAYER (nếu có) 🔽
+    const player1Stats = await this.waitForTempStats(match, 'tempPlayer1Stats', 'Player1');
+    const player2Stats = await this.waitForTempStats(match, 'tempPlayer2Stats', 'Player2');
+
+    console.log(`[BO3] 📊 Using stats - Player1:`, JSON.stringify(player1Stats));
+    console.log(`[BO3] 📊 Using stats - Player2:`, JSON.stringify(player2Stats));
+
+    // Clear temp stats
+    delete match.tempPlayer1Stats;
+    delete match.tempPlayer2Stats;
 
     // Gọi hàm logic chính để xử lý kết quả
-    // (Chúng ta truyền một 'dummy socket' vì hàm private này yêu cầu nó)
     this.handleGameFinished(
       { emit: (event, payload) => console.log(`[BO3] Dummy socket emit: ${event}`) } as Socket,
       {
         roomId,
         winner,
         stats: {
-          player1: dummyStats,
-          player2: dummyStats,
+          player1: player1Stats,
+          player2: player2Stats,
         }
       }
     );

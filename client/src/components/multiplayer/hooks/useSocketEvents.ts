@@ -20,6 +20,7 @@ type SocketEventProps = {
   initWebRTC: (isHost: boolean) => void;
   cleanupWebRTC: (reason?: string) => void;
   sendTopout: (reason?: string) => void;
+  sendPlayerStats: () => void;
   
   setMeId: (id: string | null) => void;
   setPlayerName: (name: string) => void;
@@ -58,7 +59,7 @@ type SocketEventProps = {
 export const useSocketEvents = (props: SocketEventProps) => {
   const {
     meId, roomId, urlRoomId, player, core, coreSetters,
-    initWebRTC, cleanupWebRTC, sendTopout,
+  initWebRTC, cleanupWebRTC, sendTopout, sendPlayerStats,
     setMeId, setPlayerName, setOpponentId, setOpponentName, setRoomId, setWaiting, setDebugInfo,
     setOppStage, setNetOppStage, setOppHold, setOppNextFour, setOppGameOver,
     setMatchResult, setCountdown, setElapsedMs, setTimerOn,
@@ -445,44 +446,51 @@ export const useSocketEvents = (props: SocketEventProps) => {
     // 🔽 BẮT ĐẦU LOGIC BO3 MỚI (ĐÃ CHÈN LOG) 🔽
     // ===============================================
 
-    // --- 1. Lắng nghe KẾT QUẢ 1 GAME (ví dụ: 1-0) ---
-    const onBo3GameResult = (payload: any) => {
+    // --- 1. Lắng nghe KẾT QUẢ 1 GAME (ví dụ: 1-0) ---
+    const onBo3GameResult = (payload: any) => {
       // LOG 5: Lắng nghe 'bo3:game-result'
       console.log('[DEBUG] 🕹️ bo3:game-result', payload);
       console.log('[DEBUG] 🕹️ playerRoleRef.current khi xử lý game-result:', playerRoleRef.current);
 
-      if (!payload?.winner || !payload?.score) return;
+      if (!payload?.winner || !payload?.score) return;
 
-      const myRole = playerRoleRef.current;
-      const didIWin = (myRole === 'player1' && payload.winner === 'player1') || 
-                      (myRole === 'player2' && payload.winner === 'player2');
-      
+      const myRole = playerRoleRef.current;
+      const didIWin = (myRole === 'player1' && payload.winner === 'player1') || 
+                      (myRole === 'player2' && payload.winner === 'player2');
+      
       // LOG 6: Tính toán thắng/thua
       console.log(`[DEBUG] 🕹️ Game Result: MyRole=${myRole}, Winner=${payload.winner}, DidIWin=${didIWin}`);
 
-      const myNewScore = myRole === 'player1' ? payload.score.player1Wins : payload.score.player2Wins;
-      const oppNewScore = myRole === 'player1' ? payload.score.player2Wins : payload.score.player1Wins;
+      // 🔽 NGƯỜI THẮNG CŨNG GỬI STATS (vì họ không gọi sendTopout()) 🔽
+      // Chỉ gửi nếu MÌNH THẮNG (người thua đã gửi qua sendTopout rồi)
+      if (didIWin && !coreRef.current.gameOver) {
+        console.log('[DEBUG] 📊 Winner sending stats via sendTopout');
+        sendTopout('opponent_topout');
+      }
 
-      if (didIWin) {
-        setOppGameOver(true);
-        runAnim('opp');
-      } else {
-        coreSetters.setGameOver(true);
-        runAnim('me');
-      }
-      setSeriesScore(payload.score);
-      setRoundResult({
-        outcome: didIWin ? 'win' : 'lose',
-        score: { me: myNewScore, opp: oppNewScore }
-      });
-      
-      setTimeout(() => {
-         setRoundResult(null);
-      }, 4000); 
-    };
-    socket.on('bo3:game-result', onBo3GameResult);
+      const myNewScore = myRole === 'player1' ? payload.score.player1Wins : payload.score.player2Wins;
+      const oppNewScore = myRole === 'player1' ? payload.score.player2Wins : payload.score.player1Wins;
 
-    // --- 2. Lắng nghe sự kiện BẮT ĐẦU GAME MỚI (ví dụ: game 2) ---
+      if (didIWin) {
+        console.log('[DEBUG] 📊 Winner sending stats via sendPlayerStats');
+        sendPlayerStats();
+        setOppGameOver(true);
+        runAnim('opp');
+      } else {
+        coreSetters.setGameOver(true);
+        runAnim('me');
+      }
+      setSeriesScore(payload.score);
+      setRoundResult({
+        outcome: didIWin ? 'win' : 'lose',
+        score: { me: myNewScore, opp: oppNewScore }
+      });
+      
+      setTimeout(() => {
+         setRoundResult(null);
+      }, 4000); 
+    };
+    socket.on('bo3:game-result', onBo3GameResult);    // --- 2. Lắng nghe sự kiện BẮT ĐẦU GAME MỚI (ví dụ: game 2) ---
     const onBo3NextGame = (payload: any) => {
       // LOG 7: Lắng nghe 'bo3:next-game-start'
       console.log('[DEBUG] 🚀 bo3:next-game-start', payload);

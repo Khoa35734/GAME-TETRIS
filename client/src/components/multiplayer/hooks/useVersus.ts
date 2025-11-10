@@ -124,6 +124,10 @@ export const useVersus = (urlRoomId: string | undefined) => {
     core: coreState,
     nextFour,
     hold,
+    // 🔽 TRUYỀN STATS VÀO NETWORK 🔽
+    piecesPlaced,
+    attacksSent,
+    elapsedMs,
     onOpponentTopout: (reason) => {
       // Logic này chỉ dành cho UDP, logic BO3 sẽ do useSocketEvents xử lý
       setOppGameOver(true);
@@ -153,6 +157,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
     initWebRTC: network.initWebRTC,
     cleanupWebRTC: network.cleanupWebRTC,
     sendTopout: network.sendTopout,
+  sendPlayerStats: network.sendPlayerStats,
     
     setMeId,
     setPlayerName,

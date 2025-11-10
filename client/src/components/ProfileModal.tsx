@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { getUserData } from '../services/authService';
+import {
+  getMatchHistory,
+  getMatchDetail,
+  calculatePPS,
+  calculateFinesse,
+  formatElapsedTime,
+  formatRelativeTime,
+  type MatchHistoryItem,
+  type MatchDetail,
+  type GameStats as ApiGameStats,
+} from '../services/matchHistoryService';
 
 interface PlayerStats {
   lines: number;
@@ -43,6 +54,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const [matchHistory, setMatchHistory] = useState<MatchHistory[]>([]);
   const [selectedMatch, setSelectedMatch] = useState<MatchHistory | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -65,104 +77,117 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         return;
       }
 
-      // Mock data cho demo
-      const mockMatches: MatchHistory[] = [
-        {
-          matchId: 'match_1',
-          mode: 'casual',
-          opponent: 'Player123',
-          result: 'WIN',
-          score: '2-1',
-          timestamp: Date.now() - 3600000,
-          bo3Score: { playerWins: 2, opponentWins: 1 },
-          games: [
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'player',
-              playerStats: { lines: 40, pps: 2.5, finesse: 85, pieces: 150, holds: 12, inputs: 450, time: 120 },
-              opponentStats: { lines: 35, pps: 2.1, finesse: 78, pieces: 140, holds: 15, inputs: 420, time: 120 }
-            },
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'opponent',
-              playerStats: { lines: 32, pps: 2.2, finesse: 80, pieces: 130, holds: 10, inputs: 390, time: 115 },
-              opponentStats: { lines: 40, pps: 2.6, finesse: 88, pieces: 155, holds: 11, inputs: 465, time: 115 }
-            },
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'player',
-              playerStats: { lines: 40, pps: 2.7, finesse: 90, pieces: 160, holds: 8, inputs: 480, time: 110 },
-              opponentStats: { lines: 30, pps: 2.0, finesse: 75, pieces: 125, holds: 18, inputs: 375, time: 110 }
-            }
-          ]
-        },
-        {
-          matchId: 'match_2',
-          mode: 'ranked',
-          opponent: 'ProGamer99',
-          result: 'LOSE',
-          score: '1-2',
-          timestamp: Date.now() - 7200000,
-          bo3Score: { playerWins: 1, opponentWins: 2 },
-          games: [
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'player',
-              playerStats: { lines: 40, pps: 2.4, finesse: 82, pieces: 145, holds: 14, inputs: 435, time: 125 },
-              opponentStats: { lines: 38, pps: 2.3, finesse: 80, pieces: 142, holds: 13, inputs: 426, time: 125 }
-            },
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'opponent',
-              playerStats: { lines: 30, pps: 1.9, finesse: 70, pieces: 120, holds: 20, inputs: 360, time: 130 },
-              opponentStats: { lines: 40, pps: 2.8, finesse: 92, pieces: 165, holds: 9, inputs: 495, time: 130 }
-            },
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'opponent',
-              playerStats: { lines: 35, pps: 2.1, finesse: 76, pieces: 135, holds: 16, inputs: 405, time: 120 },
-              opponentStats: { lines: 40, pps: 2.9, finesse: 94, pieces: 170, holds: 7, inputs: 510, time: 120 }
-            }
-          ]
-        },
-        {
-          matchId: 'match_3',
-          mode: 'casual',
-          opponent: 'Noob42',
-          result: 'WIN',
-          score: '2-0',
-          timestamp: Date.now() - 86400000,
-          bo3Score: { playerWins: 2, opponentWins: 0 },
-          games: [
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'player',
-              playerStats: { lines: 40, pps: 2.8, finesse: 88, pieces: 155, holds: 10, inputs: 465, time: 115 },
-              opponentStats: { lines: 25, pps: 1.5, finesse: 60, pieces: 100, holds: 25, inputs: 300, time: 115 }
-            },
-            {
-              playerScore: 0,
-              opponentScore: 0,
-              winner: 'player',
-              playerStats: { lines: 40, pps: 3.0, finesse: 92, pieces: 165, holds: 8, inputs: 495, time: 105 },
-              opponentStats: { lines: 22, pps: 1.4, finesse: 58, pieces: 95, holds: 28, inputs: 285, time: 105 }
-            }
-          ]
-        }
-      ];
+      // Fetch real data from API
+      const matches = await getMatchHistory(user.accountId);
 
-      setMatchHistory(mockMatches);
+      // Transform API data to component format
+      const transformedMatches: MatchHistory[] = matches.map((match) => ({
+        matchId: match.match_id.toString(),
+        mode: 'casual', // TODO: Add mode field to DB if needed
+        opponent: match.opponent_name,
+        result: match.result,
+        score: match.score,
+        timestamp: new Date(match.match_timestamp).getTime(),
+        bo3Score: {
+          playerWins: match.result === 'WIN' ? match.player1_score : match.player2_score,
+          opponentWins: match.result === 'WIN' ? match.player2_score : match.player1_score,
+        },
+        games: [], // Will be loaded when user clicks on the match
+      }));
+
+      setMatchHistory(transformedMatches);
     } catch (error) {
       console.error('Failed to load match history:', error);
+      setMatchHistory([]); // Set empty array on error
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMatchDetail = async (match: MatchHistory) => {
+    try {
+      setLoadingDetail(true);
+      const user = getUserData();
+      if (!user || user.isGuest) return;
+
+      // Fetch detailed match data including game stats
+      const detail = await getMatchDetail(user.accountId, parseInt(match.matchId));
+
+      // Group game stats by game number and organize by player
+      const gamesMap = new Map<number, { playerStats?: ApiGameStats; opponentStats?: ApiGameStats }>();
+
+      detail.games.forEach((game) => {
+        if (!gamesMap.has(game.game_number)) {
+          gamesMap.set(game.game_number, {});
+        }
+
+        const gameData = gamesMap.get(game.game_number)!;
+
+        // Determine if this is the current user's stats or opponent's
+        if (game.player_id === user.accountId) {
+          gameData.playerStats = game;
+        } else {
+          gameData.opponentStats = game;
+        }
+      });
+
+      // Transform to GameResult format
+      const games: GameResult[] = Array.from(gamesMap.entries())
+        .sort((a, b) => a[0] - b[0]) // Sort by game number
+        .map(([gameNum, data]) => {
+          const playerStats = data.playerStats;
+          const opponentStats = data.opponentStats;
+
+          if (!playerStats || !opponentStats) {
+            console.warn(`Missing stats for game ${gameNum}`);
+            // Return placeholder
+            return {
+              playerScore: 0,
+              opponentScore: 0,
+              winner: 'player' as const,
+              playerStats: { lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0 },
+              opponentStats: { lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0 },
+            };
+          }
+
+          return {
+            playerScore: 0,
+            opponentScore: 0,
+            winner: playerStats.is_winner ? ('player' as const) : ('opponent' as const),
+            playerStats: {
+              lines: playerStats.lines_cleared,
+              pps: calculatePPS(playerStats.pieces_placed, playerStats.elapsed_ms),
+              finesse: calculateFinesse(playerStats.inputs),
+              pieces: playerStats.pieces_placed,
+              holds: playerStats.holds,
+              inputs: playerStats.inputs,
+              time: Math.floor(playerStats.elapsed_ms / 1000),
+            },
+            opponentStats: {
+              lines: opponentStats.lines_cleared,
+              pps: calculatePPS(opponentStats.pieces_placed, opponentStats.elapsed_ms),
+              finesse: calculateFinesse(opponentStats.inputs),
+              pieces: opponentStats.pieces_placed,
+              holds: opponentStats.holds,
+              inputs: opponentStats.inputs,
+              time: Math.floor(opponentStats.elapsed_ms / 1000),
+            },
+          };
+        });
+
+      // Update the match with full game data
+      const matchWithGames: MatchHistory = {
+        ...match,
+        games,
+      };
+
+      setSelectedMatch(matchWithGames);
+    } catch (error) {
+      console.error('Failed to load match detail:', error);
+      // Still show the match but with empty games
+      setSelectedMatch(match);
+    } finally {
+      setLoadingDetail(false);
     }
   };
 
@@ -297,7 +322,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                   display: 'inline-block'
                 }}
               >
-                ID: {currentUser?.id || 'N/A'}
+                ID: {currentUser?.accountId || 'N/A'}
               </div>
             </div>
 
@@ -346,7 +371,14 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
 
           {/* Right Panel - Match History */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {selectedMatch ? (
+            {loadingDetail ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ textAlign: 'center', color: '#888' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '16px' }}>⏳</div>
+                  <div style={{ fontSize: '1.1rem' }}>Đang tải chi tiết trận đấu...</div>
+                </div>
+              </div>
+            ) : selectedMatch ? (
               <MatchDetailView
                 match={selectedMatch}
                 onBack={() => setSelectedMatch(null)}
@@ -379,7 +411,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                       <MatchHistoryCard
                         key={match.matchId}
                         match={match}
-                        onClick={() => setSelectedMatch(match)}
+                        onClick={() => loadMatchDetail(match)}
                       />
                     ))}
                   </div>
@@ -425,20 +457,6 @@ const StatCard: React.FC<{ label: string; value: string; color: string }> = ({ l
 // Match History Card Component
 const MatchHistoryCard: React.FC<{ match: MatchHistory; onClick: () => void }> = ({ match, onClick }) => {
   const isWin = match.result === 'WIN';
-
-  const formatDate = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 60) return `${diffMins} phút trước`;
-    if (diffHours < 24) return `${diffHours} giờ trước`;
-    if (diffDays < 7) return `${diffDays} ngày trước`;
-    return date.toLocaleDateString('vi-VN');
-  };
 
   return (
     <div
@@ -503,7 +521,7 @@ const MatchHistoryCard: React.FC<{ match: MatchHistory; onClick: () => void }> =
             Tỷ số: {match.score}
           </div>
           <div style={{ color: '#888', fontSize: '0.85rem' }}>
-            {formatDate(match.timestamp)}
+            {formatRelativeTime(new Date(match.timestamp).toISOString())}
           </div>
         </div>
       </div>
