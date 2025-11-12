@@ -30,6 +30,8 @@ export interface MatchHistoryItem {
   result: 'WIN' | 'LOSE';
   opponent_name: string;
   score: string; // Format: "2-1"
+  mode: 'casual' | 'ranked'; // Match mode
+  end_reason?: string; // 'normal', 'player1_disconnect', 'player2_disconnect', etc.
 }
 
 export interface MatchDetail {
@@ -117,4 +119,25 @@ export function formatRelativeTime(timestamp: string): string {
   if (diffHours < 24) return `${diffHours} giờ trước`;
   if (diffDays < 7) return `${diffDays} ngày trước`;
   return date.toLocaleDateString('vi-VN');
+}
+
+/**
+ * Get user statistics including ELO rating
+ */
+export interface UserStats {
+  userId: number;
+  username: string;
+  eloRating: number;
+  winStreak: number;
+  totalMatches: number;
+  wins: number;
+  losses: number;
+  rankedMatches: number;
+  casualMatches: number;
+  winRate: string;
+}
+
+export async function getUserStats(userId: number): Promise<UserStats> {
+  const response = await axios.get<UserStats>(`${getApiUrl()}/match-history/stats/${userId}`);
+  return response.data;
 }

@@ -19,15 +19,15 @@ const StatsPanel: React.FC<StatsPanelProps> = ({ elapsedMs, piecesPlaced, attack
     <div
       style={{
         background: 'rgba(20, 20, 22, 0.85)',
-        padding: '8px 12px',
+        padding: '6px 10px',
         borderRadius: 8,
         border: `1px solid ${accentColor}40`,
         color: '#fff',
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: 600,
         display: 'grid',
-        gap: 4,
-        minWidth: 140,
+        gap: 3,
+        minWidth: 110,
         boxShadow: `0 0 12px ${accentColor}30`,
       }}
     >

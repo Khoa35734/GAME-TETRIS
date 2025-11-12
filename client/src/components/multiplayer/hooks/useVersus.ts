@@ -37,6 +37,9 @@ export const useVersus = (urlRoomId: string | undefined) => {
   const [playerName, setPlayerName] = useState<string>('Bạn');
   const [opponentName, setOpponentName] = useState<string>('Đối thủ');
   
+  // Match mode (ranked or casual)
+  const [matchMode, setMatchMode] = useState<'ranked' | 'casual'>('casual');
+  
   const [countdown, setCountdown] = useState<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [timerOn, setTimerOn] = useState(false);
@@ -62,6 +65,13 @@ export const useVersus = (urlRoomId: string | undefined) => {
   const [piecesPlaced, setPiecesPlaced] = useState(0);
   const [attacksSent, setAttacksSent] = useState(0);
 
+  // ⭐ ELO Rating data (for rank result overlay)
+  const [eloData, setEloData] = useState<{
+    oldElo: number;
+    newElo: number;
+    eloChange: number;
+  } | null>(null);
+
   // 🔽 [SỬA LỖI 1A] Tạo refs để lưu giá trị state mới nhất cho interval
   // Điều này ngăn việc interval bị "stale closure" (dùng giá trị cũ)
   const piecesPlacedRef = useRef(piecesPlaced);
@@ -73,6 +83,48 @@ export const useVersus = (urlRoomId: string | undefined) => {
   useEffect(() => { piecesPlacedRef.current = piecesPlaced; }, [piecesPlaced]);
   useEffect(() => { attacksSentRef.current = attacksSent; }, [attacksSent]);
   useEffect(() => { elapsedMsRef.current = elapsedMs; }, [elapsedMs]);
+  
+  // ⭐ Listen for ELO updates from server
+  useEffect(() => {
+    const handleEloUpdate = (data: {
+      winnerId: number;
+      loserId: number;
+      winnerOldElo: number;
+      winnerNewElo: number;
+      loserOldElo: number;
+      loserNewElo: number;
+      winnerEloChange: number; // positive
+      loserEloChange: number; // negative
+    }) => {
+      console.log('⭐ [ELO] Received ELO update:', data);
+      
+      // Determine if I'm the winner or loser
+      const myAccountId = Number(meId);
+      if (myAccountId === data.winnerId) {
+        // I won
+        setEloData({
+          oldElo: data.winnerOldElo,
+          newElo: data.winnerNewElo,
+          eloChange: data.winnerEloChange, // positive
+        });
+        console.log(`⭐ [ELO] I WON: ${data.winnerOldElo} → ${data.winnerNewElo} (+${data.winnerEloChange})`);
+      } else if (myAccountId === data.loserId) {
+        // I lost
+        setEloData({
+          oldElo: data.loserOldElo,
+          newElo: data.loserNewElo,
+          eloChange: data.loserEloChange, // negative
+        });
+        console.log(`⭐ [ELO] I LOST: ${data.loserOldElo} → ${data.loserNewElo} (${data.loserEloChange})`);
+      }
+    };
+
+    socket.on('elo:updated', handleEloUpdate);
+
+    return () => {
+      socket.off('elo:updated', handleEloUpdate);
+    };
+  }, [meId]);
   
   // Opponent board state
   const [oppStage, setOppStage] = useState<any[][]>(() => createStage());
@@ -190,6 +242,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
     setSeriesScore: series.applySeriesScore, // Đổi tên để khớp với hàm trong useSeriesState
     setSeriesCurrentGame: series.setSeriesCurrentGame,
     setPlayerRole: series.setPlayerRole,
+    setMatchMode, // ⭐ Truyền setter để cập nhật match mode
     playerRoleRef: series.playerRoleRef, // Truyền ref để listener luôn có giá trị mới nhất
   });
   
@@ -340,6 +393,10 @@ export const useVersus = (urlRoomId: string | undefined) => {
     // 📊 Live performance stats
     piecesPlaced,
     attacksSent,
+    
+    // ⭐ ELO Rating
+    eloData,
+    matchMode, // ⭐ Match mode (ranked or casual)
     
     // Opponent Info
     opponentName,

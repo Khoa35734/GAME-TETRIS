@@ -7,9 +7,11 @@ import {
   calculateFinesse,
   formatElapsedTime,
   formatRelativeTime,
+  getUserStats,
   type MatchHistoryItem,
   type MatchDetail,
   type GameStats as ApiGameStats,
+  type UserStats,
 } from '../services/matchHistoryService';
 
 interface PlayerStats {
@@ -42,6 +44,7 @@ interface MatchHistory {
     playerWins: number;
     opponentWins: number;
   };
+  endReason?: string; // 'normal', 'player1_disconnect', 'player2_disconnect', etc.
 }
 
 interface ProfileModalProps {
@@ -51,6 +54,7 @@ interface ProfileModalProps {
 
 const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [userStats, setUserStats] = useState<any>(null);
   const [matchHistory, setMatchHistory] = useState<MatchHistory[]>([]);
   const [selectedMatch, setSelectedMatch] = useState<MatchHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,12 +64,25 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     if (isOpen) {
       loadUserData();
       loadMatchHistory();
+      loadUserStats();
     }
   }, [isOpen]);
 
   const loadUserData = async () => {
     const user = getUserData();
     setCurrentUser(user);
+  };
+
+  const loadUserStats = async () => {
+    try {
+      const user = getUserData();
+      if (!user || user.isGuest) return;
+
+      const stats = await getUserStats(user.accountId);
+      setUserStats(stats);
+    } catch (error) {
+      console.error('Failed to load user stats:', error);
+    }
   };
 
   const loadMatchHistory = async () => {
@@ -83,7 +100,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       // Transform API data to component format
       const transformedMatches: MatchHistory[] = matches.map((match) => ({
         matchId: match.match_id.toString(),
-        mode: 'casual', // TODO: Add mode field to DB if needed
+        mode: match.mode || 'casual', // Use mode from API
         opponent: match.opponent_name,
         result: match.result,
         score: match.score,
@@ -93,6 +110,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
           opponentWins: match.result === 'WIN' ? match.player2_score : match.player1_score,
         },
         games: [], // Will be loaded when user clicks on the match
+        endReason: match.end_reason, // Add end_reason from API
       }));
 
       setMatchHistory(transformedMatches);
@@ -326,6 +344,33 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               </div>
             </div>
 
+            {/* ELO Rating - Prominent Display */}
+            {userStats && (
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, rgba(255, 170, 0, 0.2) 0%, rgba(255, 140, 0, 0.1) 100%)',
+                  border: '2px solid rgba(255, 170, 0, 0.5)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  marginBottom: '24px',
+                  textAlign: 'center',
+                  boxShadow: '0 4px 12px rgba(255, 170, 0, 0.3)'
+                }}
+              >
+                <div style={{ color: '#ffaa00', fontSize: '0.85rem', fontWeight: 700, letterSpacing: '1px', marginBottom: '8px' }}>
+                  ⭐ ELO RATING
+                </div>
+                <div style={{ fontSize: '3rem', fontWeight: 900, color: '#fff', lineHeight: 1, marginBottom: '8px' }}>
+                  {userStats.eloRating}
+                </div>
+                {userStats.winStreak > 0 && (
+                  <div style={{ fontSize: '0.9rem', color: '#4ade80', fontWeight: 600 }}>
+                    🔥 Chuỗi thắng: {userStats.winStreak}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Stats Overview */}
             <div style={{ marginBottom: '24px' }}>
               <h4
@@ -341,10 +386,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               </h4>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <StatCard label="Tổng trận" value={matchHistory.length.toString()} color="#4ecdc4" />
-                <StatCard label="Thắng" value={getTotalWins().toString()} color="#4ade80" />
-                <StatCard label="Thua" value={getTotalLosses().toString()} color="#f87171" />
-                <StatCard label="Tỷ lệ thắng" value={`${getWinRate()}%`} color="#fbbf24" />
+                <StatCard label="Tổng trận" value={userStats?.totalMatches?.toString() || '0'} color="#4ecdc4" />
+                <StatCard label="Thắng" value={userStats?.wins?.toString() || '0'} color="#4ade80" />
+                <StatCard label="Thua" value={userStats?.losses?.toString() || '0'} color="#f87171" />
+                <StatCard label="Tỷ lệ thắng" value={`${userStats?.winRate || '0'}%`} color="#fbbf24" />
+                <StatCard label="ELO" value={userStats?.eloRating?.toString() || '1000'} color="#ff9800" />
+                <StatCard label="Casual" value={userStats?.casualMatches?.toString() || '0'} color="#9e9e9e" />
               </div>
             </div>
 
@@ -632,6 +679,23 @@ const MatchDetailView: React.FC<{ match: MatchHistory; onBack: () => void }> = (
           <div style={{ color: '#ccc', fontSize: '1rem', marginTop: '6px' }}>
             Tỷ số: {match.score}
           </div>
+          {/* Display disconnect/AFK reason if match ended abnormally */}
+          {match.endReason && match.endReason !== 'normal' && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px',
+                background: 'rgba(251, 191, 36, 0.2)',
+                border: '1px solid rgba(251, 191, 36, 0.5)',
+                borderRadius: '6px',
+                color: '#fbbf24',
+                fontSize: '0.95rem',
+                fontWeight: 600
+              }}
+            >
+              ⚠️ {match.endReason.includes('disconnect') ? 'Đối thủ đã mất kết nối' : 'Đối thủ đã AFK'}
+            </div>
+          )}
         </div>
       </div>
 

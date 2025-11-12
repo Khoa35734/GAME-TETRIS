@@ -48,27 +48,24 @@ type SocketEventProps = {
   setIncomingGarbage: (g: number | ((prev: number) => number)) => void;
   setGarbageToSend: (g: number | ((prev: number) => number)) => void;
 
-  setRoundResult: (result: RoundResult) => void;
-  setSeriesScore: (score: any) => void;
-  setSeriesCurrentGame: (game: number) => void;
-  setPlayerRole: (role: 'player1' | 'player2' | null) => void;
-  playerRoleRef: React.RefObject<'player1' | 'player2' | null>;
+  setRoundResult: (result: RoundResult) => void;
+  setSeriesScore: (score: any) => void;
+  setSeriesCurrentGame: (game: number) => void;
+  setPlayerRole: (role: 'player1' | 'player2' | null) => void;
+  setMatchMode: (mode: 'ranked' | 'casual') => void;
+  playerRoleRef: React.RefObject<'player1' | 'player2' | null>;
 };
-
-
 export const useSocketEvents = (props: SocketEventProps) => {
   const {
     meId, roomId, urlRoomId, player, core, coreSetters,
   initWebRTC, cleanupWebRTC, sendTopout, sendPlayerStats,
-    setMeId, setPlayerName, setOpponentId, setOpponentName, setRoomId, setWaiting, setDebugInfo,
-    setOppStage, setNetOppStage, setOppHold, setOppNextFour, setOppGameOver,
-    setMatchResult, setCountdown, setElapsedMs, setTimerOn,
-    setMyFillWhiteProgress, setOppFillWhiteProgress, setMyStats,
-    setIncomingGarbage, setGarbageToSend,
-    setRoundResult, setSeriesScore, setSeriesCurrentGame, setPlayerRole, playerRoleRef
-  } = props;
-
-  // ... (các state và hàm nội bộ giữ nguyên)
+    setMeId, setPlayerName, setOpponentId, setOpponentName, setRoomId, setWaiting, setDebugInfo,
+    setOppStage, setNetOppStage, setOppHold, setOppNextFour, setOppGameOver,
+    setMatchResult, setCountdown, setElapsedMs, setTimerOn,
+    setMyFillWhiteProgress, setOppFillWhiteProgress, setMyStats,
+    setIncomingGarbage, setGarbageToSend,
+    setRoundResult, setSeriesScore, setSeriesCurrentGame, setPlayerRole, setMatchMode, playerRoleRef
+  } = props;  // ... (các state và hàm nội bộ giữ nguyên)
   const navigate = useNavigate();
   const matchTimer = useRef<number | null>(null);
   const readyEmittedRef = useRef(false);
@@ -224,19 +221,31 @@ export const useSocketEvents = (props: SocketEventProps) => {
     };
     run();
 
-    const onFound = (payload: any) => {
+    const onFound = (payload: any) => {
       stopMatchmaking();
       setRoomId(payload.roomId);
       setOpponentId(payload.opponent);
        if (payload?.opponent?.username) setOpponentName(String(payload.opponent.username));
       else if (payload?.opponentUsername) setOpponentName(payload.opponentUsername);
       else if (payload?.opponent) setOpponentName(String(payload.opponent));
+
+      if (payload?.mode) {
+        const resolvedMode = payload.mode === 'ranked' ? 'ranked' : 'casual';
+        setMatchMode(resolvedMode);
+        console.log('[DEBUG] 🎯 matchmaking:found mode:', resolvedMode, payload.mode);
+      }
     };
-    socket.on('ranked:found', onFound);
+    socket.on('ranked:found', onFound);
+    socket.on('matchmaking:found', onFound);
 
     const onGameStart = (payload?: any) => {
       stopMatchmaking();
       if (payload?.roomId) setRoomId(payload.roomId);
+      if (payload?.mode) {
+        const resolvedMode = payload.mode === 'ranked' ? 'ranked' : 'casual';
+        setMatchMode(resolvedMode);
+        console.log('[DEBUG] 🎯 game:start mode:', resolvedMode, payload.mode);
+      }
       if (payload?.player1 && payload?.player2 && meId) {
         const myInfo = payload.player1.id === meId ? payload.player1 : payload.player2.id === meId ? payload.player2 : null;
         const oppInfo = payload.player1.id === meId ? payload.player2 : payload.player2.id === meId ? payload.player1 : null;
@@ -280,6 +289,12 @@ export const useSocketEvents = (props: SocketEventProps) => {
     const onBo3MatchStartLegacy = (payload: any) => {
       console.log('[DEBUG] 🏆 bo3:match-start', payload);
       console.log('[DEBUG] 🏆 My socket.id is:', socket.id);
+      
+      // ⭐ SET MATCH MODE (ranked or casual)
+      if (payload?.mode) {
+        setMatchMode(payload.mode);
+        console.log('[DEBUG] 🏆 Match mode:', payload.mode);
+      }
       
       if (payload?.player1?.socketId && payload.player2?.socketId) {
         let role: 'player1' | 'player2' | null = null;
@@ -331,6 +346,7 @@ export const useSocketEvents = (props: SocketEventProps) => {
     return () => {
       stopMatchmaking();
       socket.off('ranked:found', onFound);
+      socket.off('matchmaking:found', onFound);
       socket.off('game:start', onGameStart);
       socket.off('game:start', onGameStartWebRTC);
 //       socket.off('matchmaking:start', onBo3MatchStart);

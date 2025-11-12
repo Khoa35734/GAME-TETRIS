@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getApiBaseUrl } from './apiConfig';
+import { tokenStore } from './tokenStore';
 
 const getApiUrl = () => getApiBaseUrl();
 
@@ -35,24 +36,48 @@ type ApiResponse<T extends object = Record<string, unknown>> = {
   message?: string;
 } & T;
 
+const normalizeToken = (token: string | null | undefined): string | null => {
+  if (!token) return null;
+  const trimmed = token.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+  return trimmed;
+};
+
 const getAuthToken = (): string | null => {
-  return localStorage.getItem('tetris:token');
+  const fromStore = normalizeToken(tokenStore.getAccessToken());
+  if (fromStore) {
+    console.log('[FriendsService] ✅ Using token from tokenStore');
+    return fromStore;
+  }
+
+  const fromStorage = normalizeToken(localStorage.getItem('tetris:token'));
+  if (fromStorage) {
+    console.log('[FriendsService] ✅ Using token from localStorage');
+    return fromStorage;
+  }
+
+  console.warn('[FriendsService] ❌ No valid token found');
+  return null;
 };
 
 export const getFriends = async (): Promise<{ success: boolean; friends?: Friend[]; message?: string }> => {
   try {
     const token = getAuthToken();
     if (!token) {
+      console.error('[friendsService] ❌ Cannot fetch friends - no token');
       return { success: false, message: 'Not authenticated' };
     }
+
+    console.log('[friendsService] 🔍 Fetching friends with token:', token.substring(0, 20) + '...');
 
     const response = await axios.get<ApiResponse<{ friends?: Friend[] }>>(`${getApiUrl()}/friends`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    console.log('[friendsService] ✅ Friends fetched successfully:', response.data);
     return response.data;
   } catch (error: any) {
-    console.error('[friendsService] Get friends error:', error);
+    console.error('[friendsService] ❌ Get friends error:', error.response?.status, error.response?.data);
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to fetch friends',

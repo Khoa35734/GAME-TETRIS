@@ -41,6 +41,7 @@ router.get('/:userId', async (req: Request, res: Response) => {
         w.user_name as winner_name,
         m.mode,
         m.match_timestamp,
+        m.end_reason,
         CASE 
           WHEN m.player1_id = $1 THEN 
             CASE WHEN m.winner_id = $1 THEN 'win' ELSE 'lose' END
@@ -73,6 +74,8 @@ router.get('/:userId', async (req: Request, res: Response) => {
       result: (row.result === 'win' ? 'WIN' : 'LOSE') as 'WIN' | 'LOSE',
       opponent_name: Number(row.player1_id) === userId ? row.player2_name : row.player1_name,
       score: `${row.player1_wins}-${row.player2_wins}`,
+      mode: row.mode || 'casual', // Add mode field
+      end_reason: row.end_reason, // Add end_reason field
     }));
 
     res.json(matches);
@@ -89,6 +92,63 @@ router.get('/:userId', async (req: Request, res: Response) => {
  * GET /api/match-history/:userId/:matchId
  * Lấy chi tiết 1 trận đấu (bao gồm stats từng ván)
  */
+router.get('/stats/:userId', async (req: Request, res: Response) => {
+  const userId = parseInt(req.params.userId);
+  console.log('[MatchHistory] Stats request for userId param:', req.params.userId, '-> parsed:', userId);
+
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
+
+  try {
+    const userQuery = await pool.query(
+      'SELECT user_id, user_name, elo_rating, win_streak FROM users WHERE user_id = $1',
+      [userId]
+    );
+
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userQuery.rows[0];
+
+    const statsQuery = await pool.query(
+      `SELECT 
+        COUNT(*) as total_matches,
+        SUM(CASE WHEN winner_id = $1 THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN winner_id != $1 THEN 1 ELSE 0 END) as losses,
+        SUM(CASE WHEN mode = 'ranked' THEN 1 ELSE 0 END) as ranked_matches,
+        SUM(CASE WHEN mode = 'casual' THEN 1 ELSE 0 END) as casual_matches
+      FROM matches 
+      WHERE player1_id = $1 OR player2_id = $1`,
+      [userId]
+    );
+
+    const stats = statsQuery.rows[0];
+
+    res.json({
+      userId: user.user_id,
+      username: user.user_name,
+      eloRating: user.elo_rating ?? 1000,
+      winStreak: user.win_streak ?? 0,
+      totalMatches: parseInt(stats.total_matches) || 0,
+      wins: parseInt(stats.wins) || 0,
+      losses: parseInt(stats.losses) || 0,
+      rankedMatches: parseInt(stats.ranked_matches) || 0,
+      casualMatches: parseInt(stats.casual_matches) || 0,
+      winRate: stats.total_matches > 0 
+        ? ((parseInt(stats.wins) / parseInt(stats.total_matches)) * 100).toFixed(1)
+        : 0,
+    });
+  } catch (error) {
+    console.error('[Match History API] Error (stats):', error);
+    res.status(500).json({
+      error: 'Failed to fetch user stats',
+      details: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 router.get('/:userId/:matchId', async (req: Request, res: Response) => {
   const userId = parseInt(req.params.userId);
   const matchId = parseInt(req.params.matchId);

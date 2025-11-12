@@ -7,7 +7,7 @@ type Props = {
 };
 
 export const StyledStage = styled.div<Props>`
-  --boardW: clamp(340px, 20vw, 480px);
+  --boardW: clamp(280px, 18vw, 380px);
   --cell: calc(var(--boardW) / ${(props) => props.width});
 
   position: relative;

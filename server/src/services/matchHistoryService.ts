@@ -51,6 +51,7 @@ export interface MatchData {
   winner_id: number | null;  // NULL nếu hòa (không bao giờ xảy ra trong BO3)
   mode: 'casual' | 'ranked';
   games: GameData[];         // Mảng chứa dữ liệu từng ván (1-3 ván)
+  end_reason?: string;       // Lý do kết thúc: 'normal', 'player1_disconnect', 'player2_disconnect', etc.
 }
 
 // =============================================
@@ -143,9 +144,10 @@ export async function saveMatchData(matchData: MatchData): Promise<number> {
         player2_wins,
         winner_id,
         mode,
-        match_timestamp
+        match_timestamp,
+        end_reason
       )
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
       RETURNING match_id
     `;
 
@@ -156,6 +158,7 @@ export async function saveMatchData(matchData: MatchData): Promise<number> {
       matchData.player2_wins,
       matchData.winner_id,
       matchData.mode,
+      matchData.end_reason || 'normal',
     ]);
 
     const matchId = matchResult.rows[0].match_id;

@@ -4,6 +4,7 @@
 import { Server, Socket } from 'socket.io';
 import { saveMatchData, calculatePPS, calculateAPM } from '../services/matchHistoryService';
 import type { MatchData, GameData, PlayerGameStats } from '../services/matchHistoryService';
+import { updateEloAfterMatch } from '../services/eloService';
 
 const DEFAULT_BEST_OF = 3;
 
@@ -62,6 +63,7 @@ interface BO3Match {
   roundActive: boolean;
   tempPlayer1Stats?: GameStats;
   tempPlayer2Stats?: GameStats;
+  endReason?: string; // 'normal', 'player1_disconnect', 'player2_disconnect', 'player1_afk', 'player2_afk'
 }
 
 class BO3MatchManager {
@@ -339,7 +341,10 @@ class BO3MatchManager {
 
     console.log(`[BO3] Match ${match.matchId} completed: ${overallWinner} wins (${finalScore})`);
 
-    // Notify players
+    // Save match history to database FIRST to get ELO changes
+    const eloChanges = await this.saveMatchHistory(match, overallWinner);
+
+    // Notify players with ELO changes
     this.io.to(match.roomId).emit('bo3:match-end', {
       winner: overallWinner,
       score: match.score,
@@ -347,10 +352,8 @@ class BO3MatchManager {
       games: match.games,
       bestOf: match.bestOf,
       winsRequired: match.winsRequired,
+      eloChanges: eloChanges, // Add ELO changes for ranked matches
     });
-
-    // Save match history to database
-    await this.saveMatchHistory(match, overallWinner);
 
     // Clean up after 30 seconds
     setTimeout(() => {
@@ -359,7 +362,7 @@ class BO3MatchManager {
     }, 30000);
   }
 
-  private async saveMatchHistory(match: BO3Match, winner: 'player1' | 'player2') {
+  private async saveMatchHistory(match: BO3Match, winner: 'player1' | 'player2'): Promise<{ winnerId: number; loserId: number; winnerEloChange: number; loserEloChange: number; winnerNewElo: number; loserNewElo: number } | null> {
     try {
       console.log(`[BO3] 💾 Saving match history to database...`);
       console.log(`[BO3] 💾 Match ID: ${match.matchId}, Room: ${match.roomId}`);
@@ -442,6 +445,7 @@ class BO3MatchManager {
         winner_id: winnerId,
         mode: match.mode,
         games: gamesData,
+        end_reason: match.endReason || 'normal',
       };
 
       // === LƯU VÀO DATABASE ===
@@ -454,6 +458,48 @@ class BO3MatchManager {
       console.log(`[BO3] 🏆 Winner: ${winner === 'player1' ? match.player1.username : match.player2.username}`);
       console.log(`[BO3] 📝 Total games played: ${match.games.length}`);
 
+      // === UPDATE ELO FOR RANKED MATCHES ===
+      if (match.mode === 'ranked') {
+        try {
+          const loserId = winner === 'player1' ? match.player2.accountId : match.player1.accountId;
+          const winScore = match.score.player1Wins > match.score.player2Wins ? match.score.player1Wins : match.score.player2Wins;
+          const loseScore = match.score.player1Wins > match.score.player2Wins ? match.score.player2Wins : match.score.player1Wins;
+
+          const eloResult = await updateEloAfterMatch(winnerId, loserId, winScore, loseScore);
+          
+          console.log(`[BO3] 🏅 ELO Updated:`);
+          console.log(`[BO3] 🏅 Winner ${winnerId}: ${eloResult.winnerOldElo} → ${eloResult.winnerNewElo} (+${eloResult.eloChange})`);
+          console.log(`[BO3] 🏅 Loser ${loserId}: ${eloResult.loserOldElo} → ${eloResult.loserNewElo} (${eloResult.loserEloChange})`);
+
+          // Emit ELO update to both players with complete data
+          this.io.to(match.roomId).emit('elo:updated', {
+            winnerId,
+            loserId,
+            winnerOldElo: eloResult.winnerOldElo,
+            winnerNewElo: eloResult.winnerNewElo,
+            loserOldElo: eloResult.loserOldElo,
+            loserNewElo: eloResult.loserNewElo,
+            winnerEloChange: eloResult.eloChange,
+            loserEloChange: eloResult.loserEloChange,
+          });
+
+          return {
+            winnerId,
+            loserId,
+            winnerEloChange: eloResult.eloChange,
+            loserEloChange: eloResult.loserEloChange,
+            winnerNewElo: eloResult.winnerNewElo,
+            loserNewElo: eloResult.loserNewElo,
+          };
+        } catch (eloError) {
+          console.error('[BO3] ❌ Failed to update ELO:', eloError);
+          // Don't throw - match history is already saved
+          return null;
+        }
+      }
+
+      return null;
+
     } catch (error) {
       console.error('[BO3] ❌ Failed to save match history:', error);
       if (error instanceof Error) {
@@ -461,6 +507,7 @@ class BO3MatchManager {
         console.error('[BO3] ❌ Error stack:', error.stack);
       }
       // Không throw error để không làm crash server
+      return null;
     }
   }
 
@@ -554,6 +601,72 @@ class BO3MatchManager {
   // Get all active matches
   public getActiveMatchesCount(): number {
     return this.activeMatches.size;
+  }
+
+  /**
+   * Find active match by socket ID
+   */
+  public findMatchBySocketId(socketId: string): BO3Match | null {
+    for (const match of this.activeMatches.values()) {
+      if (match.player1.socketId === socketId || match.player2.socketId === socketId) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Handle player disconnect/AFK - auto-forfeit the match
+   */
+  public handlePlayerDisconnect(roomId: string, disconnectedPlayer: 'player1' | 'player2', reason: 'disconnect' | 'afk') {
+    const match = this.activeMatches.get(roomId);
+    if (!match || match.status === 'completed') {
+      console.log(`[BO3] No active match found for room ${roomId} to handle disconnect`);
+      return;
+    }
+
+    console.log(`[BO3] 🔌 Player ${disconnectedPlayer} ${reason} in room ${roomId}`);
+
+    // Set end reason
+    match.endReason = `${disconnectedPlayer}_${reason}`;
+
+    // Auto-forfeit: winner is the OTHER player
+    const winner = disconnectedPlayer === 'player1' ? 'player2' : 'player1';
+    
+    // Award all remaining wins to winner
+    const remainingWins = match.winsRequired - Math.max(match.score.player1Wins, match.score.player2Wins);
+    if (winner === 'player1') {
+      match.score.player1Wins = match.winsRequired;
+    } else {
+      match.score.player2Wins = match.winsRequired;
+    }
+
+    // Mark as completed
+    match.status = 'completed';
+
+    console.log(`[BO3] 🏆 Auto-forfeit: ${winner} wins due to ${disconnectedPlayer} ${reason}`);
+    console.log(`[BO3] 📊 Final score: ${match.score.player1Wins}-${match.score.player2Wins}`);
+
+    // Emit match end event
+    this.io.to(roomId).emit('bo3:match-ended', {
+      matchId: match.matchId,
+      winner,
+      score: match.score,
+      finalScore: `${match.score.player1Wins}-${match.score.player2Wins}`,
+      reason: match.endReason,
+      games: match.games,
+      bestOf: match.bestOf,
+      winsRequired: match.winsRequired,
+    });
+
+    // Save to database (with existing stats if any)
+    this.saveMatchHistory(match, winner);
+
+    // Clean up
+    setTimeout(() => {
+      this.activeMatches.delete(roomId);
+      console.log(`[BO3] Match ${match.matchId} cleaned up after disconnect`);
+    }, 10000);
   }
 }
 

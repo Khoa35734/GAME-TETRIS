@@ -81,7 +81,13 @@ setupRoomHandlers(socket, io);
       status: 'online',
       since: Date.now(),
     });
-
+io.emit('presence:update', { // Tạm thời broadcast cho tất cả (nếu mạng nhỏ)
+        userId: accountId,
+        status: 'online',
+        mode: undefined,
+        since: Date.now(),
+    });
+    console.log(`[Socket] 📡 Broadcasted presence: ${username} is online`);
     // Notify matchmaking system
     matchmaking.handleSocketConnected(socket);
 
@@ -134,15 +140,17 @@ setupRoomHandlers(socket, io);
         const payload = {
           countdown: 3,
           roomId: match.roomId ?? roomId,
+          matchId: match.matchId,
+          mode: match.mode === 'ranked' ? 'ranked' : 'casual',
           seed: match.seed,
           next: initialPieces,
           player1: {
-            id: players[0].accountId ?? players[0].playerId,
+            id: String(players[0].accountId ?? players[0].playerId),
             name: players[0].name ?? null,
             socketId: players[0].socketId,
           },
           player2: {
-            id: players[1].accountId ?? players[1].playerId,
+            id: String(players[1].accountId ?? players[1].playerId),
             name: players[1].name ?? null,
             socketId: players[1].socketId,
           },
@@ -350,6 +358,26 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
       console.log(`\n[Socket] ⛔ User disconnected: ${username} (${accountId})`);
       console.log(`[Socket] Reason: ${reason}`);
 
+      // Handle BO3 match disconnect (forfeit if in active match)
+      try {
+        const activeMatch = matchmaking.bo3MatchManager.findMatchBySocketId(socket.id);
+        if (activeMatch) {
+          console.log(`[Socket] 🏳️ Player ${username} disconnected from BO3 match ${activeMatch.roomId}`);
+          
+          // Determine which player disconnected
+          const disconnectedPlayer = activeMatch.player1.socketId === socket.id ? 'player1' : 'player2';
+          
+          // Auto-forfeit with disconnect reason
+          await matchmaking.bo3MatchManager.handlePlayerDisconnect(
+            activeMatch.roomId,
+            disconnectedPlayer,
+            'disconnect'
+          );
+        }
+      } catch (error) {
+        console.error('[Socket] ❌ Error handling BO3 disconnect:', error);
+      }
+
       // Handle matchmaking disconnect
       try {
         matchmaking.handleDisconnect(socket);
@@ -371,7 +399,13 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
         status: 'offline',
         since: Date.now(),
       });
-
+io.emit('presence:update', { // Tạm thời broadcast cho tất cả
+        userId: accountId,
+        status: 'offline',
+        mode: undefined,
+        since: Date.now(),
+    });
+    console.log(`[Socket] 📡 Broadcasted presence: ${username} is offline`);
       console.log(`[Socket] Current online users: ${onlineUsersState.size}`);
     });
 

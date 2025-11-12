@@ -20,7 +20,16 @@ import messagesRouter from './routes/messages';
 
 const PORT = process.env.PORT || 4000;
 
+// Prevent multiple bootstrap calls (hot reload issue)
+let isBootstrapped = false;
+
 async function bootstrap() {
+  if (isBootstrapped) {
+    console.log('[Bootstrap] ⚠️ Already bootstrapped, skipping...');
+    return;
+  }
+  isBootstrapped = true;
+
   try {
     // Initialize external services
     console.log('[Bootstrap] Initializing Redis...');
@@ -37,11 +46,9 @@ async function bootstrap() {
 
     // Start server
     server.listen(PORT, () => {
-
       console.log(`\n🚀 Server is running on port ${PORT}`);
       console.log(`📡 WebSocket server ready`);
-
-      console.log(`?? Matchmaking system initializing...`);
+      console.log(`🎮 Matchmaking system initializing...`);
       // Matchmaking system is initialized in server.ts
     });
   } catch (error) {
@@ -51,6 +58,33 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+// Graceful shutdown handler
+function gracefulShutdown(signal: string) {
+  console.log(`\n[Shutdown] Received ${signal}, closing server gracefully...`);
+  
+  if (server.listening) {
+    server.close(() => {
+      console.log('[Shutdown] HTTP server closed');
+      io.close(() => {
+        console.log('[Shutdown] Socket.IO server closed');
+        process.exit(0);
+      });
+    });
+
+    // Force close after 10 seconds
+    setTimeout(() => {
+      console.error('[Shutdown] Forcing shutdown after timeout');
+      process.exit(1);
+    }, 10000);
+  } else {
+    process.exit(0);
+  }
+}
+
+// Handle shutdown signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Presence helper exports (for backward compatibility)
 export function isUserOnline(accountId: number): boolean {
