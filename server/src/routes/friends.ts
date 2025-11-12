@@ -3,7 +3,7 @@ import Friendship, { FriendshipStatus } from '../models/Friendship';
 import User from '../models/User';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
-import { isUserOnline, getUserPresence } from '../index';
+import { isUserOnline, getUserPresence } from '../core/presence';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || '123456';
@@ -60,16 +60,17 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       success: true,
       friends: friends.map((f) => {
         const presence = getUserPresence(f.user_id);
-        const isOnline = isUserOnline(f.user_id);
+        const currentStatus = presence?.status || 'offline';
+        const isCurrentlyOnline = currentStatus !== 'offline';
         return {
           userId: f.user_id,
           username: f.user_name,
           email: f.email,
           createdAt: f.created_at,
-          isOnline,
-          presenceStatus: presence?.status || (isOnline ? 'online' : 'offline'),
-          gameMode: presence?.mode,
-          inGameSince: presence?.since,
+          isOnline: isCurrentlyOnline,
+          presenceStatus: currentStatus, 
+          gameMode: presence?.mode,
+          inGameSince: presence?.since,
         };
       }),
     });

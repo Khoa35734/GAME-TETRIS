@@ -6,6 +6,8 @@ import BO3MatchManager from '../managers/bo3MatchManager';
 import { bagGenerator, nextPieces, TType } from '../game/pieceGenerator';
 import { onlineUsers as onlineUsersState, userPresence } from '../core/state';
 import { setupRoomHandlers } from './roomHandlers';
+import { getFriendIds } from '../services/friendService';
+import { getUserPresence } from '../core/presence';
 export type PlayerState = {
   id: string;
   ready: boolean;
@@ -62,7 +64,7 @@ export function setupSocketHandlers(io: Server, matchmaking: MatchmakingSystem) 
   console.log('[SocketHandlers] Setting up socket event handlers...');
 
   io.on('connection', async (socket: Socket) => {
-    const accountId = (socket as any).accountId;
+    const accountId = Number((socket as any).accountId);
     const username = (socket as any).username;
     console.log(`\n[Socket] ✅ User connected: ${username} (ID: ${accountId}, Socket: ${socket.id})`);
 
@@ -81,13 +83,55 @@ setupRoomHandlers(socket, io);
       status: 'online',
       since: Date.now(),
     });
-    io.emit('presence:update', { // Tạm thời broadcast cho tất cả (nếu mạng nhỏ)
-        userId: accountId,
+    // Lấy danh sách bạn bè của user vừa online
+try {
+  const friendIds = await getFriendIds(accountId);
+
+  for (const friendId of friendIds) {
+    // Nếu bạn bè đó đang online → gửi event đến họ
+      const fid = Number(friendId); // ép kiểu
+  const friendSocketId = onlineUsersState.get(fid);
+    if (friendSocketId) {
+      console.log(`[Presence] Notify ${friendId} about ${username} (${accountId}) -> ${!!friendSocketId}`);
+
+      io.to(friendSocketId).emit('presence:update', {
+        userId: accountId,            // chính user vừa online
         status: 'online',
         mode: undefined,
         since: Date.now(),
-    });
+      });
+    }
+  }
+} catch (err) {
+  console.error(`[Socket] ❌ Failed to notify friends of ${username} going online`, err);
+}
+
+    //io.emit('presence:update', { // Tạm thời broadcast cho tất cả (nếu mạng nhỏ)
+      //  userId: accountId,
+        //status: 'online',
+       // mode: undefined,
+      //  since: Date.now(),
+    //});
     console.log(`[Socket] 📡 Broadcasted presence: ${username} is online`);
+try {
+  const friendIds = await getFriendIds(accountId); 
+  console.log(`[Socket] 🔄 Sending status of ${friendIds.length} friends to ${username}`);
+
+  for (const friendId of friendIds) {
+    const friendPresence = await getUserPresence(Number(friendId));  // ✅ MUST await
+
+    if (friendPresence && friendPresence.status !== 'offline') {
+      socket.emit('presence:update', { 
+        userId: friendId,
+        status: friendPresence.status, 
+        mode: friendPresence.mode, 
+        since: friendPresence.since 
+      });
+    }
+  }
+} catch (error) {
+  console.error('[Socket] ❌ Failed to send initial friend presence:', error);
+}
 
     // Notify matchmaking system
     matchmaking.handleSocketConnected(socket);
@@ -378,12 +422,32 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
         status: 'offline',
         since: Date.now(),
       });
-io.emit('presence:update', { // Tạm thời broadcast cho tất cả
+      try {
+  const friendIds = await getFriendIds(accountId);
+  for (const friendId of friendIds) {
+     const fid = Number(friendId);
+  const friendSocketId = onlineUsersState.get(fid);
+    if (friendSocketId) {
+      console.log(`[Presence] Notify ${friendId} about ${username} (${accountId}) -> ${!!friendSocketId}`);
+
+      io.to(friendSocketId).emit('presence:update', {
         userId: accountId,
         status: 'offline',
         mode: undefined,
         since: Date.now(),
-    });
+      });
+    }
+  }
+} catch (err) {
+  console.error(`[Socket] ❌ Failed to notify friends of ${username} going offline`, err);
+}
+
+//io.emit('presence:update', { // Tạm thời broadcast cho tất cả
+  //      userId: accountId,
+    //    status: 'offline',
+      //  mode: undefined,
+        //since: Date.now(),
+    //});
     console.log(`[Socket] 📡 Broadcasted presence: ${username} is offline`);
       console.log(`[Socket] Current online users: ${onlineUsersState.size}`);
     });

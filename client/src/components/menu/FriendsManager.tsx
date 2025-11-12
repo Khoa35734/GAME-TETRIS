@@ -332,68 +332,6 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (activeTab === 'friends') {
-      loadFriends();
-    } else if (activeTab === 'requests') {
-      loadRequests();
-    }
-  }, [activeTab]);
-
-  // Presence tracking via socket events
-  useEffect(() => {
-    const handleUserOnline = (userId: number) => {
-      setFriends((prev) => prev.map((f) => f.userId === userId
-        ? { ...f, isOnline: true, presenceStatus: 'online', gameMode: undefined, inGameSince: undefined }
-        : f));
-    };
-
-    const handleUserOffline = (userId: number) => {
-      setFriends((prev) => prev.map((f) => f.userId === userId
-        ? { ...f, isOnline: false, presenceStatus: 'offline', gameMode: undefined, inGameSince: undefined }
-        : f));
-    };
-
-    const handlePresenceUpdate = (payload: any) => {
-      const { userId: rawId, status, mode, since } = payload || {};
-      const userId = parseInt(String(rawId)); 
-  console.log(`✅ SOCKET RECEIVED: Cập nhật trạng thái cho User ID ${userId} thành ${status}`);
-  if (isNaN(userId)) return;
-      setFriends((prev) => {
-            const friendIds = prev.map(f => f.userId);
-            console.log(`🔍 DANH SÁCH BẠN BÈ: ${friendIds.join(', ')}`);
-             
-
-            return prev.map((f) => {
-              const friendIdNumber = parseInt(String(f.userId));
-              if (friendIdNumber === userId) {
-                console.log(`🎉 CẬP NHẬT THÀNH CÔNG: User ID ${userId} được tìm thấy trong danh sách bạn bè.`);
-            return{
-              ...f,
-              isOnline: status === 'offline' ? false : true,
-              presenceStatus: status,
-              gameMode: mode,
-              inGameSince: since,
-            };
-          }
-          return f;
-        });
-      });
-    };
-
-    console.log('👂 [FriendsManager] Registering presence listeners');
-    socket.on('user:online', handleUserOnline);
-    socket.on('user:offline', handleUserOffline);
-    socket.on('presence:update', handlePresenceUpdate);
-
-    return () => {
-      console.log('🔇 [FriendsManager] Cleaning up presence listeners');
-      socket.off('user:online', handleUserOnline);
-      socket.off('user:offline', handleUserOffline);
-      socket.off('presence:update', handlePresenceUpdate);
-    };
-  }, []);
-
   const showMessage = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setMessage({ text, type });
     setTimeout(() => setMessage(null), 3000);
@@ -491,6 +429,80 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
       showMessage(result.message || 'Lỗi khi xóa', 'error');
     }
   };
+  
+  useEffect(() => {
+    if (activeTab === 'friends') {
+      loadFriends();
+    } else if (activeTab === 'requests') {
+      loadRequests();
+    }
+  }, [activeTab]);
+
+  // Presence tracking via socket events
+  useEffect(() => {
+    const handleUserOnline = (userId: number) => {
+      setFriends((prev) => prev.map((f) => f.userId === userId
+        ? { ...f, isOnline: true, presenceStatus: 'online', gameMode: undefined, inGameSince: undefined }
+        : f));
+    };
+
+    const handleUserOffline = (userId: number) => {
+      setFriends((prev) => prev.map((f) => f.userId === userId
+        ? { ...f, isOnline: false, presenceStatus: 'offline', gameMode: undefined, inGameSince: undefined }
+        : f));
+    };
+
+    const handlePresenceUpdate = (payload: any) => {
+      const { userId: rawId, status, mode, since } = payload || {};
+      const userId = parseInt(String(rawId)); 
+  console.log(`✅ SOCKET RECEIVED: Cập nhật trạng thái cho User ID ${userId} thành ${status}`);
+  if (isNaN(userId)) return;
+      setFriends((prev) => {
+            const friendIds = prev.map(f => f.userId);
+            console.log(`🔍 DANH SÁCH BẠN BÈ: ${friendIds.join(', ')}`);
+             
+
+            return prev.map((f) => {
+              const friendIdNumber = parseInt(String(f.userId));
+              if (friendIdNumber === userId) {
+                console.log(`🎉 CẬP NHẬT THÀNH CÔNG: User ID ${userId} được tìm thấy trong danh sách bạn bè.`);
+            return{
+              ...f,
+              isOnline: status === 'offline' ? false : true,
+              presenceStatus: status,
+              gameMode: mode,
+              inGameSince: since,
+            };
+          }
+          return f;
+        });
+      });
+    };
+
+    const handleReconnect = (attemptNumber: number) => {
+        console.log(`📡 [Socket] Reconnected successfully after ${attemptNumber} attempts. Reloading friends list for full presence sync.`);
+        // Gọi hàm API REST để tải lại danh sách bạn bè và trạng thái của họ
+        // Hàm loadFriends được định nghĩa ở ngoài useEffect này (dòng ~278)
+        loadFriends(); 
+    };
+
+    console.log('👂 [FriendsManager] Registering presence listeners');
+    socket.on('user:online', handleUserOnline);
+    socket.on('user:offline', handleUserOffline);
+    socket.on('presence:update', handlePresenceUpdate);
+
+    socket.on('reconnect', handleReconnect);
+
+    return () => {
+      console.log('🔇 [FriendsManager] Cleaning up presence listeners');
+      socket.off('user:online', handleUserOnline);
+      socket.off('user:offline', handleUserOffline);
+      socket.off('presence:update', handlePresenceUpdate);
+      socket.off('reconnect', handleReconnect);
+    };
+  }, [loadFriends]);
+
+  
 
   return (
     <Container>
