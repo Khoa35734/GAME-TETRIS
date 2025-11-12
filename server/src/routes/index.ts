@@ -8,8 +8,8 @@ import reportsRouter from '../routes/reports';
 import broadcastsRouter from '../routes/broadcasts';
 import adminRoutes from '../routes/admin';
 import messagesRouter from './messages';
+import matchHistoryRouter from './matchHistory';
 import leaderboardRouter from './leaderboard';
-import gameSessionsRouter from './gameSessions';
 
 export function mountApiRoutes(app: Express) {
   app.use('/api/auth', authRouter);
@@ -21,7 +21,7 @@ export function mountApiRoutes(app: Express) {
   app.use('/api/broadcast', broadcastsRouter);
   app.use('/api/admin', adminRoutes);
   app.use('/api/messages', messagesRouter);
-  app.use('/api/leaderboard', leaderboardRouter); // 🏆 Leaderboard API
-  app.use('/api/game-sessions', gameSessionsRouter); // 🎮 Game Sessions API
+  app.use('/api/match-history', matchHistoryRouter);
+  app.use('/api/leaderboard', leaderboardRouter);
 
 }

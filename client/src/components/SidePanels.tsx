@@ -17,7 +17,7 @@ export const HoldPanel = ({
   <div style={{ ...panelTexture, ...panelHold, ...(style || {}) }}>
     <div style={header}>HOLD</div>
     <div style={content}>
-      <MinoPreview type={(hold as any) ?? null} size={18} />
+      <MinoPreview type={(hold as any) ?? null} size={14} />
     </div>
   </div>
 );
@@ -36,7 +36,7 @@ export const NextPanel = ({
     <div style={header}>NEXT</div>
     <div style={contentGrid}>
       {queue.slice(0, 4).map((t, i) => (
-        <MinoPreview key={i} type={t as any} size={18} />
+        <MinoPreview key={i} type={t as any} size={14} />
       ))}
     </div>
   </div>
@@ -83,16 +83,16 @@ const panelTexture: CSS = {
 
 // 🧩 HOLD: hẹp, luôn giữ kích cỡ, sát board trái
 const panelHold: CSS = {
-  width: 120,
-  minHeight: 110,
+  width: 95,
+  minHeight: 90,
   transform: "translateX(-2px)", // dịch sát board trái
   marginRight: 2,
 };
 
 // 🔮 NEXT: hẹp, sát board phải, canh giữa khối
 const panelNext: CSS = {
-  width: 115,
-  height: 4 * (4 * 18 + 8), // 4 khối I (4 ô mỗi khối, mỗi ô size=18, gap=8)
+  width: 95,
+  height: 4 * (4 * 14 + 6), // Reduced: 4 khối I (4 ô mỗi khối, mỗi ô size=14, gap=6)
   marginLeft: 2,
   transform: "translateX(2px)", // dịch sát phải
   display: "flex",

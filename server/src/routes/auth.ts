@@ -90,10 +90,14 @@ router.post('/register', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    console.log('[Auth] ✅ Register success - Token generated for user:', newUser.user_id);
+
     res.status(201).json({
       success: true,
       message: 'Đăng ký thành công!',
+      accessToken: token,
       token,
+      expiresIn: 7 * 24 * 60 * 60,
       user: {
         accountId: newUser.user_id,
         username: newUser.user_name,
@@ -176,10 +180,14 @@ router.post('/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    console.log('[Auth] ✅ Login success - Token generated for user:', user.user_id);
+
     res.json({
       success: true,
       message: 'Đăng nhập thành công!',
+      accessToken: token,
       token,
+      expiresIn: 7 * 24 * 60 * 60,
       user: {
         accountId: user.user_id,
         username: user.user_name,

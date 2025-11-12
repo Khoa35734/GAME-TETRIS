@@ -7,7 +7,6 @@ import { matchManager } from './managers/matchManager';
 import BO3MatchManager from './managers/bo3MatchManager';
 import { sequelize } from './stores/postgres';
 import { QueryTypes } from 'sequelize';
-
 const normalizeBestOf = (value: number): number => {
   const cleaned = Math.max(1, Math.floor(value));
   return cleaned % 2 === 0 ? cleaned + 1 : cleaned;
@@ -94,8 +93,7 @@ class MatchmakingSystem {
       socket.emit('matchmaking:error', { error: 'Not authenticated' });
       return;
     }
-
-    // 🔥 FETCH LATEST USERNAME FROM DATABASE
+ // 🔥 FETCH LATEST USERNAME FROM DATABASE
     try {
       console.log(`[Matchmaking] 🔍 Querying database for user_id: ${accountId} (type: ${typeof accountId})`);
       
@@ -376,14 +374,14 @@ class MatchmakingSystem {
         hostSocketId: match.player1.socketId,
         hostAccountId: String(match.player1.accountId),
         maxPlayers: 2,
-        hostName: match.player1.username, // ✅ Truyền username vào
+        hostName: match.player1.username,
       });
 
       await matchManager.addPlayer(roomId, {
         playerId: match.player2.socketId,
         socketId: match.player2.socketId,
         accountId: String(match.player2.accountId),
-        name: match.player2.username, // ✅ Truyền username vào
+        name: match.player2.username,
       });
 
 
@@ -462,19 +460,25 @@ console.log(`[Matchmaking] 🚀 Emitted 'game:start' to room ${roomId}`);
       this.requeuePlayer(match.player1);
       this.requeuePlayer(match.player2);
     }
-    this.io.to(match.player1.socketId).emit('game:start', {
-  roomId,
-  player1: { id: match.player1.accountId, name: match.player1.username },
-  player2: { id: match.player2.accountId, name: match.player2.username },
-  next: [], // optional: bạn có thể gửi mảng khối ban đầu từ bagGenerator() nếu muốn
-});
 
-this.io.to(match.player2.socketId).emit('game:start', {
-  roomId,
-  player1: { id: match.player1.accountId, name: match.player1.username },
-  player2: { id: match.player2.accountId, name: match.player2.username },
-  next: [],
-});
+    const normalizedMode: 'ranked' | 'casual' = match.mode === 'ranked' ? 'ranked' : 'casual';
+    const gameStartPayload = {
+      matchId: match.matchId,
+      roomId,
+      mode: normalizedMode,
+      next: [],
+      player1: {
+        id: String(match.player1.accountId),
+        name: match.player1.username,
+      },
+      player2: {
+        id: String(match.player2.accountId),
+        name: match.player2.username,
+      },
+    };
+
+    this.io.to(match.player1.socketId).emit('game:start', gameStartPayload);
+    this.io.to(match.player2.socketId).emit('game:start', gameStartPayload);
   }
 
   private handleConfirmTimeout(matchId: string) {

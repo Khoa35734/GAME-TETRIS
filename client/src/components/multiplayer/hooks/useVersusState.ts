@@ -810,8 +810,7 @@ export const useVersusState = (urlRoomId: string | undefined) => {
         let opponentInfo: { id: number, name: string } | null = null;
 
         if (payload?.player1 && payload?.player2 && meId) {
-            // Convert meId to number for comparison if needed
-            const myAccountId = parseInt(String(meId), 10);
+           const myAccountId = parseInt(String(meId), 10);
             
             if (payload.player1.id === myAccountId || String(payload.player1.id) === meId) {
                 myInfo = payload.player1;
@@ -820,14 +819,14 @@ export const useVersusState = (urlRoomId: string | undefined) => {
                 myInfo = payload.player2;
                 opponentInfo = payload.player1;
             } else {
-                 console.error("[Versus] Could not identify player!", { meId, myAccountId, p1: payload.player1.id, p2: payload.player2.id });
+                     console.error("[Versus] Could not identify player!", { meId, myAccountId, p1: payload.player1.id, p2: payload.player2.id });
             }
             
             if (myInfo?.name) {
               setPlayerName(myInfo.name);
               console.log('[Versus] ✅ My name:', myInfo.name);
             }
-            if (opponentInfo?.name) {
+         if (opponentInfo?.name) {
                 setOpponentId(String(opponentInfo.id));
                 setOpponentName(opponentInfo.name);
                 console.log('[Versus] ✅ Opponent name:', opponentInfo.name);

@@ -1,232 +1,95 @@
-import express, { Request, Response } from 'express';
-import { sequelize } from '../stores/postgres';
-import { QueryTypes } from 'sequelize';
+import { Router, Request, Response } from 'express';
+import { Pool } from 'pg';
 
-const router = express.Router();
+const router = Router();
 
-interface LeaderboardQuery {
-  search?: string;
-  sort?: 'rating' | 'wins' | 'games' | 'winrate';
-  order?: 'asc' | 'desc';
-  limit?: string;
-  offset?: string;
-}
-
-/**
- * GET /api/leaderboard
- * Get leaderboard - simplified version, just display the list
- */
-router.get('/', async (req: Request<{}, {}, {}, LeaderboardQuery>, res: Response) => {
-  console.log('[Leaderboard] 🎯 Request received');
-  
-  try {
-    // Simple query - just get top 50 players by rank_points
-    const dataQuery = `
-      SELECT 
-        u.user_id,
-        u.user_name as username,
-        u.email,
-        l.rank_points as elo_rating,
-        l.games_played,
-        CASE 
-          WHEN l.games_played > 0 THEN ROUND(l.games_played * l.winrate / 100)
-          ELSE 0 
-        END as games_won,
-        CASE 
-          WHEN l.games_played > 0 THEN (l.games_played - ROUND(l.games_played * l.winrate / 100))
-          ELSE 0 
-        END as games_lost,
-        u.created_at,
-        u.last_login,
-        COALESCE(l.winrate, 0) as win_rate,
-        l.rank_position as rank
-      FROM leaderboards l
-      INNER JOIN users u ON l.user_id = u.user_id
-      WHERE u.is_active = TRUE
-      ORDER BY l.rank_points DESC
-      LIMIT 50
-    `;
-
-    console.log('[Leaderboard] Executing query...');
-
-    const result = await sequelize.query(dataQuery, {
-      type: QueryTypes.SELECT
-    });
-
-    console.log('[Leaderboard] ✅ Success! Found', result.length, 'players');
-
-    res.json({
-      success: true,
-      data: result,
-      pagination: {
-        total: result.length,
-        limit: 50,
-        offset: 0,
-        hasMore: false
-      }
-    });
-
-  } catch (error) {
-    console.error('[Leaderboard] ❌ ERROR:', error);
-    console.error('[Leaderboard] Error details:', {
-      message: error instanceof Error ? error.message : 'Unknown',
-      stack: error instanceof Error ? error.stack : 'No stack'
-    });
-    
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch leaderboard',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
+const pool = new Pool({
+  host: process.env.PG_HOST || 'localhost',
+  port: Number(process.env.PG_PORT ?? 5432),
+  database: process.env.PG_DATABASE || process.env.PG_DB || 'tetris',
+  user: process.env.PG_USER || 'devuser',
+  password:
+    typeof process.env.PG_PASSWORD === 'string' && process.env.PG_PASSWORD.length > 0
+      ? process.env.PG_PASSWORD
+      : '123456',
 });
 
-/**
- * GET /api/leaderboard/stats
- * Get overall leaderboard statistics
- */
-router.get('/stats', async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
+  const sortParam = req.query.sort === 'winrate' ? 'winrate' : 'rating';
+  const limitParam = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 200);
+  const offsetParam = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+
   try {
-    const statsQuery = `
-      SELECT 
-        COUNT(*) as total_players,
-        COUNT(*) FILTER (WHERE l.games_played > 0) as active_players,
-        COALESCE(AVG(l.rank_points)::INTEGER, 1000) as avg_rating,
-        COALESCE(MAX(l.rank_points), 1000) as max_rating,
-        COALESCE(MIN(l.rank_points) FILTER (WHERE l.games_played > 0), 1000) as min_rating,
-        COALESCE(SUM(l.games_played), 0) as total_games,
-        COALESCE(SUM(ROUND(l.games_played * l.winrate / 100)), 0) as total_wins
-      FROM leaderboards l
-      INNER JOIN users u ON l.user_id = u.user_id
-      WHERE u.is_active = TRUE
-    `;
-
-    const result = await sequelize.query(statsQuery, {
-      type: QueryTypes.SELECT
-    }) as any[];
-    const stats = result[0];
-
-    res.json({
-      success: true,
-      stats: {
-        totalPlayers: parseInt(stats.total_players) || 0,
-        activePlayers: parseInt(stats.active_players) || 0,
-        avgRating: parseInt(stats.avg_rating) || 1000,
-        maxRating: parseInt(stats.max_rating) || 1000,
-        minRating: parseInt(stats.min_rating) || 1000,
-        totalGames: parseInt(stats.total_games) || 0,
-        totalWins: parseInt(stats.total_wins) || 0
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching leaderboard stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch statistics',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-/**
- * GET /api/leaderboard/user/:userId
- * Get specific user's rank and stats
- */
-router.get('/user/:userId', async (req: Request, res: Response) => {
-  try {
-    const { userId } = req.params;
-
     const query = `
-      WITH ranked_users AS (
-        SELECT 
-          account_id,
-          username,
-          elo_rating,
-          games_played,
-          games_won,
-          games_lost,
-          CASE 
-            WHEN games_played > 0 
-            THEN ROUND((games_won::NUMERIC / games_played) * 100, 2)
-            ELSE 0 
-          END as win_rate,
-          ROW_NUMBER() OVER (ORDER BY elo_rating DESC) as rank
-        FROM users
-        WHERE is_active = TRUE
+      WITH ranked_players AS (
+        SELECT
+          u.user_id,
+          u.user_name,
+          COALESCE(u.elo_rating, 1000) AS elo_rating,
+          COALESCE(u.win_streak, 0) AS win_streak,
+          COALESCE(SUM(CASE WHEN m.winner_id = u.user_id THEN 1 ELSE 0 END), 0)::int AS games_won,
+          COALESCE(SUM(CASE WHEN m.player1_id = u.user_id OR m.player2_id = u.user_id THEN 1 ELSE 0 END), 0)::int AS games_played,
+          CASE
+            WHEN COALESCE(SUM(CASE WHEN m.player1_id = u.user_id OR m.player2_id = u.user_id THEN 1 ELSE 0 END), 0) = 0
+              THEN 0
+            ELSE ROUND(
+              (COALESCE(SUM(CASE WHEN m.winner_id = u.user_id THEN 1 ELSE 0 END), 0)::numeric * 100.0)
+              /
+              NULLIF(COALESCE(SUM(CASE WHEN m.player1_id = u.user_id OR m.player2_id = u.user_id THEN 1 ELSE 0 END), 0)::numeric, 0),
+              1
+            )
+          END AS win_rate
+        FROM users u
+        LEFT JOIN matches m
+          ON m.mode = 'ranked'
+         AND (m.player1_id = u.user_id OR m.player2_id = u.user_id)
+        WHERE COALESCE(LOWER(u.role), 'player') <> 'admin'
+        GROUP BY u.user_id
       )
-      SELECT * FROM ranked_users
-      WHERE account_id = $1
+      SELECT *
+      FROM ranked_players
+      ORDER BY
+        ${sortParam === 'rating' ? 'elo_rating DESC, win_rate DESC' : 'win_rate DESC, games_played DESC, elo_rating DESC'}
+      OFFSET $1
+      LIMIT $2;
     `;
 
-    const result = await sequelize.query(query, {
-      replacements: [userId],
-      type: QueryTypes.SELECT
-    });
+    const { rows } = await pool.query(query, [offsetParam, limitParam]);
 
-    if (result.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
+    const payload = rows.map((row, index) => {
+      const gamesPlayed = Number(row.games_played) || 0;
+      const gamesWon = Number(row.games_won) || 0;
+      const gamesLost = Math.max(gamesPlayed - gamesWon, 0);
 
-    res.json({
-      success: true,
-      data: result[0]
-    });
-  } catch (error) {
-    console.error('Error fetching user rank:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch user rank',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-/**
- * GET /api/leaderboard/top/:count
- * Get top N players
- */
-router.get('/top/:count', async (req: Request, res: Response) => {
-  try {
-    const count = Math.min(parseInt(req.params.count) || 10, 100); // Max 100
-
-    const query = `
-      SELECT 
-        u.account_id,
-        u.username,
-        u.elo_rating,
-        u.games_played,
-        u.games_won,
-        u.games_lost,
-        CASE 
-          WHEN u.games_played > 0 
-          THEN ROUND((u.games_won::NUMERIC / u.games_played) * 100, 2)
-          ELSE 0 
-        END as win_rate,
-        ROW_NUMBER() OVER (ORDER BY u.elo_rating DESC) as rank
-      FROM users u
-      WHERE u.is_active = TRUE AND u.games_played > 0
-      ORDER BY u.elo_rating DESC
-      LIMIT $1
-    `;
-
-    const result = await sequelize.query(query, {
-      replacements: [count],
-      type: QueryTypes.SELECT
+      return {
+        account_id: Number(row.user_id),
+        username: row.user_name,
+        elo_rating: Number(row.elo_rating) || 0,
+        games_played: gamesPlayed,
+        games_won: gamesWon,
+        games_lost: gamesLost,
+        win_rate: Number(row.win_rate) || 0,
+        win_streak: Number(row.win_streak) || 0,
+        rank: offsetParam + index + 1,
+      };
     });
 
     res.json({
       success: true,
-      data: result
+      data: payload,
+      pagination: {
+        total: payload.length,
+        limit: limitParam,
+        offset: offsetParam,
+        hasMore: payload.length === limitParam,
+      },
     });
   } catch (error) {
-    console.error('Error fetching top players:', error);
+    console.error('[Leaderboard] Failed to fetch leaderboard:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch top players',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Failed to fetch leaderboard',
+      message: error instanceof Error ? error.message : String(error),
     });
   }
 });

@@ -13,6 +13,10 @@ type NetworkProps = {
   onOpponentTopout: (reason: string) => void;
   onGarbageReceived: (lines: number) => void;
   onOpponentState: (matrix: any, hold: any) => void;
+  // 🔽 THÊM PROPS CHO STATS 🔽
+  piecesPlaced?: number;
+  attacksSent?: number;
+  elapsedMs?: number;
 };
 
 /**
@@ -27,6 +31,9 @@ export const useNetwork = ({
   onOpponentTopout,
   onGarbageReceived,
   onOpponentState,
+  piecesPlaced = 0,
+  attacksSent = 0,
+  elapsedMs = 0,
 }: NetworkProps) => {
   const [isRtcReady, setIsRtcReady] = useState(false);
   const [myPing, setMyPing] = useState<number | null>(null);
@@ -39,6 +46,35 @@ export const useNetwork = ({
 
   // === 1. UDP Channel ===
   
+  const sendPlayerStats = useCallback(() => {
+    if (!roomId) {
+      return;
+    }
+
+    const timeSeconds = elapsedMs / 1000;
+    const pps = timeSeconds > 0 ? piecesPlaced / timeSeconds : 0;
+    const apm = timeSeconds > 0 ? (attacksSent / timeSeconds) * 60 : 0;
+
+    const myStats = {
+      pieces: piecesPlaced,
+      attack_lines: attacksSent,
+      time: timeSeconds,
+      pps: Math.round(pps * 100) / 100,
+      apm: Math.round(apm * 100) / 100,
+      lines: core.rows || 0,
+      finesse: 0,
+      holds: 0,
+      inputs: 0,
+    };
+
+    console.log('[Network] 📊 Sending my stats to server:', myStats);
+
+    socket.emit('bo3:player-stats', {
+      roomId,
+      stats: myStats,
+    });
+  }, [roomId, elapsedMs, piecesPlaced, attacksSent, core.rows]);
+
   const onUDPMessage = useCallback((msg: UDPMessage) => {
     switch (msg.type) {
       case 'garbage':
@@ -48,6 +84,7 @@ export const useNetwork = ({
         onOpponentState(msg.payload?.matrix, msg.payload?.hold);
         break;
       case 'topout':
+        sendPlayerStats();
         onOpponentTopout(msg.payload?.reason || 'Opponent topout');
         break;
       case 'input':
@@ -56,7 +93,7 @@ export const useNetwork = ({
         console.warn('⚠️ Unknown UDP msg type:', msg.type, msg);
         break;
     }
-  }, [onGarbageReceived, onOpponentState, onOpponentTopout]);
+  }, [onGarbageReceived, onOpponentState, onOpponentTopout, sendPlayerStats]);
 
   const { sendUDP } = useReliableUDP({
     dc: dcRef.current,
@@ -200,9 +237,13 @@ export const useNetwork = ({
   }, [sendUDP]);
   
   const sendTopout = useCallback((reason?: string) => {
+    // Vẫn giữ logic UDP/TCP topout (để server biết ai thua)
     const sent = sendUDP('topout', { reason }, true);
     if (!sent && roomId) socket.emit('game:topout', roomId, reason);
-  }, [sendUDP, roomId]);
+
+    // Gửi stats ngay sau khi báo topout
+    sendPlayerStats();
+  }, [sendUDP, roomId, sendPlayerStats]);
 
   const sendSnapshot = useCallback(() => {
     const snapshot = {
@@ -250,6 +291,7 @@ export const useNetwork = ({
     sendGarbage,
     sendInput,
     sendTopout,
+    sendPlayerStats,
     initWebRTC,
     cleanupWebRTC,
   };

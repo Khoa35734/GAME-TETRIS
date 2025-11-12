@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styled, { keyframes } from 'styled-components';
 import socket from '../../socket'; // Import socket
 import type { Friend, FriendRequest, SearchResult } from '../../services/friendsService';
@@ -331,6 +331,7 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [loading, setLoading] = useState(false);
+  const pendingPresenceRef = useRef<Map<number, { status: 'online' | 'offline' | 'in_game'; mode?: 'single' | 'multi'; since?: number }>>(new Map());
 
   useEffect(() => {
     if (activeTab === 'friends') {
@@ -342,30 +343,49 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
 
   // Presence tracking via socket events
   useEffect(() => {
-    const handleUserOnline = (userId: number) => {
-      setFriends((prev) => prev.map((f) => f.userId === userId
-        ? { ...f, isOnline: true, presenceStatus: 'online', gameMode: undefined, inGameSince: undefined }
-        : f));
+    const applyPresenceUpdate = (
+      userId: number,
+      status: 'online' | 'offline' | 'in_game',
+      mode?: 'single' | 'multi',
+      since?: number,
+    ) => {
+      if (!Number.isFinite(userId)) return;
+
+      setFriends((prev) => {
+        let found = false;
+        const updated = prev.map((f) => {
+          if (f.userId === userId) {
+            found = true;
+            return {
+              ...f,
+              isOnline: status !== 'offline',
+              presenceStatus: status,
+              gameMode: mode,
+              inGameSince: since,
+            };
+          }
+          return f;
+        });
+
+        if (!found) {
+          pendingPresenceRef.current.set(userId, { status, mode, since });
+          return prev;
+        }
+
+        pendingPresenceRef.current.delete(userId);
+        return updated;
+      });
     };
 
-    const handleUserOffline = (userId: number) => {
-      setFriends((prev) => prev.map((f) => f.userId === userId
-        ? { ...f, isOnline: false, presenceStatus: 'offline', gameMode: undefined, inGameSince: undefined }
-        : f));
-    };
+    const handleUserOnline = (userId: number) => applyPresenceUpdate(userId, 'online');
+    const handleUserOffline = (userId: number) => applyPresenceUpdate(userId, 'offline');
 
     const handlePresenceUpdate = (payload: any) => {
-      const { userId, status, mode, since } = payload || {};
-      if (typeof userId !== "number") return;
-      setFriends((prev) => prev.map((f) => f.userId === userId
-        ? {
-            ...f,
-            isOnline: status === 'offline' ? false : true,
-            presenceStatus: status,
-            gameMode: mode,
-            inGameSince: since,
-          }
-        : f));
+      const { userId: rawId, status, mode, since } = payload || {};
+      const userId = Number(rawId);
+      if (!Number.isFinite(userId)) return;
+      const normalizedStatus = status === 'in_game' ? 'in_game' : status === 'offline' ? 'offline' : 'online';
+      applyPresenceUpdate(userId, normalizedStatus, mode, since);
     };
 
     console.log('👂 [FriendsManager] Registering presence listeners');
@@ -391,8 +411,23 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
     const result = await getFriends();
     setLoading(false);
 
-    if (result.success && result.friends) {
-      setFriends(result.friends);
+    if (result.success) {
+      const fetchedFriends = (result.friends ?? []).map((friend) => {
+        const pending = pendingPresenceRef.current.get(friend.userId);
+        if (!pending) {
+          return friend;
+        }
+
+        return {
+          ...friend,
+          isOnline: pending.status !== 'offline',
+          presenceStatus: pending.status,
+          gameMode: pending.mode,
+          inGameSince: pending.since,
+        };
+      });
+
+      setFriends(fetchedFriends);
     } else {
       showMessage(result.message || 'Lỗi khi tải danh sách bạn bè', 'error');
     }

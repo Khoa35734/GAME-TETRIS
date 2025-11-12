@@ -7,6 +7,7 @@ import Stage from '../Stage';
 import { HoldPanel, NextPanel } from '../SidePanels';
 import GarbageQueueBar from '../GarbageQueueBar'; // Giả sử file này cũng ở root components
 import { ScoreUpdateOverlay } from './ScoreUpdateOverlay'; // 👈 IMPORT OVERLAY MỚI
+import { RankResultOverlay } from './RankResultOverlay'; // ⭐ IMPORT RANK RESULT OVERLAY
 import StatsPanel from './StatsPanel'; // 📊 Import Stats Panel
 
 // Import tài nguyên (với đường dẫn đã sửa)
@@ -68,6 +69,8 @@ const Versus: React.FC = () => {
     seriesBestOf,
     seriesWinsRequired,
     seriesCurrentGame,
+    eloData, // ⭐ ELO data for rank result overlay
+    matchMode, // ⭐ Match mode (ranked or casual)
     // sendTopout - removed (only used in forfeit handler)
     cleanupWebRTC,
     navigate,
@@ -305,7 +308,7 @@ const Versus: React.FC = () => {
           {countdown}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 36, alignItems: 'start', position: 'relative' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start', position: 'relative' }}>
           
           {/* Disconnect countdown notification */}
           {disconnectCountdown !== null && disconnectCountdown > 0 && (
@@ -358,8 +361,8 @@ const Versus: React.FC = () => {
             </div>
           </div>
           {/* Left side: YOU (ĐÃ ĐỔI - Board của bạn bên TRÁI với viền xanh lá) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
-            <div style={{ gridColumn: '1 / -1', color: '#4ecdc4', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 12 }}>
+            <div style={{ gridColumn: '1 / -1', color: '#4ecdc4', marginBottom: 4, fontWeight: 700, fontSize: '1rem' }}>
               {playerName ? `🎮 Bạn: ${playerName}` : '🎮 Bạn'}
             </div>
             <HoldPanel hold={hold as any} />
@@ -395,8 +398,8 @@ const Versus: React.FC = () => {
           </div>
 
           {/* Right side: OPPONENT (ĐÃ ĐỔI - Board đối thủ bên PHẢI với viền đỏ) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 16 }}>
-            <div style={{ gridColumn: '1 / -1', color: '#ff6b6b', marginBottom: 4, fontWeight: 700, fontSize: '1.1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', alignItems: 'start', gap: 12 }}>
+            <div style={{ gridColumn: '1 / -1', color: '#ff6b6b', marginBottom: 4, fontWeight: 700, fontSize: '1rem' }}>
               {(opponentName || opponentId) ? `⚔️ Đối thủ: ${opponentName || `User_${opponentId?.slice(0,4)}`}` : '⚔️ Đối thủ'}
             </div>
             <HoldPanel hold={oppHold} />
@@ -434,258 +437,154 @@ const Versus: React.FC = () => {
           </div>
         </div>
       )}
-      {/* TEMPORARILY DISABLED OVERLAY FOR TESTING FILL WHITE ANIMATION */}
-      { matchResult && (() => {
-        const result = matchResult!; // Non-null assertion since we checked above
-        return (
-        <div style={{ 
-          position: 'fixed', 
-          inset: 0, 
-          display: 'grid', 
-          placeItems: 'center', 
-          background: 'rgba(0,0,0,0.75)', 
-          color: '#fff', 
-          textAlign: 'center', 
-          zIndex: 998,
-          backdropFilter: 'blur(8px)'
-        }}>
-          <div style={{ 
-            background: 'linear-gradient(135deg, rgba(20,20,22,0.95) 0%, rgba(30,30,35,0.95) 100%)', 
-            padding: '40px 56px', 
-            borderRadius: 24, 
-            boxShadow: '0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1)', 
-            minWidth: 480,
-            maxWidth: 600,
-            border: result.outcome === 'win' 
-              ? '2px solid rgba(76, 175, 80, 0.5)' 
-              : result.outcome === 'lose' 
-                ? '2px solid rgba(244, 67, 54, 0.5)' 
-                : '2px solid rgba(255, 152, 0, 0.5)'
-          }}>
-            {/* Result Title */}
-            <div style={{ 
-              fontSize: 52, 
-              fontWeight: 900, 
-              marginBottom: 8,
-              background: result.outcome === 'win'
-                ? 'linear-gradient(135deg, #4CAF50 0%, #81C784 100%)'
-                : result.outcome === 'lose'
-                  ? 'linear-gradient(135deg, #F44336 0%, #E57373 100%)'
-                  : 'linear-gradient(135deg, #FF9800 0%, #FFB74D 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              textShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              letterSpacing: '2px'
-            }}>
-              {result.outcome === 'win' ? '🎉 CHIẾN THẮNG!' : result.outcome === 'lose' ? '😢 THẤT BẠI' : '🤝 HÒA TRẬN'}
-            </div>
+      {/* ⭐ NEW RANK RESULT OVERLAY with ELO animation - ONLY FOR RANKED MATCHES */}
+      {matchResult && eloData && matchMode === 'ranked' && (
+        <RankResultOverlay
+          show={true}
+          outcome={matchResult.outcome as 'win' | 'lose'}
+          finalScore={seriesScore}
+          bestOf={seriesBestOf}
+          playerName={playerName}
+          opponentName={opponentName}
+          myStats={myStats}
+          oppStats={oppStats}
+          oldElo={eloData.oldElo}
+          newElo={eloData.newElo}
+          eloChange={eloData.eloChange}
+          onComplete={() => {
+            if (meId) socket.emit('ranked:leave', meId);
+            if (autoExitTimerRef.current) {
+              clearInterval(autoExitTimerRef.current);
+              autoExitTimerRef.current = null;
+            }
+            cleanupWebRTC('manual-exit');
+            navigate('/?modes=1');
+          }}
+        />
+      )}
 
-            {/* Series Score Display */}
-            <div style={{
-              fontSize: 32,
-              fontWeight: 800,
-              marginBottom: 16,
+      {/* Fallback overlay for RANKED matches if ELO not received yet */}
+      {matchResult && !eloData && matchMode === 'ranked' && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.9)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            color: '#fff',
+            fontSize: 24,
+            fontWeight: 600,
+          }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⏳</div>
+            <div>Đang tính toán ELO...</div>
+          </div>
+        </div>
+      )}
+
+      {/* Simple overlay for CASUAL matches (no ELO) */}
+      {matchResult && matchMode === 'casual' && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(20,20,25,0.98) 0%, rgba(30,30,40,0.98) 100%)',
+              padding: '48px 56px',
+              borderRadius: 24,
+              boxShadow: `0 25px 80px rgba(0,0,0,0.7), 0 0 0 2px ${
+                matchResult.outcome === 'win' ? 'rgba(76, 175, 80, 0.6)' : 'rgba(244, 67, 54, 0.6)'
+              }`,
+              minWidth: 600,
+              maxWidth: 700,
+              border: `3px solid ${matchResult.outcome === 'win' ? 'rgba(76, 175, 80, 0.5)' : 'rgba(244, 67, 54, 0.5)'}`,
+              textAlign: 'center',
               color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 16,
-            }}>
-              <span style={{ 
-                color: result.outcome === 'win' ? '#4CAF50' : '#fff',
-                textShadow: '2px 2px 8px rgba(0,0,0,0.4)'
-              }}>
-                {seriesScore.me}
-              </span>
-              <span style={{ opacity: 0.5, fontSize: 24 }}>-</span>
-              <span style={{ 
-                color: result.outcome === 'lose' ? '#F44336' : '#fff',
-                textShadow: '2px 2px 8px rgba(0,0,0,0.4)'
-              }}>
-                {seriesScore.opponent}
-              </span>
-            </div>
-
-            {/* Best of X indicator */}
-            <div style={{
-              fontSize: 14,
-              opacity: 0.7,
-              marginBottom: 24,
-              fontWeight: 600,
-            }}>
-              Best of {seriesBestOf}
-            </div>
-
-            {/* Reason */}
-            {result.reason && (
-              <div style={{ 
-                fontSize: 15, 
-                opacity: 0.8, 
-                marginBottom: 32,
-                padding: '8px 16px',
-                background: 'rgba(255,255,255,0.05)',
-                borderRadius: 8,
-                fontStyle: 'italic'
-              }}>
-                💬 {result.reason}
-              </div>
-            )}
-
-            {/* Stats Comparison */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr auto 1fr', 
-              gap: 24, 
-              marginBottom: 32,
-              padding: '24px',
-              background: 'rgba(0,0,0,0.2)',
-              borderRadius: 16
-            }}>
-              {/* Your Stats */}
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ 
-                  fontSize: 14, 
-                  opacity: 0.6, 
-                  marginBottom: 12,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px'
-                }}>
-                  🎮 BẠN
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ opacity: 0.7, fontSize: 13 }}>Dòng</span>
-                    <span style={{ fontWeight: 700, fontSize: 20, color: '#4CAF50' }}>{myStats.rows}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ opacity: 0.7, fontSize: 13 }}>Level</span>
-                    <span style={{ fontWeight: 700, fontSize: 20, color: '#2196F3' }}>{myStats.level}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ opacity: 0.7, fontSize: 13 }}>Điểm</span>
-                    <span style={{ fontWeight: 700, fontSize: 20, color: '#FF9800' }}>{myStats.score.toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* VS Divider */}
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                fontSize: 28, 
+            }}
+          >
+            <div
+              style={{
+                fontSize: 64,
                 fontWeight: 900,
-                opacity: 0.3,
-                padding: '0 16px'
-              }}>
-                VS
-              </div>
-
-              {/* Opponent Stats */}
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ 
-                  fontSize: 14, 
-                  opacity: 0.6, 
-                  marginBottom: 12,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px'
-                }}>
-                  👾 ĐỐI THỦ
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 700, fontSize: 20, color: '#4CAF50' }}>{oppStats.rows}</span>
-                    <span style={{ opacity: 0.7, fontSize: 13 }}>Dòng</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 700, fontSize: 20, color: '#2196F3' }}>{oppStats.level}</span>
-                    <span style={{ opacity: 0.7, fontSize: 13 }}>Level</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 700, fontSize: 20, color: '#FF9800' }}>{oppStats.score.toLocaleString()}</span>
-                    <span style={{ opacity: 0.7, fontSize: 13 }}>Điểm</span>
-                  </div>
-                </div>
-              </div>
+                marginBottom: 24,
+                background: matchResult.outcome === 'win'
+                  ? 'linear-gradient(135deg, #4CAF50 0%, #81C784 100%)'
+                  : 'linear-gradient(135deg, #F44336 0%, #E57373 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              {matchResult.outcome === 'win' ? '🎉 THẮNG!' : '💔 THUA'}
             </div>
 
-            {/* Time Stats */}
-            <div style={{ 
-              marginBottom: 24,
-              fontSize: 14,
-              opacity: 0.7,
-              display: 'flex',
-              justifyContent: 'center',
-              gap: 24
-            }}>
-              <div>
-                ⏱️ Thời gian: <strong>{Math.floor(elapsedMs / 1000 / 60)}:{String(Math.floor(elapsedMs / 1000) % 60).padStart(2, '0')}</strong>
-              </div>
-              {myPing !== null && (
-                <div>
-                  📡 Ping: <strong>{myPing}ms</strong>
-                </div>
-              )}
+            <div style={{ fontSize: 48, fontWeight: 800, marginBottom: 32 }}>
+              {seriesScore.me} - {seriesScore.opponent}
             </div>
 
-            {/* Action Button */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-              <button
-                onClick={() => {
-                  if (meId) socket.emit('ranked:leave', meId);
-                  if (autoExitTimerRef.current) {
-                    clearInterval(autoExitTimerRef.current);
-                    autoExitTimerRef.current = null;
-                  }
-                  cleanupWebRTC('manual-exit');
-                  navigate('/?modes=1');
-                }}
-                style={{ 
-                  padding: '14px 32px', 
-                  borderRadius: 12, 
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
-                  color: '#fff', 
-                  cursor: 'pointer', 
-                  fontWeight: 700,
-                  fontSize: 15,
-                  letterSpacing: '0.5px',
-                  boxShadow: '0 4px 16px rgba(102, 126, 234, 0.4)',
-                  transition: 'all 0.3s ease',
-                  textTransform: 'uppercase'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 4px 16px rgba(102, 126, 234, 0.4)';
-                }}
-              >
-                🏠 Về Menu
-              </button>
+            <div style={{ fontSize: 14, opacity: 0.6, marginBottom: 32 }}>
+              Chế độ: Casual (Không tính ELO)
             </div>
 
-            {/* Auto Exit Countdown */}
+            <button
+              onClick={() => {
+                if (meId) socket.emit('ranked:leave', meId);
+                if (autoExitTimerRef.current) {
+                  clearInterval(autoExitTimerRef.current);
+                  autoExitTimerRef.current = null;
+                }
+                cleanupWebRTC('manual-exit');
+                navigate('/?modes=1');
+              }}
+              style={{
+                padding: '16px 48px',
+                borderRadius: 12,
+                border: 'none',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 800,
+                fontSize: 16,
+                letterSpacing: '1px',
+                boxShadow: '0 6px 20px rgba(102, 126, 234, 0.5)',
+                transition: 'all 0.3s ease',
+                textTransform: 'uppercase',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-3px) scale(1.05)';
+                e.currentTarget.style.boxShadow = '0 8px 28px rgba(102, 126, 234, 0.7)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                e.currentTarget.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.5)';
+              }}
+            >
+              🏠 Về Menu
+            </button>
+
             {autoExitCountdown !== null && (
-              <div style={{ 
-                marginTop: 20, 
-                fontSize: 12, 
-                opacity: 0.5,
-                fontStyle: 'italic'
-              }}>
+              <div style={{ marginTop: 20, fontSize: 12, opacity: 0.5 }}>
                 Tự động thoát sau {autoExitCountdown}s...
               </div>
             )}
           </div>
         </div>
-        );
-      })()}
+      )}
 
-      {/* Score Update Overlay - Hiển thị khi thắng/thua 1 ván */}
-      {roundResult && (
+      {/* Score Update Overlay - CHỈ hiển thị khi thắng/thua 1 ván VÀ trận chưa kết thúc */}
+      {roundResult && !matchResult && (
         <ScoreUpdateOverlay
           show={true}
           outcome={roundResult.outcome}

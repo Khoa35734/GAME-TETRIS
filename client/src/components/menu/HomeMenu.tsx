@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { authService, type AuthResponse } from "../../services/authService";
 import { fetchLeaderboard, type LeaderboardPlayer } from "../../services/leaderboardService";
+import { getUserStats } from "../../services/matchHistoryService";
 import SettingsPage from './SettingsPage';
 import FriendsManager from './FriendsManager';
 import ConnectionDebug from '../ConnectionDebug'; // Debug tool
@@ -56,14 +57,22 @@ const HomeMenu: React.FC = () => {
     }
   });
 
+  // ELO Rating
+  const [eloRating, setEloRating] = useState<number>(1000);
+  const [winStreak, setWinStreak] = useState<number>(0);
+
   // Guest restrictions
   const isGuest = currentUser?.isGuest ?? false;
   const guestLockReason = isGuest ? "Vui lòng đăng nhập tài khoản để vào chế độ này" : undefined;
 
-  // Real leaderboard data from API
+  // Leaderboard data
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardPlayer[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
-  const [leaderboardSort, setLeaderboardSort] = useState<'rating' | 'wins'>('rating');
+  const [leaderboardSort, setLeaderboardSort] = useState<'rating' | 'winrate'>('rating');
+  const topLeaderboardPlayer = leaderboardData[0];
+  const topEloRating = topLeaderboardPlayer ? Number(topLeaderboardPlayer.elo_rating) || 0 : 0;
+  const topWinRateValue = topLeaderboardPlayer ? Number(topLeaderboardPlayer.win_rate) || 0 : 0;
+  const rightColumnLabel = leaderboardSort === 'rating' ? 'ELO' : 'Tỷ lệ';
 
   // Fetch leaderboard data when modal opens
   useEffect(() => {
@@ -75,14 +84,16 @@ const HomeMenu: React.FC = () => {
   const loadLeaderboardData = async () => {
     setLeaderboardLoading(true);
     try {
+      const sortParam = leaderboardSort === 'rating' ? 'rating' : 'winrate';
       const response = await fetchLeaderboard({
-        sort: leaderboardSort,
+        sort: sortParam,
         order: 'desc',
-        limit: 10
+        limit: 100 // Lấy top 100 người chơi
       });
       setLeaderboardData(response.data);
+      console.log(`✅ Loaded ${response.data.length} players sorted by ${sortParam}`);
     } catch (error) {
-      console.error('Failed to load leaderboard:', error);
+      console.error('❌ Failed to load leaderboard:', error);
     } finally {
       setLeaderboardLoading(false);
     }
@@ -146,6 +157,34 @@ const HomeMenu: React.FC = () => {
     }
   }
 }, []);
+
+  // Load ELO rating when user changes
+  useEffect(() => {
+    const loadELO = async () => {
+      if (currentUser && !currentUser.isGuest) {
+        const accountId = typeof currentUser.accountId === 'number'
+          ? currentUser.accountId
+          : Number(currentUser.accountId);
+
+        if (!Number.isInteger(accountId) || accountId <= 0) {
+          console.warn('[HomeMenu] ⚠️ Bỏ qua load ELO vì accountId không hợp lệ:', currentUser.accountId);
+          return;
+        }
+
+        try {
+          console.log('🔍 Loading ELO for accountId:', accountId);
+          const stats = await getUserStats(accountId);
+          console.log('📊 Stats received:', stats);
+          setEloRating(stats.eloRating);
+          setWinStreak(stats.winStreak);
+          console.log('✅ ELO set to:', stats.eloRating);
+        } catch (error) {
+          console.error('❌ Failed to load ELO:', error);
+        }
+      }
+    };
+    loadELO();
+  }, [currentUser]);
 
   // Handle login
   const handleLogin = async (e: React.FormEvent) => {
@@ -559,7 +598,7 @@ const HomeMenu: React.FC = () => {
                 ID: #{currentUser.accountId}
               </div>
 
-              {/* Level & Stars - Chỉ hiện khi KHÔNG phải khách */}
+              {/* Level & ELO - Chỉ hiện khi KHÔNG phải khách */}
               {!currentUser.isGuest && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   {/* Level */}
@@ -582,7 +621,7 @@ const HomeMenu: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* Stars */}
+                  {/* ELO */}
                   <div style={{ 
                     display: 'flex', 
                     alignItems: 'center', 
@@ -598,8 +637,13 @@ const HomeMenu: React.FC = () => {
                       fontWeight: 600,
                       fontSize: '0.9rem'
                     }}>
-                      {playerStats.stars}
+                      {eloRating}
                     </span>
+                    {winStreak > 0 && (
+                      <span style={{ fontSize: '0.8rem', marginLeft: '2px' }}>
+                        🔥{winStreak}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -1721,6 +1765,36 @@ const HomeMenu: React.FC = () => {
               </button>
             </div>
 
+            {/* Stats Summary */}
+            {!leaderboardLoading && leaderboardData.length > 0 && (
+              <div style={{
+                background: 'rgba(78, 205, 196, 0.1)',
+                border: '1px solid rgba(78, 205, 196, 0.3)',
+                borderRadius: 8,
+                padding: '12px 16px',
+                marginBottom: '16px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '8px',
+                color: '#4ecdc4',
+                fontSize: '0.9rem',
+                fontWeight: 600
+              }}>
+                <span>📊</span>
+                <span>Hiển thị top {leaderboardData.length} người chơi</span>
+                {leaderboardSort === 'rating' ? (
+                  <span>
+                    • ELO cao nhất: <span style={{ color: '#ffc107' }}>{topEloRating}</span>
+                  </span>
+                ) : (
+                  <span>
+                    • Tỷ lệ thắng cao nhất: <span style={{ color: '#ffc107' }}>{topWinRateValue.toFixed(1)}%</span>
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Sort Tabs */}
             <div style={{ 
               display: 'flex', 
@@ -1728,7 +1802,7 @@ const HomeMenu: React.FC = () => {
               marginBottom: '24px'
             }}>
               <button
-                onClick={() => setLeaderboardSort('rating')}
+                 onClick={() => setLeaderboardSort('rating')}
                 disabled={leaderboardLoading}
                 style={{
                   flex: 1,
@@ -1748,7 +1822,7 @@ const HomeMenu: React.FC = () => {
                   opacity: leaderboardLoading ? 0.6 : 1
                 }}
                 onMouseEnter={(e) => {
-                  if (leaderboardSort !== 'rating' && !leaderboardLoading) {
+                  if (leaderboardSort !== 'rating' && !leaderboardLoading ) {
                     e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
                   }
                 }}
@@ -1758,40 +1832,40 @@ const HomeMenu: React.FC = () => {
                   }
                 }}
               >
-                ⭐ Xếp theo ELO Rating
+                📊 Xếp theo ELO
               </button>
               <button
-                onClick={() => setLeaderboardSort('wins')}
+                 onClick={() => setLeaderboardSort('winrate')}
                 disabled={leaderboardLoading}
                 style={{
                   flex: 1,
                   padding: '12px 20px',
-                  background: leaderboardSort === 'wins'
+                  background: leaderboardSort === 'winrate'
                     ? 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'
                     : 'rgba(255, 255, 255, 0.08)',
-                  border: leaderboardSort === 'wins'
+                  border: leaderboardSort === 'winrate'
                     ? '2px solid rgba(240, 147, 251, 0.5)'
                     : '1px solid rgba(255, 255, 255, 0.2)',
                   color: '#fff',
                   borderRadius: 8,
-                  cursor: leaderboardLoading ? 'wait' : 'pointer',
+                   cursor: leaderboardLoading ? 'wait' : 'pointer',
                   fontSize: '0.95rem',
                   fontWeight: 600,
                   transition: 'all 0.3s ease',
                   opacity: leaderboardLoading ? 0.6 : 1
                 }}
                 onMouseEnter={(e) => {
-                  if (leaderboardSort !== 'wins' && !leaderboardLoading) {
+                  if (leaderboardSort !== 'winrate' && !leaderboardLoading) {
                     e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (leaderboardSort !== 'wins' && !leaderboardLoading) {
+                  if (leaderboardSort !== 'winrate' && !leaderboardLoading) {
                     e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
                   }
                 }}
               >
-                🏆 Xếp theo Chiến thắng
+                📈 Xếp theo Tỷ lệ thắng
               </button>
             </div>
 
@@ -1802,8 +1876,8 @@ const HomeMenu: React.FC = () => {
               overflow: 'hidden',
               border: '1px solid rgba(255, 255, 255, 0.1)'
             }}>
-              {/* Loading State */}
-              {leaderboardLoading ? (
+              {/* Table Header */}
+               {leaderboardLoading ? (
                 <div style={{
                   padding: '60px 20px',
                   textAlign: 'center',
@@ -1846,89 +1920,94 @@ const HomeMenu: React.FC = () => {
                     <div>Người chơi</div>
                     <div>ELO Rating</div>
                     <div>Thắng</div>
-                    <div>Tỷ lệ</div>
+                    <div>{rightColumnLabel}</div>
                   </div>
-
-                  {/* Table Rows */}
-                  {leaderboardData.map((player) => {
-                    const isCurrentUser = player.account_id === currentUser?.accountId;
-                    const getMedalEmoji = (rank: number) => {
-                      if (rank === 1) return '🥇';
-                      if (rank === 2) return '🥈';
-                      if (rank === 3) return '🥉';
-                      return `#${rank}`;
-                    };
-
-                    return (
-                      <div
-                        key={player.account_id}
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '60px 1fr 120px 100px 100px',
-                          padding: '16px 20px',
-                          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                          background: isCurrentUser 
-                            ? 'rgba(78, 205, 196, 0.15)'
-                            : 'transparent',
-                          transition: 'all 0.3s ease',
-                          fontSize: '0.95rem'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isCurrentUser) {
-                            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isCurrentUser) {
-                            e.currentTarget.style.background = 'transparent';
-                          }
-                        }}
-                      >
-                        <div style={{ 
-                          fontWeight: 700,
-                          color: player.rank <= 3 ? '#ffc107' : '#888',
-                          fontSize: player.rank <= 3 ? '1.1rem' : '0.95rem'
-                        }}>
-                          {getMedalEmoji(player.rank)}
-                        </div>
-                        <div style={{ 
-                          fontWeight: isCurrentUser ? 700 : 500,
-                          color: isCurrentUser ? '#4ecdc4' : '#fff'
-                        }}>
-                          {player.username}
-                          {isCurrentUser && (
-                            <span style={{ 
-                              marginLeft: '8px', 
-                              color: '#4ecdc4',
-                              fontSize: '0.8rem'
-                            }}>
-                              (Bạn)
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ 
-                          fontWeight: 700,
-                          color: player.elo_rating >= 1500 ? '#e74c3c' : player.elo_rating >= 1200 ? '#3498db' : '#95a5a6'
-                        }}>
-                          {player.elo_rating}
-                        </div>
-                        <div style={{ 
-                          fontWeight: 600,
-                          color: '#10b981'
-                        }}>
-                          {player.games_won}
-                        </div>
-                        <div style={{ 
-                          fontWeight: 600,
-                          color: player.win_rate >= 60 ? '#10b981' : player.win_rate >= 40 ? '#ffc107' : '#ef4444'
-                        }}>
-                          {player.win_rate}%
-                        </div>
-                      </div>
-                    );
-                  })}
                 </>
               )}
+
+              {/* Table Rows */}
+              {leaderboardData.map((player, index) => {
+                  const isCurrentUser = player.username === currentUser?.username;
+                  const rank = index + 1;
+                  const getMedalEmoji = (rank: number) => {
+                    if (rank === 1) return '🥇';
+                    if (rank === 2) return '🥈';
+                    if (rank === 3) return '🥉';
+                    return `#${rank}`;
+                  };
+
+                  return (
+                    <div
+                      key={`${player.account_id}-${player.username}`}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '60px 1fr 120px 100px 100px',
+                        padding: '16px 20px',
+                        borderBottom: index < leaderboardData.length - 1 
+                          ? '1px solid rgba(255, 255, 255, 0.08)' 
+                          : 'none',
+                        background: isCurrentUser 
+                          ? 'rgba(78, 205, 196, 0.15)'
+                          : 'transparent',
+                        transition: 'all 0.3s ease',
+                        fontSize: '0.95rem'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isCurrentUser) {
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isCurrentUser) {
+                          e.currentTarget.style.background = 'transparent';
+                        }
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: 700,
+                        color: rank <= 3 ? '#ffc107' : '#888',
+                        fontSize: rank <= 3 ? '1.1rem' : '0.95rem'
+                      }}>
+                        {getMedalEmoji(rank)}
+                      </div>
+                      <div style={{ 
+                        fontWeight: isCurrentUser ? 700 : 500,
+                        color: isCurrentUser ? '#4ecdc4' : '#fff'
+                      }}>
+                        {player.username}
+                        {isCurrentUser && (
+                          <span style={{ 
+                            marginLeft: '8px', 
+                            color: '#4ecdc4',
+                            fontSize: '0.8rem'
+                          }}>
+                            (Bạn)
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ 
+                        fontWeight: 600,
+                        color: '#9b59b6'
+                      }}>
+                        {player.elo_rating}
+                      </div>
+                      <div style={{ 
+                        fontWeight: 600,
+                        color: '#4ecdc4'
+                      }}>
+                        {player.games_won}
+                      </div>
+                      <div style={{ 
+                        fontWeight: 600,
+                        color: '#ffc107'
+                      }}>
+                        {leaderboardSort === 'rating'
+                          ? player.elo_rating
+                          : `${Number(player.win_rate).toFixed(1)}%`}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </div>

@@ -20,6 +20,7 @@ type SocketEventProps = {
   initWebRTC: (isHost: boolean) => void;
   cleanupWebRTC: (reason?: string) => void;
   sendTopout: (reason?: string) => void;
+  sendPlayerStats: () => void;
   
   setMeId: (id: string | null) => void;
   setPlayerName: (name: string) => void;
@@ -47,27 +48,24 @@ type SocketEventProps = {
   setIncomingGarbage: (g: number | ((prev: number) => number)) => void;
   setGarbageToSend: (g: number | ((prev: number) => number)) => void;
 
-  setRoundResult: (result: RoundResult) => void;
-  setSeriesScore: (score: any) => void;
-  setSeriesCurrentGame: (game: number) => void;
-  setPlayerRole: (role: 'player1' | 'player2' | null) => void;
-  playerRoleRef: React.RefObject<'player1' | 'player2' | null>;
+  setRoundResult: (result: RoundResult) => void;
+  setSeriesScore: (score: any) => void;
+  setSeriesCurrentGame: (game: number) => void;
+  setPlayerRole: (role: 'player1' | 'player2' | null) => void;
+  setMatchMode: (mode: 'ranked' | 'casual') => void;
+  playerRoleRef: React.RefObject<'player1' | 'player2' | null>;
 };
-
-
 export const useSocketEvents = (props: SocketEventProps) => {
   const {
     meId, roomId, urlRoomId, player, core, coreSetters,
-    initWebRTC, cleanupWebRTC, sendTopout,
-    setMeId, setPlayerName, setOpponentId, setOpponentName, setRoomId, setWaiting, setDebugInfo,
-    setOppStage, setNetOppStage, setOppHold, setOppNextFour, setOppGameOver,
-    setMatchResult, setCountdown, setElapsedMs, setTimerOn,
-    setMyFillWhiteProgress, setOppFillWhiteProgress, setMyStats,
-    setIncomingGarbage, setGarbageToSend,
-    setRoundResult, setSeriesScore, setSeriesCurrentGame, setPlayerRole, playerRoleRef
-  } = props;
-
-  // ... (các state và hàm nội bộ giữ nguyên)
+  initWebRTC, cleanupWebRTC, sendTopout, sendPlayerStats,
+    setMeId, setPlayerName, setOpponentId, setOpponentName, setRoomId, setWaiting, setDebugInfo,
+    setOppStage, setNetOppStage, setOppHold, setOppNextFour, setOppGameOver,
+    setMatchResult, setCountdown, setElapsedMs, setTimerOn,
+    setMyFillWhiteProgress, setOppFillWhiteProgress, setMyStats,
+    setIncomingGarbage, setGarbageToSend,
+    setRoundResult, setSeriesScore, setSeriesCurrentGame, setPlayerRole, setMatchMode, playerRoleRef
+  } = props;  // ... (các state và hàm nội bộ giữ nguyên)
   const navigate = useNavigate();
   const matchTimer = useRef<number | null>(null);
   const readyEmittedRef = useRef(false);
@@ -223,19 +221,31 @@ export const useSocketEvents = (props: SocketEventProps) => {
     };
     run();
 
-    const onFound = (payload: any) => {
+    const onFound = (payload: any) => {
       stopMatchmaking();
       setRoomId(payload.roomId);
       setOpponentId(payload.opponent);
        if (payload?.opponent?.username) setOpponentName(String(payload.opponent.username));
       else if (payload?.opponentUsername) setOpponentName(payload.opponentUsername);
       else if (payload?.opponent) setOpponentName(String(payload.opponent));
+
+      if (payload?.mode) {
+        const resolvedMode = payload.mode === 'ranked' ? 'ranked' : 'casual';
+        setMatchMode(resolvedMode);
+        console.log('[DEBUG] 🎯 matchmaking:found mode:', resolvedMode, payload.mode);
+      }
     };
-    socket.on('ranked:found', onFound);
+    socket.on('ranked:found', onFound);
+    socket.on('matchmaking:found', onFound);
 
     const onGameStart = (payload?: any) => {
       stopMatchmaking();
       if (payload?.roomId) setRoomId(payload.roomId);
+      if (payload?.mode) {
+        const resolvedMode = payload.mode === 'ranked' ? 'ranked' : 'casual';
+        setMatchMode(resolvedMode);
+        console.log('[DEBUG] 🎯 game:start mode:', resolvedMode, payload.mode);
+      }
       if (payload?.player1 && payload?.player2 && meId) {
         const myInfo = payload.player1.id === meId ? payload.player1 : payload.player2.id === meId ? payload.player2 : null;
         const oppInfo = payload.player1.id === meId ? payload.player2 : payload.player2.id === meId ? payload.player1 : null;
@@ -279,6 +289,12 @@ export const useSocketEvents = (props: SocketEventProps) => {
     const onBo3MatchStartLegacy = (payload: any) => {
       console.log('[DEBUG] 🏆 bo3:match-start', payload);
       console.log('[DEBUG] 🏆 My socket.id is:', socket.id);
+      
+      // ⭐ SET MATCH MODE (ranked or casual)
+      if (payload?.mode) {
+        setMatchMode(payload.mode);
+        console.log('[DEBUG] 🏆 Match mode:', payload.mode);
+      }
       
       if (payload?.player1?.socketId && payload.player2?.socketId) {
         let role: 'player1' | 'player2' | null = null;
@@ -330,6 +346,7 @@ export const useSocketEvents = (props: SocketEventProps) => {
     return () => {
       stopMatchmaking();
       socket.off('ranked:found', onFound);
+      socket.off('matchmaking:found', onFound);
       socket.off('game:start', onGameStart);
       socket.off('game:start', onGameStartWebRTC);
 //       socket.off('matchmaking:start', onBo3MatchStart);
@@ -445,44 +462,51 @@ export const useSocketEvents = (props: SocketEventProps) => {
     // 🔽 BẮT ĐẦU LOGIC BO3 MỚI (ĐÃ CHÈN LOG) 🔽
     // ===============================================
 
-    // --- 1. Lắng nghe KẾT QUẢ 1 GAME (ví dụ: 1-0) ---
-    const onBo3GameResult = (payload: any) => {
+    // --- 1. Lắng nghe KẾT QUẢ 1 GAME (ví dụ: 1-0) ---
+    const onBo3GameResult = (payload: any) => {
       // LOG 5: Lắng nghe 'bo3:game-result'
       console.log('[DEBUG] 🕹️ bo3:game-result', payload);
       console.log('[DEBUG] 🕹️ playerRoleRef.current khi xử lý game-result:', playerRoleRef.current);
 
-      if (!payload?.winner || !payload?.score) return;
+      if (!payload?.winner || !payload?.score) return;
 
-      const myRole = playerRoleRef.current;
-      const didIWin = (myRole === 'player1' && payload.winner === 'player1') || 
-                      (myRole === 'player2' && payload.winner === 'player2');
-      
+      const myRole = playerRoleRef.current;
+      const didIWin = (myRole === 'player1' && payload.winner === 'player1') || 
+                      (myRole === 'player2' && payload.winner === 'player2');
+      
       // LOG 6: Tính toán thắng/thua
       console.log(`[DEBUG] 🕹️ Game Result: MyRole=${myRole}, Winner=${payload.winner}, DidIWin=${didIWin}`);
 
-      const myNewScore = myRole === 'player1' ? payload.score.player1Wins : payload.score.player2Wins;
-      const oppNewScore = myRole === 'player1' ? payload.score.player2Wins : payload.score.player1Wins;
+      // 🔽 NGƯỜI THẮNG CŨNG GỬI STATS (vì họ không gọi sendTopout()) 🔽
+      // Chỉ gửi nếu MÌNH THẮNG (người thua đã gửi qua sendTopout rồi)
+      if (didIWin && !coreRef.current.gameOver) {
+        console.log('[DEBUG] 📊 Winner sending stats via sendTopout');
+        sendTopout('opponent_topout');
+      }
 
-      if (didIWin) {
-        setOppGameOver(true);
-        runAnim('opp');
-      } else {
-        coreSetters.setGameOver(true);
-        runAnim('me');
-      }
-      setSeriesScore(payload.score);
-      setRoundResult({
-        outcome: didIWin ? 'win' : 'lose',
-        score: { me: myNewScore, opp: oppNewScore }
-      });
-      
-      setTimeout(() => {
-         setRoundResult(null);
-      }, 4000); 
-    };
-    socket.on('bo3:game-result', onBo3GameResult);
+      const myNewScore = myRole === 'player1' ? payload.score.player1Wins : payload.score.player2Wins;
+      const oppNewScore = myRole === 'player1' ? payload.score.player2Wins : payload.score.player1Wins;
 
-    // --- 2. Lắng nghe sự kiện BẮT ĐẦU GAME MỚI (ví dụ: game 2) ---
+      if (didIWin) {
+        console.log('[DEBUG] 📊 Winner sending stats via sendPlayerStats');
+        sendPlayerStats();
+        setOppGameOver(true);
+        runAnim('opp');
+      } else {
+        coreSetters.setGameOver(true);
+        runAnim('me');
+      }
+      setSeriesScore(payload.score);
+      setRoundResult({
+        outcome: didIWin ? 'win' : 'lose',
+        score: { me: myNewScore, opp: oppNewScore }
+      });
+      
+      setTimeout(() => {
+         setRoundResult(null);
+      }, 4000); 
+    };
+    socket.on('bo3:game-result', onBo3GameResult);    // --- 2. Lắng nghe sự kiện BẮT ĐẦU GAME MỚI (ví dụ: game 2) ---
     const onBo3NextGame = (payload: any) => {
       // LOG 7: Lắng nghe 'bo3:next-game-start'
       console.log('[DEBUG] 🚀 bo3:next-game-start', payload);
