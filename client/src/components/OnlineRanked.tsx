@@ -37,7 +37,7 @@ const OnlineRanked: React.FC = () => {
       }}
     >
       <button
-        onClick={() => navigate('/')}
+        onClick={() => navigate('/?modes=1')}
         style={{
           position: 'fixed',
           top: 12,
