@@ -5,6 +5,8 @@ import { Server, Socket } from 'socket.io';
 import { getSocketUserInfo, storeSocketUser } from './stores/redisStore';
 import { matchManager } from './managers/matchManager';
 import BO3MatchManager from './managers/bo3MatchManager';
+import { sequelize } from './stores/postgres';
+import { QueryTypes } from 'sequelize';
 
 const normalizeBestOf = (value: number): number => {
   const cleaned = Math.max(1, Math.floor(value));
@@ -87,9 +89,51 @@ class MatchmakingSystem {
       }
     }
 
-    if (!accountId || !username) {
+    if (!accountId) {
       console.warn(`[Matchmaking] Socket ${socket.id} missing account info`);
       socket.emit('matchmaking:error', { error: 'Not authenticated' });
+      return;
+    }
+
+    // 🔥 FETCH LATEST USERNAME FROM DATABASE
+    try {
+      console.log(`[Matchmaking] 🔍 Querying database for user_id: ${accountId} (type: ${typeof accountId})`);
+      
+      const userResult = await sequelize.query(
+        'SELECT user_name FROM users WHERE user_id = :userId AND is_active = TRUE',
+        {
+          replacements: { userId: accountId },
+          type: QueryTypes.SELECT
+        }
+      ) as any[];
+
+      console.log(`[Matchmaking] 🔍 DB Query result:`, JSON.stringify(userResult, null, 2));
+
+      if (userResult.length > 0 && userResult[0].user_name) {
+        username = String(userResult[0].user_name);
+        console.log(`[Matchmaking] ✅ Fetched fresh username from DB: "${username}" (ID: ${accountId})`);
+        
+        // Update Redis cache with latest username
+        await storeSocketUser(socket.id, accountId, username);
+      } else {
+        console.warn(`[Matchmaking] ⚠️ User ${accountId} not found in database!`);
+        console.warn(`[Matchmaking] Query was: SELECT user_name FROM users WHERE user_id = ${accountId} AND is_active = TRUE`);
+        socket.emit('matchmaking:error', { error: 'User not found in database' });
+        return;
+      }
+    } catch (error) {
+      console.error('[Matchmaking] Failed to fetch username from DB:', error);
+      if (!username) {
+        socket.emit('matchmaking:error', { error: 'Failed to fetch user data' });
+        return;
+      }
+      // If DB fetch fails but we have cached username, continue with it
+    }
+
+    // At this point, username must be defined
+    if (!username) {
+      console.error(`[Matchmaking] Username is still undefined for account ${accountId}`);
+      socket.emit('matchmaking:error', { error: 'Missing username' });
       return;
     }
 
@@ -332,12 +376,14 @@ class MatchmakingSystem {
         hostSocketId: match.player1.socketId,
         hostAccountId: String(match.player1.accountId),
         maxPlayers: 2,
+        hostName: match.player1.username, // ✅ Truyền username vào
       });
 
       await matchManager.addPlayer(roomId, {
         playerId: match.player2.socketId,
         socketId: match.player2.socketId,
         accountId: String(match.player2.accountId),
+        name: match.player2.username, // ✅ Truyền username vào
       });
 
 

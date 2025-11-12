@@ -53,8 +53,8 @@ export const useVersusState = (urlRoomId: string | undefined) => {
   const [pendingGarbageLeft, setPendingGarbageLeft] = useState(0);
   const [matchResult, setMatchResult] = useState<MatchSummary>(null);
 
-  const [playerName, setPlayerName] = useState<string>('Bạn');
-  const [opponentName, setOpponentName] = useState<string>('Đối thủ');
+  const [playerName, setPlayerName] = useState<string>('');
+  const [opponentName, setOpponentName] = useState<string>('');
   
   // Series (Best of X) State
   const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
@@ -83,7 +83,7 @@ export const useVersusState = (urlRoomId: string | undefined) => {
 
   useEffect(() => {
     let resolvedId: string | null = null;
-    let resolvedName = 'Bạn';
+    let resolvedName = '';
     try {
       const userStr = localStorage.getItem('tetris:user');
       if (userStr) {
@@ -94,7 +94,7 @@ export const useVersusState = (urlRoomId: string | undefined) => {
     } catch (err) { /* ... */ }
     if (!resolvedId) resolvedId = socket.id || `guest_${Date.now().toString(36)}`;
     setMeId(resolvedId);
-    setPlayerName(resolvedName);
+    if (resolvedName) setPlayerName(resolvedName);
     console.log(`[Versus] Initial Identity: meId=${resolvedId}, playerName=${resolvedName}`);
   }, []);
   
@@ -806,30 +806,31 @@ export const useVersusState = (urlRoomId: string | undefined) => {
       if (waiting) {
         if (payload?.roomId) setRoomId(payload.roomId);
 
-        let myInfo: { id: string, name: string } | null = null;
-        let opponentInfo: { id: string, name: string } | null = null;
+        let myInfo: { id: number, name: string } | null = null;
+        let opponentInfo: { id: number, name: string } | null = null;
 
         if (payload?.player1 && payload?.player2 && meId) {
-            if (payload.player1.id === meId) {
+            // Convert meId to number for comparison if needed
+            const myAccountId = parseInt(String(meId), 10);
+            
+            if (payload.player1.id === myAccountId || String(payload.player1.id) === meId) {
                 myInfo = payload.player1;
                 opponentInfo = payload.player2;
-            } else if (payload.player2.id === meId) {
+            } else if (payload.player2.id === myAccountId || String(payload.player2.id) === meId) {
                 myInfo = payload.player2;
                 opponentInfo = payload.player1;
             } else {
-                 console.error("[Versus] Could not identify player!", { meId, p1: payload.player1.id, p2: payload.player2.id });
-                 if (payload.opponent) {
-                     setOpponentId(String(payload.opponent));
-                     setOpponentName(`Opponent_${String(payload.opponent).slice(0,4)}`);
-                 }
+                 console.error("[Versus] Could not identify player!", { meId, myAccountId, p1: payload.player1.id, p2: payload.player2.id });
             }
-            if (myInfo?.name) setPlayerName(myInfo.name);
-            if (opponentInfo) {
-                setOpponentId(opponentInfo.id);
-                setOpponentName(opponentInfo.name || `Opponent_${opponentInfo.id.slice(0,4)}`);
-            } else if (!opponentId && !opponentName) {
-                 setOpponentId(null);
-                 setOpponentName('Đối thủ');
+            
+            if (myInfo?.name) {
+              setPlayerName(myInfo.name);
+              console.log('[Versus] ✅ My name:', myInfo.name);
+            }
+            if (opponentInfo?.name) {
+                setOpponentId(String(opponentInfo.id));
+                setOpponentName(opponentInfo.name);
+                console.log('[Versus] ✅ Opponent name:', opponentInfo.name);
             }
         } else {
           console.warn("[Versus] game:start payload missing player details.");
