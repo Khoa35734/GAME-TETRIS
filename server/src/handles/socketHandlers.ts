@@ -81,6 +81,13 @@ setupRoomHandlers(socket, io);
       status: 'online',
       since: Date.now(),
     });
+    io.emit('presence:update', { // Tạm thời broadcast cho tất cả (nếu mạng nhỏ)
+        userId: accountId,
+        status: 'online',
+        mode: undefined,
+        since: Date.now(),
+    });
+    console.log(`[Socket] 📡 Broadcasted presence: ${username} is online`);
 
     // Notify matchmaking system
     matchmaking.handleSocketConnected(socket);
@@ -371,7 +378,13 @@ socket.on('matchmaking:join', async (data: { mode: 'casual' | 'ranked' }) => {
         status: 'offline',
         since: Date.now(),
       });
-
+io.emit('presence:update', { // Tạm thời broadcast cho tất cả
+        userId: accountId,
+        status: 'offline',
+        mode: undefined,
+        since: Date.now(),
+    });
+    console.log(`[Socket] 📡 Broadcasted presence: ${username} is offline`);
       console.log(`[Socket] Current online users: ${onlineUsersState.size}`);
     });
 

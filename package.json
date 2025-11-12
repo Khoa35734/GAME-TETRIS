@@ -6,6 +6,7 @@
     "@types/sequelize": "^4.28.20",
     "axios": "^1.12.2",
     "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.545.0",
     "react": "^19.1.1",

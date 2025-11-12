@@ -355,17 +355,30 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
     };
 
     const handlePresenceUpdate = (payload: any) => {
-      const { userId, status, mode, since } = payload || {};
-      if (typeof userId !== "number") return;
-      setFriends((prev) => prev.map((f) => f.userId === userId
-        ? {
-            ...f,
-            isOnline: status === 'offline' ? false : true,
-            presenceStatus: status,
-            gameMode: mode,
-            inGameSince: since,
+      const { userId: rawId, status, mode, since } = payload || {};
+      const userId = parseInt(String(rawId)); 
+  console.log(`✅ SOCKET RECEIVED: Cập nhật trạng thái cho User ID ${userId} thành ${status}`);
+  if (isNaN(userId)) return;
+      setFriends((prev) => {
+            const friendIds = prev.map(f => f.userId);
+            console.log(`🔍 DANH SÁCH BẠN BÈ: ${friendIds.join(', ')}`);
+             
+
+            return prev.map((f) => {
+              const friendIdNumber = parseInt(String(f.userId));
+              if (friendIdNumber === userId) {
+                console.log(`🎉 CẬP NHẬT THÀNH CÔNG: User ID ${userId} được tìm thấy trong danh sách bạn bè.`);
+            return{
+              ...f,
+              isOnline: status === 'offline' ? false : true,
+              presenceStatus: status,
+              gameMode: mode,
+              inGameSince: since,
+            };
           }
-        : f));
+          return f;
+        });
+      });
     };
 
     console.log('👂 [FriendsManager] Registering presence listeners');

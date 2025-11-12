@@ -1,61 +1,61 @@
 {
-  "hash": "b634754a",
-  "configHash": "87b1bb28",
-  "lockfileHash": "a146fb8c",
-  "browserHash": "3ab1541c",
+  "hash": "1b840dc0",
+  "configHash": "d100e11a",
+  "lockfileHash": "dbcc9418",
+  "browserHash": "17496675",
   "optimized": {
     "react": {
       "src": "../../node_modules/react/index.js",
       "file": "react.js",
-      "fileHash": "ad2e5f27",
+      "fileHash": "05c9daf8",
       "needsInterop": true
     },
     "react-dom": {
       "src": "../../node_modules/react-dom/index.js",
       "file": "react-dom.js",
-      "fileHash": "ed558df2",
+      "fileHash": "408101fc",
       "needsInterop": true
     },
     "react/jsx-dev-runtime": {
       "src": "../../node_modules/react/jsx-dev-runtime.js",
       "file": "react_jsx-dev-runtime.js",
-      "fileHash": "f0c8f759",
+      "fileHash": "cd609587",
       "needsInterop": true
     },
     "react/jsx-runtime": {
       "src": "../../node_modules/react/jsx-runtime.js",
       "file": "react_jsx-runtime.js",
-      "fileHash": "f584dc99",
+      "fileHash": "7cea58af",
       "needsInterop": true
     },
     "axios": {
-      "src": "../../../node_modules/axios/index.js",
+      "src": "../../node_modules/axios/index.js",
       "file": "axios.js",
-      "fileHash": "bb7f8585",
+      "fileHash": "611297ad",
       "needsInterop": false
     },
     "react-dom/client": {
       "src": "../../node_modules/react-dom/client.js",
       "file": "react-dom_client.js",
-      "fileHash": "4a450698",
+      "fileHash": "0e0637b5",
       "needsInterop": true
     },
     "react-router-dom": {
       "src": "../../node_modules/react-router-dom/dist/index.mjs",
       "file": "react-router-dom.js",
-      "fileHash": "e6bfdeb0",
+      "fileHash": "ec81e312",
       "needsInterop": false
     },
     "socket.io-client": {
       "src": "../../node_modules/socket.io-client/build/esm/index.js",
       "file": "socket__io-client.js",
-      "fileHash": "5a2471af",
+      "fileHash": "5968e23f",
       "needsInterop": false
     },
     "styled-components": {
       "src": "../../node_modules/styled-components/dist/styled-components.browser.esm.js",
       "file": "styled-components.js",
-      "fileHash": "5821e4d7",
+      "fileHash": "91b1a1a7",
       "needsInterop": false
     }
   },
