@@ -1,12 +1,8 @@
-import { useCallback, useState } from "react";
-import { STAGE_WIDTH, checkCollision } from "../gamehelper";
+import React, { useCallback, useState } from "react";
+import { STAGE_WIDTH, checkCollision } from "../game/gamehelper";
 import { TETROMINOES } from "../components/tetrominos";
-import type { Stage, CellValue } from "./useStage";
-import { useQueue, type TType } from "./useQueue";
-
-
-
-
+import type { Stage, CellValue } from "./useStage"; // Assuming useStage exports these types
+import { useQueue, type TType } from "./useQueue";   // Assuming useQueue exports these
 
 export type Player = {
   pos: { x: number; y: number };
@@ -15,164 +11,207 @@ export type Player = {
   collided: boolean;
 };
 
-const rotate = (m: CellValue[][], dir: number) => {
-  const r = m.map((_, i) => m.map(c => c[i]));
-  return dir > 0 ? r.map(row => row.reverse()) : r.reverse();
+// Helper function to rotate a matrix (tetromino shape)
+const rotate = (m: CellValue[][], dir: number): CellValue[][] => {
+  // Transpose matrix (swap rows and columns)
+  const transposed = m.map((_, i) => m.map(c => c[i]));
+  // Reverse each row for clockwise, or reverse the whole matrix for counter-clockwise
+  if (dir > 0) { // Clockwise
+    return transposed.map(row => row.reverse());
+  } else { // Counter-clockwise (default for dir <= 0)
+    return transposed.reverse();
+  }
 };
 
 export const usePlayer = (): [
-  Player,
-  (pos: { x: number; y: number; collided: boolean }) => void,
-  () => void,
-  (stage: Stage, dir: number) => void,
-  // các giá trị thêm cho UI tetr.io:
-  TType | null,   // hold
-  boolean,        // canHold
-  TType[],        // nextFour
-  () => void,     // holdSwap
-  () => void,     // clearHold
-  // server sync helpers
-  (seed: TType[]) => void,
-  (more: TType[]) => void
+  Player,                                     // Current player state
+  (pos: { x: number; y: number; collided: boolean }) => void, // updatePlayerPos
+  () => void,                                 // resetPlayer (spawn)
+  (stage: Stage, dir: number) => Player | null, // playerRotate (returns new player state or null)
+  TType | null,                               // hold piece type
+  boolean,                                    // canHold status
+  TType[],                                    // nextFour pieces
+  () => void,                                 // holdSwap function
+  () => void,                                 // clearHold function
+  (seed: TType[]) => void,                    // setSeed (from useQueue)
+  (more: TType[]) => void,                    // pushMany (from useQueue)
+  React.Dispatch<React.SetStateAction<Player>> // setPlayer (direct state setter)
 ] => {
-  const { nextN, popNext, setSeed, pushMany } = useQueue(5); // 5 khối hiển thị
+  // Use the queue hook to manage upcoming pieces
+  // Requesting 5 for hold + next 4 visibility
+  const { nextN, popNext, setSeed, pushMany } = useQueue(5);
 
-
-  const [player, setPlayer] = useState<Player>({
-    pos: { x: 0, y: 0 },
-    tetromino: TETROMINOES["T"].shape,
-    type: "T",
-    collided: false,
+  const [player, setPlayer] = useState<Player>(() => {
+    // Initial state setup to avoid issues before first spawn
+    const initialType = 'T'; // Or any default piece
+    const initialShape = TETROMINOES[initialType].shape;
+    const startX = Math.floor((STAGE_WIDTH - initialShape[0].length) / 2);
+    return {
+      pos: { x: startX, y: 0 },
+      tetromino: initialShape,
+      type: initialType,
+      collided: false,
+    };
   });
 
   const [hold, setHold] = useState<TType | null>(null);
-  // Chặn hold trước khi khối đầu tiên được spawn từ queue (fix race khi vừa Start đã Hold)
+  // Prevent holding right after start/hold until a piece is properly spawned
   const [canHold, setCanHold] = useState(false);
 
-  const updatePlayerPos = ({
-    x, y, collided,
-  }: { x: number; y: number; collided: boolean }) => {
+  // Function to update player position relatively
+  const updatePlayerPos = useCallback(({ x, y, collided }: { x: number; y: number; collided: boolean }) => {
     setPlayer(prev => ({
       ...prev,
       pos: { x: prev.pos.x + x, y: prev.pos.y + y },
-      collided,
+      collided, // Update collision status
     }));
-  };
+  }, []); // Empty dependency array as setPlayer doesn't change
 
+  // Function to spawn the next piece from the queue
   const spawnFromQueue = useCallback(() => {
-    const t = popNext();  // lấy khối đầu tiên, push random vào cuối
-    const base = TETROMINOES[t].shape;
-    // Tính 4 thế xoay (0, 90, 180, 270)
-    const rotations = [0,1,2,3].map(r => {
-      let matOriginal = base;
-      const rot = (m: any[][]) => {
-        const rt = m.map((_, i2) => m.map(c => c[i2]));
-        return rt.map(row => row.reverse());
-      };
-      for (let i = 0; i < r; i++) matOriginal = rot(matOriginal as any) as any;
-      // Tính kích thước thực tế cho tiêu chí chọn (không dùng để chơi)
-      const mat = matOriginal as any[][];
-      let topIdx = 0;
-      while (topIdx < mat.length && mat[topIdx].every(v => v === 0)) topIdx++;
-      let bottomIdx = mat.length - 1;
-      while (bottomIdx >= 0 && mat[bottomIdx].every(v => v === 0)) bottomIdx--;
-      const height = Math.max(0, bottomIdx - topIdx + 1);
-      let leftIdx = 0;
-      let rightIdx = (mat[0]?.length || 0) - 1;
-      const isEmptyCol = (col: number) => mat.every(row => row[col] === 0);
-      while (leftIdx <= rightIdx && isEmptyCol(leftIdx)) leftIdx++;
-      while (rightIdx >= leftIdx && isEmptyCol(rightIdx)) rightIdx--;
-      const width = Math.max(0, rightIdx - leftIdx + 1);
-      return { r, matOriginal, height, width };
-    });
-    // Ưu tiên: height nhỏ nhất (nằm ngang nhất), tie-break width lớn nhất
-    rotations.sort((a,b) => (a.height - b.height) || (b.width - a.width));
-    const best = rotations[0];
-  const pieceWidth = best.width || (best.matOriginal[0]?.length || 0);
+    const nextType = popNext(); // Get the next piece type and update queue
+    if (!nextType) {
+      console.error("Queue is empty, cannot spawn piece!");
+      return; // Should ideally not happen if queue is managed well
+    }
+
+    const piece = TETROMINOES[nextType];
+    const initialTetromino = piece.shape;
+    // Standard SRS spawn position calculation
+    const pieceWidth = initialTetromino[0].length;
     const startX = Math.floor((STAGE_WIDTH - pieceWidth) / 2);
-    // Spawn ngay dưới vùng buffer để có không gian xoay/rơi
-    const startY = 0; // chúng ta giữ 0 vì stage đã có buffer; vẽ/ẩn top đã xử lý trong Stage.tsx
+    const startY = 0; // Assuming stage buffer handles initial visibility
 
-    setPlayer({
+    const newPlayerState: Player = {
       pos: { x: startX, y: startY },
-  tetromino: best.matOriginal as any,
-      type: t,
-      collided: false,
-    });
-    setCanHold(true);
-  }, [popNext]);
+      tetromino: initialTetromino,
+      type: nextType,
+      collided: false, // Reset collision status on spawn
+    };
 
+    setPlayer(newPlayerState); // Update player state
+    setCanHold(true);        // Allow holding after a piece is spawned
+
+  }, [popNext]); // Depends on popNext from useQueue
+
+  // Simple wrapper for spawnFromQueue, used after locking a piece
   const resetPlayer = useCallback(() => {
     spawnFromQueue();
   }, [spawnFromQueue]);
 
-  const playerRotate = (stage: Stage, dir: number) => {
-    const cloned = JSON.parse(JSON.stringify(player)) as Player;
-    if (cloned.type === "O") return;
-    cloned.tetromino = rotate(cloned.tetromino, dir);
+  // Player rotation function with basic wall kick and bounds check
+  const playerRotate = useCallback((stage: Stage, dir: number): Player | null => {
+    if (player.type === 'O') return null; // 'O' tetromino doesn't rotate
 
-    const pos = cloned.pos.x;
-    let offset = 1;
-    while (checkCollision(cloned, stage, { x: 0, y: 0 })) {
-      cloned.pos.x += offset;
-      offset = -(offset + (offset > 0 ? 1 : -1));
-      if (offset > cloned.tetromino[0].length) {
-        cloned.tetromino = rotate(cloned.tetromino, -dir);
-        cloned.pos.x = pos;
-        return;
+    // 1. Create a deep copy to attempt rotation
+    const clonedPlayer = JSON.parse(JSON.stringify(player)) as Player;
+    clonedPlayer.tetromino = rotate(clonedPlayer.tetromino, dir); // Rotate the shape
+
+    const originalX = player.pos.x; // Store original position for kick calculations
+    let offsetX = 1; // Initial kick offset (try moving right first)
+
+    // 2. Loop through potential kick positions (0, +1, -2, +3, -4...)
+    // Limit iterations to prevent infinite loops (max kick = piece width)
+    const maxKicks = clonedPlayer.tetromino[0]?.length || 4;
+    for (let i = 0; i <= maxKicks; ++i) {
+      const kickX = (i === 0) ? 0 : offsetX; // Apply kick offset (0 on first check)
+      clonedPlayer.pos.x = originalX + kickX; // Set potential new X position
+
+      // 3. Check for collisions AND out-of-bounds at the potential position
+      let collision = checkCollision(clonedPlayer, stage, { x: 0, y: 0 });
+      let outOfBounds = false;
+
+      if (!collision) {
+        // Explicitly check bounds AFTER collision check passes
+        for (let y = 0; y < clonedPlayer.tetromino.length; y += 1) {
+          for (let x = 0; x < clonedPlayer.tetromino[y].length; x += 1) {
+            if (clonedPlayer.tetromino[y][x] !== 0) { // If it's part of the shape
+              const boardX = clonedPlayer.pos.x + x;
+              const boardY = clonedPlayer.pos.y + y;
+              // Check left, right, and bottom bounds (top bound check isn't usually needed for rotation)
+              if (boardX < 0 || boardX >= STAGE_WIDTH || boardY >= stage.length) {
+                outOfBounds = true;
+                break; // Stop checking this piece if one part is out
+              }
+            }
+          }
+          if (outOfBounds) break; // Stop checking rows if out of bounds
+        }
       }
+
+      // 4. If NO collision AND NO out-of-bounds, the rotation is successful
+      if (!collision && !outOfBounds) {
+        // console.log(`[Rotate] Success with kick offset: ${kickX}`);
+        setPlayer(clonedPlayer); // Update the actual player state
+        return clonedPlayer;     // Return the successfully rotated player state
+      }
+
+      // 5. If failed, calculate the next kick offset (alternating sign, increasing magnitude)
+      offsetX = -(offsetX + (offsetX > 0 ? 1 : -1)); // 1 -> -2 -> 3 -> -4 ...
     }
-    setPlayer(cloned);
-  };
 
+    // 6. If all kick attempts failed
+    console.log("[Rotate] Failed - All kick positions invalid");
+    return null; // Return null to indicate rotation failure
+  }, [player]); // Depends only on the current player state
+
+  // Function to handle swapping the current piece with the hold piece
   const holdSwap = useCallback(() => {
-    if (!canHold) return;
-    setPlayer(p => {
-      if (hold === null) {
-        // Lần hold đầu: đẩy khối hiện tại vào hold, spawn khối TIẾP THEO từ queue
-        setHold(p.type);
-        // Lấy khối tiếp theo từ queue (sẽ pop và thêm random vào cuối)
-        const t = popNext();
-        const base = TETROMINOES[t].shape;
-        setCanHold(false);
-        return { 
-          pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, 
-          tetromino: base, 
-          type: t, 
-          collided: false 
-        };
-      } else {
-        // Đã có hold: hoán đổi khối hiện tại với hold (KHÔNG thay đổi queue)
-        const t = hold;
-        setHold(p.type);
-        setCanHold(false);
-        return { 
-          pos: { x: STAGE_WIDTH / 2 - 2, y: 0 }, 
-          tetromino: TETROMINOES[t].shape, 
-          type: t, 
-          collided: false 
-        };
-      }
-    });
-  }, [canHold, hold, popNext]);
+    if (!canHold) return; // Only allow holding once per piece spawn
 
+    setPlayer(p => {
+      const currentPieceType = p.type; // Piece currently being played
+      let nextSpawnType: TType | null = null;
+
+      if (hold === null) {
+        // First time holding: current piece goes to hold, next piece from queue spawns
+        nextSpawnType = popNext(); // Get next piece from queue
+      } else {
+        // Subsequent holds: piece from hold comes out, current piece goes in
+        nextSpawnType = hold;
+      }
+
+      // If queue was empty on first hold (shouldn't happen with proper init)
+      if (!nextSpawnType) return p;
+
+      setHold(currentPieceType); // Put the current piece into hold
+      setCanHold(false);         // Disable holding until next piece locks
+
+      // Spawn the new piece (logic similar to spawnFromQueue)
+      const piece = TETROMINOES[nextSpawnType];
+      const initialTetromino = piece.shape;
+      const pieceWidth = initialTetromino[0].length;
+      const startX = Math.floor((STAGE_WIDTH - pieceWidth) / 2);
+      const startY = 0;
+
+      return { // Return the new player state
+        pos: { x: startX, y: startY },
+        tetromino: initialTetromino,
+        type: nextSpawnType,
+        collided: false,
+      };
+    });
+  }, [canHold, hold, popNext]); // Dependencies
+
+  // Function to clear the hold piece (e.g., at game start)
   const clearHold = useCallback(() => {
     setHold(null);
-    // Không bật canHold ở đây; spawnFromQueue sẽ bật khi đã có current hợp lệ từ queue
+    setCanHold(false); // Can't hold until a piece spawns
   }, []);
 
- 
+  // Return the state and functions needed by the game logic hook
   return [
-    player,
-    updatePlayerPos,
-    resetPlayer,
-    playerRotate,
-    hold,
-    canHold,
-    nextN,
-    holdSwap,
-    clearHold,
-    setSeed,
-    pushMany,
+    player,         // The current player state (pos, tetromino, type, collided)
+    updatePlayerPos,// Function to move the player relatively
+    resetPlayer,    // Function to spawn the next piece
+    playerRotate,   // Function to rotate the player (with wall kick)
+    hold,           // The type of piece currently in hold (or null)
+    canHold,        // Boolean indicating if hold action is allowed
+    nextN,          // Array of the next N upcoming piece types
+    holdSwap,       // Function to perform the hold action
+    clearHold,      // Function to clear the hold piece state
+    setSeed,        // Function to set the queue seed (from useQueue)
+    pushMany,       // Function to add pieces to the queue (from useQueue)
+    setPlayer,      // Direct state setter (use with caution, e.g., for complex rotations/updates)
   ];
 };
