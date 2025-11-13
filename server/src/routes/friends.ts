@@ -3,8 +3,7 @@ import Friendship, { FriendshipStatus } from '../models/Friendship';
 import User from '../models/User';
 import jwt from 'jsonwebtoken';
 import { Op } from 'sequelize';
-import { isUserOnline, getUserPresence } from '../index';
-import { onlineUsers } from '../core/state';
+import { isUserOnline, getUserPresence } from '../core/presence';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || '123456';
@@ -14,74 +13,19 @@ interface AuthRequest extends Request {
   userId?: number;
 }
 
-const extractToken = (req: AuthRequest): string | null => {
-  const normalize = (value: string | null | undefined): string | null => {
-    if (!value) return null;
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === 'undefined' || trimmed === 'null') return null;
-    return trimmed;
-  };
-
-  const authHeader = req.headers['authorization'];
-  if (typeof authHeader === 'string') {
-    if (authHeader.startsWith('Bearer ')) {
-      const bearerToken = normalize(authHeader.slice(7));
-      if (bearerToken) return bearerToken;
-    }
-
-    const rawHeaderToken = normalize(authHeader);
-    if (rawHeaderToken) return rawHeaderToken;
-  }
-
-  const cookieHeader = req.headers['cookie'];
-  if (typeof cookieHeader === 'string') {
-    const possibleKeys = ['token', 'accessToken', 'authToken', 'authorization'];
-    const cookies = cookieHeader.split(';').map((pair) => pair.trim());
-
-    for (const key of possibleKeys) {
-      const match = cookies.find((pair) => pair.toLowerCase().startsWith(`${key.toLowerCase()}=`));
-      if (match) {
-        const [, rawToken] = match.split('=');
-        const normalized = normalize(rawToken ? decodeURIComponent(rawToken) : null);
-        if (normalized) return normalized;
-      }
-    }
-  }
-
-  return null;
-};
-
 const authenticateToken = (req: AuthRequest, res: Response, next: Function) => {
-  const token = extractToken(req);
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    console.warn('[Friends Auth] ❌ No token provided');
     return res.status(401).json({ success: false, message: 'Token không được cung cấp' });
   }
 
   jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
     if (err) {
-      console.error('[Friends Auth] ❌ JWT verification failed:', err.message);
       return res.status(403).json({ success: false, message: 'Token không hợp lệ' });
     }
-
-    if (!decoded) {
-      console.error('[Friends Auth] ❌ Empty decoded payload');
-      return res.status(403).json({ success: false, message: 'Token không hợp lệ' });
-    }
-
-    const possibleId =
-      decoded.accountId ?? decoded.user_id ?? decoded.userId ?? decoded.id ?? decoded.account_id;
-
-    const normalizedId = Number(possibleId);
-
-    if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
-      console.error('[Friends Auth] ❌ Invalid user ID in token:', decoded);
-      return res.status(403).json({ success: false, message: 'Token không hợp lệ' });
-    }
-
-    console.log('[Friends Auth] ✅ Authenticated user:', normalizedId);
-    req.userId = normalizedId;
+    req.userId = decoded.accountId || decoded.user_id;
     next();
   });
 };
@@ -101,24 +45,10 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       },
     });
 
-    console.log('[Friends] Fetch friends for', userId, {
-      totalFriendships: friendships.length,
-      onlineUsersKeys: Array.from(onlineUsers.keys()),
-    });    const friendIds = Array.from(
-      new Set(
-        friendships
-          .map((f) => {
-            const rawId = f.user_id === userId ? f.friend_id : f.user_id;
-            const coercedId = Number(rawId);
-            return Number.isFinite(coercedId) ? coercedId : null;
-          })
-          .filter((id): id is number => id !== null && id !== userId)
-      )
+    // Lấy danh sách friend IDs
+    const friendIds = friendships.map((f) =>
+      f.user_id === userId ? f.friend_id : f.user_id
     );
-
-    if (friendIds.length === 0) {
-      return res.json({ success: true, friends: [] });
-    }
 
     // Lấy thông tin user của friends
     const friends = await User.findAll({
@@ -129,19 +59,18 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       friends: friends.map((f) => {
-        const friendId = Number(f.user_id);
-        const presence = getUserPresence(friendId);
-        const isOnline = isUserOnline(friendId);
-        console.log('[Friends] Friend', friendId, 'online?', isOnline, 'presence:', presence);
+        const presence = getUserPresence(f.user_id);
+        const currentStatus = presence?.status || 'offline';
+        const isCurrentlyOnline = currentStatus !== 'offline';
         return {
-          userId: friendId,
+          userId: f.user_id,
           username: f.user_name,
           email: f.email,
           createdAt: f.created_at,
-          isOnline,
-          presenceStatus: presence?.status || (isOnline ? 'online' : 'offline'),
-          gameMode: presence?.mode,
-          inGameSince: presence?.since,
+          isOnline: isCurrentlyOnline,
+          presenceStatus: currentStatus, 
+          gameMode: presence?.mode,
+          inGameSince: presence?.since,
         };
       }),
     });
