@@ -61,22 +61,32 @@ router.get('/:userId', async (req: Request, res: Response) => {
     const matchesResult = await pool.query(matchesQuery, [userId]);
 
     // Format response to match client interface
-    const matches = matchesResult.rows.map((row) => ({
-      match_id: row.match_id,
-      player1_id: row.player1_id,
-      player2_id: row.player2_id,
-      player1_name: row.player1_name,
-      player2_name: row.player2_name,
-      winner_id: row.winner_id,
-      player1_score: row.player1_wins,
-      player2_score: row.player2_wins,
-      match_timestamp: row.match_timestamp,
-      result: (row.result === 'win' ? 'WIN' : 'LOSE') as 'WIN' | 'LOSE',
-      opponent_name: Number(row.player1_id) === userId ? row.player2_name : row.player1_name,
-      score: `${row.player1_wins}-${row.player2_wins}`,
-      mode: row.mode || 'casual', // Add mode field
-      end_reason: row.end_reason, // Add end_reason field
-    }));
+    const matches = matchesResult.rows.map((row) => {
+      const isPlayer1 = Number(row.player1_id) === userId;
+      const selfName = isPlayer1 ? row.player1_name : row.player2_name;
+      const opponentName = isPlayer1 ? row.player2_name : row.player1_name;
+      const selfScore = isPlayer1 ? row.player1_wins : row.player2_wins;
+      const opponentScore = isPlayer1 ? row.player2_wins : row.player1_wins;
+
+      return {
+        match_id: row.match_id,
+        player1_id: row.player1_id,
+        player2_id: row.player2_id,
+        player1_name: row.player1_name,
+        player2_name: row.player2_name,
+        winner_id: row.winner_id,
+        player1_score: row.player1_wins,
+        player2_score: row.player2_wins,
+        self_score: selfScore,
+        opponent_score: opponentScore,
+        match_timestamp: row.match_timestamp,
+        result: (row.result === 'win' ? 'WIN' : 'LOSE') as 'WIN' | 'LOSE',
+        opponent_name: opponentName,
+        score: `${selfScore}-${opponentScore}`,
+        mode: row.mode || 'casual', // Add mode field
+        end_reason: row.end_reason, // Add end_reason field
+      };
+    });
 
     res.json(matches);
   } catch (error) {

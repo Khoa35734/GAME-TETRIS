@@ -136,9 +136,12 @@ try {
 // [ĐÃ SỬA] Xử lý khi client tải xong màn hình game và báo sẵn sàng
 // File: socketHandlers.ts
 
-    const handlePlayerReady = async (roomId: string) => {
+    const handlePlayerReady = async (roomIdOrData: string | { roomId: string }) => {
       const accountId = (socket as any).accountId;
       const username = (socket as any).username;
+
+      // Handle both string and object formats
+      const roomId = typeof roomIdOrData === 'string' ? roomIdOrData : roomIdOrData?.roomId;
 
       if (!roomId) {
         console.warn(`[Socket] ⚠️ ${username} sent 'player:ready' without roomId`);
@@ -148,36 +151,96 @@ try {
       console.log(`[Socket] ✅ ${username} (${accountId}) is ready in room ${roomId}`);
 
       try {
-        const readiness = await matchManager.setPlayerReady(roomId, socket.id, true);
-        if (!readiness) {
-          console.error(`[Socket] ❌ Match not found (roomId: ${roomId}) when setting ready.`);
-          socket.emit('matchmaking:error', { error: 'Match not found after ready confirmation' });
+        // Get match first to find the correct player
+        const match = await matchManager.getMatch(roomId);
+        if (!match) {
+          console.error(`[Socket] ❌ Match not found (roomId: ${roomId})`);
+          socket.emit('matchmaking:error', { error: 'Match not found' });
           return;
         }
 
-        const { match, statusChanged } = readiness;
-        const readyCount = match.players.filter((p) => p.ready).length;
+        // Find player by socketId
+        const player = match.players.find((p) => p.socketId === socket.id);
+        if (!player) {
+          console.error(`[Socket] ❌ Player ${socket.id} not found in match ${roomId}`);
+          return;
+        }
+
+        console.log(`[Socket] 🔍 Found player: ${player.playerId} (${player.name}) in match ${roomId}`);
+
+        const readiness = await matchManager.setPlayerReady(roomId, player.playerId, true);
+        if (!readiness) {
+          console.error(`[Socket] ❌ Failed to set player ready`);
+          return;
+        }
+
+        const { match: updatedMatch, statusChanged } = readiness;
+        const readyCount = updatedMatch.players.filter((p) => p.ready).length;
+
+        console.log(`[Socket] 📊 Ready status: ${readyCount}/${updatedMatch.maxPlayers} players ready, statusChanged: ${statusChanged}`);
 
         if (!statusChanged) {
-          console.log(`[Socket] ⏳ Waiting for all players in ${roomId} (ready ${readyCount}/${match.maxPlayers})`);
+          console.log(`[Socket] ⏳ Waiting for all players in ${roomId} (ready ${readyCount}/${updatedMatch.maxPlayers})`);
           return;
         }
 
-        const generator = bagGenerator(match.seed);
+        const generator = bagGenerator(updatedMatch.seed);
         const initialPieces = nextPieces(generator, 14);
 
-        const players = match.players.slice(0, 2);
+        const players = updatedMatch.players.slice(0, 2);
         if (players.length < 2) {
           console.warn(`[Socket] ⚠️ Not enough players to start match ${roomId}`);
           return;
         }
 
+        const toAccountId = (player: PlayerMatchState): number => {
+          if (!player.accountId) return 0;
+          const parsed = Number(player.accountId);
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+
+        const toUsername = (player: PlayerMatchState, fallback: string): string => {
+          if (player.name && player.name.length > 0) {
+            return player.name;
+          }
+          if (player.accountId) {
+            return `User_${player.accountId}`;
+          }
+          return fallback;
+        };
+
+        const bo3Mode: 'casual' | 'ranked' = updatedMatch.mode === 'ranked' ? 'ranked' : 'casual';
+        const bo3MatchId = updatedMatch.matchId || roomId;
+
+        // Initialize BO3 match for all game modes (ranked, casual, custom)
+        const bo3Match = matchmaking.bo3MatchManager.createMatch(
+          bo3MatchId,
+          roomId,
+          {
+            socketId: players[0].socketId,
+            accountId: toAccountId(players[0]),
+            username: toUsername(players[0], 'Player1'),
+          },
+          {
+            socketId: players[1].socketId,
+            accountId: toAccountId(players[1]),
+            username: toUsername(players[1], 'Player2'),
+          },
+          bo3Mode,
+        );
+
+        console.log(`[Socket] 🎮 Created BO3 match for ${roomId}:`, {
+          player1: { socket: players[0].socketId, name: players[0].name },
+          player2: { socket: players[1].socketId, name: players[1].name },
+          mode: updatedMatch.mode
+        });
+
         const payload = {
           countdown: 3,
-          roomId: match.roomId ?? roomId,
-          matchId: match.matchId,
-          mode: match.mode === 'ranked' ? 'ranked' : 'casual',
-          seed: match.seed,
+          roomId: updatedMatch.roomId ?? roomId,
+          matchId: updatedMatch.matchId,
+          mode: updatedMatch.mode,
+          seed: updatedMatch.seed,
           next: initialPieces,
           player1: {
             id: String(players[0].accountId ?? players[0].playerId),
@@ -191,8 +254,12 @@ try {
           },
         };
 
+        console.log(`[Socket] 🚀 Emitting 'game:start' for ${roomId}`, {
+          players: players.map(p => ({ id: p.playerId, name: p.name, socketId: p.socketId })),
+          mode: payload.mode
+        });
+
         io.to(roomId).emit('game:start', payload);
-        console.log(`[Socket] 🚀 Emitted 'game:start' for ${roomId}`);
       } catch (error) {
         console.error(`[Socket] ❌ Error processing 'player:ready' for ${username} in room ${roomId}:`, error);
         socket.emit('matchmaking:error', { error: 'Failed processing ready status' });

@@ -165,6 +165,8 @@ const RoomLobby: React.FC = () => {
 
     const onGameStarting = () => {
       console.log('[RoomLobby] 🎮 game:starting -> navigate');
+      // Don't set hasJoinedRef to false, so cleanup won't emit leave
+      hasJoinedRef.current = false;
       navigate(`/versus/${roomId}`);
     };
 
@@ -230,11 +232,15 @@ const RoomLobby: React.FC = () => {
       socket.off('room:update', onRoomUpdate);
       socket.off('room:chat', onRoomChat);
       socket.off('game:starting', onGameStarting);
+      
+      // Only leave if hasJoinedRef is still true (means we didn't navigate to game)
       if (hasJoinedRef.current && roomId) {
+        console.log('[RoomLobby] Cleanup: User left before game started, leaving room', roomId);
         socket.emit('room:leave', roomId);
-        hasJoinedRef.current = false;
         sessionStorage.removeItem(`joined_${roomId}`);
         sessionStorage.removeItem(`roomHost_${roomId}`);
+      } else {
+        console.log('[RoomLobby] Cleanup: hasJoinedRef is false, NOT leaving room (game started)');
       }
     };
   }, [roomId, navigate, identityReady, displayName]);

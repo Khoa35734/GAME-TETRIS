@@ -7,6 +7,7 @@ import SettingsPage from './SettingsPage';
 import FriendsManager from './FriendsManager';
 import ConnectionDebug from '../ConnectionDebug'; // Debug tool
 import ProfileModal from '../ProfileModal'; // Profile modal
+import FeedbackModal from '../FeedbackModal'; // Feedback modal
 import socket from '../../socket'; // Import socket để gửi authentication
 
 interface User {
@@ -42,6 +43,7 @@ const HomeMenu: React.FC = () => {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showDebug, setShowDebug] = useState(false); // Debug panel
   const [showProfile, setShowProfile] = useState(false); // Profile modal
+  const [showFeedback, setShowFeedback] = useState(false); // Feedback modal
 
   // Background music
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
@@ -756,6 +758,37 @@ const HomeMenu: React.FC = () => {
               }}
             >
               🏆 Bảng xếp hạng
+            </button>
+
+            {/* Feedback Button */}
+            <button
+              onClick={() => setShowFeedback(true)}
+              style={{
+                background: 'rgba(33, 150, 243, 0.15)',
+                border: '1px solid rgba(33, 150, 243, 0.4)',
+                color: '#42a5f5',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(33, 150, 243, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(33, 150, 243, 0.15)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              💬 Feedback
             </button>
 
             {/* Settings Button */}
@@ -2106,6 +2139,9 @@ const HomeMenu: React.FC = () => {
       
       {/* Profile Modal */}
       <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
+      
+      {/* Feedback Modal */}
+      <FeedbackModal isOpen={showFeedback} onClose={() => setShowFeedback(false)} />
     </div>
   );
 };

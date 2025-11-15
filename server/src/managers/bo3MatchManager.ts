@@ -5,6 +5,7 @@ import { Server, Socket } from 'socket.io';
 import { saveMatchData, calculatePPS, calculateAPM } from '../services/matchHistoryService';
 import type { MatchData, GameData, PlayerGameStats } from '../services/matchHistoryService';
 import { updateEloAfterMatch } from '../services/eloService';
+import { matchManager } from './matchManager';
 
 const DEFAULT_BEST_OF = 3;
 
@@ -143,7 +144,7 @@ class BO3MatchManager {
       });
 
       // Game finished in current round (DEPRECATED - chỉ dùng để backward compatibility)
-      socket.on('bo3:game-finished', (data: {
+      socket.on('bo3:game-finished', async (data: {
         roomId: string;
         winner?: 'player1' | 'player2' | 'opponent';
         stats?: {
@@ -152,7 +153,7 @@ class BO3MatchManager {
         };
       }) => {
         console.log('[BO3] 📥 Received bo3:game-finished from client:', socket.id, data);
-        this.handleGameFinished(socket, data);
+        await this.handleGameFinished(socket, data);
       });
 
       // Player ready for next game
@@ -224,7 +225,7 @@ class BO3MatchManager {
     return match;
   }
 
-  private handleGameFinished(
+  private async handleGameFinished(
     socket: Socket,
     data: {
       roomId: string;
@@ -268,16 +269,19 @@ class BO3MatchManager {
 
     console.log(`[BO3] 📊 Game ${match.currentGame} finished: Winner = ${winner}`);
 
-    // === LẤY STATS TỪ CLIENT HOẶC TẠO DUMMY ===
-    const player1Stats: GameStats = data.stats?.player1 || {
+    // === ƯU TIÊN STATS TỪ tempStats ĐÃ LƯU, SAU ĐÓ MỚI LẤY TỪ PARAMETER ===
+    const player1Stats: GameStats = data.stats?.player1 || match.tempPlayer1Stats || {
       lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0,
       attack_lines: 0, apm: 0
     };
 
-    const player2Stats: GameStats = data.stats?.player2 || {
+    const player2Stats: GameStats = data.stats?.player2 || match.tempPlayer2Stats || {
       lines: 0, pps: 0, finesse: 0, pieces: 0, holds: 0, inputs: 0, time: 0,
       attack_lines: 0, apm: 0
     };
+
+    console.log(`[BO3] 📊 Player1 stats used:`, JSON.stringify(player1Stats).substring(0, 100));
+    console.log(`[BO3] 📊 Player2 stats used:`, JSON.stringify(player2Stats).substring(0, 100));
 
     // Record game result
     const gameResult: GameResult = {
@@ -306,10 +310,25 @@ class BO3MatchManager {
       match.score.player2Wins >= match.winsRequired ||
       match.currentGame >= match.bestOf
     ) {
-      this.finishMatch(match);
+      await this.finishMatch(match);
     } else {
       // Prepare for next game
       match.currentGame = Math.min(match.currentGame + 1, match.bestOf);
+
+      const resetTargetIds = [match.matchId, match.roomId].filter(
+        (value, index, array) => typeof value === 'string' && value.length > 0 && array.indexOf(value) === index,
+      ) as string[];
+
+      for (const targetId of resetTargetIds) {
+        try {
+          const resetResult = await matchManager.resetRoundState(targetId);
+          if (resetResult) {
+            break;
+          }
+        } catch (resetError) {
+          console.error(`[BO3] ❌ Failed to reset round state for ${targetId}:`, resetError);
+        }
+      }
       
       this.io.to(data.roomId).emit('bo3:game-result', {
         gameNumber: gameResult.gameNumber,
@@ -581,7 +600,7 @@ class BO3MatchManager {
     delete match.tempPlayer2Stats;
 
     // Gọi hàm logic chính để xử lý kết quả
-    this.handleGameFinished(
+    await this.handleGameFinished(
       { emit: (event, payload) => console.log(`[BO3] Dummy socket emit: ${event}`) } as Socket,
       {
         roomId,

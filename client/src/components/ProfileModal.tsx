@@ -37,7 +37,7 @@ interface MatchHistory {
   mode: 'casual' | 'ranked';
   opponent: string;
   result: 'WIN' | 'LOSE';
-  score: string;
+  score: string; // Numeric format e.g. "2-1"
   timestamp: number;
   games: GameResult[];
   bo3Score: {
@@ -98,20 +98,26 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       const matches = await getMatchHistory(user.accountId);
 
       // Transform API data to component format
-      const transformedMatches: MatchHistory[] = matches.map((match) => ({
-        matchId: match.match_id.toString(),
-        mode: match.mode || 'casual', // Use mode from API
-        opponent: match.opponent_name,
-        result: match.result,
-        score: match.score,
-        timestamp: new Date(match.match_timestamp).getTime(),
-        bo3Score: {
-          playerWins: match.result === 'WIN' ? match.player1_score : match.player2_score,
-          opponentWins: match.result === 'WIN' ? match.player2_score : match.player1_score,
-        },
-        games: [], // Will be loaded when user clicks on the match
-        endReason: match.end_reason, // Add end_reason from API
-      }));
+      const transformedMatches: MatchHistory[] = matches.map((match) => {
+        const playerWins = match.self_score ?? match.player1_score;
+        const opponentWins = match.opponent_score ?? match.player2_score;
+        const scoreNumeric = match.score || `${playerWins}-${opponentWins}`;
+
+        return {
+          matchId: match.match_id.toString(),
+          mode: match.mode || 'casual', // Use mode from API
+          opponent: match.opponent_name,
+          result: match.result,
+          score: scoreNumeric,
+          timestamp: new Date(match.match_timestamp).getTime(),
+          bo3Score: {
+            playerWins,
+            opponentWins,
+          },
+          games: [], // Will be loaded when user clicks on the match
+          endReason: match.end_reason, // Add end_reason from API
+        };
+      });
 
       setMatchHistory(transformedMatches);
     } catch (error) {

@@ -68,14 +68,9 @@ const OnlineMenu: React.FC = () => {
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
 
-  // Function to generate random room ID
+  // Function to generate random room ID (6 digits only)
   const generateRoomId = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
+    return Math.floor(100000 + Math.random() * 900000).toString();
   };
 
   // Function to create room and navigate to lobby

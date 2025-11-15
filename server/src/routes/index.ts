@@ -10,6 +10,7 @@ import adminRoutes from '../routes/admin';
 import messagesRouter from './messages';
 import matchHistoryRouter from './matchHistory';
 import leaderboardRouter from './leaderboard';
+import feedbackRouter from './feedback';
 
 export function mountApiRoutes(app: Express) {
   app.use('/api/auth', authRouter);
@@ -23,5 +24,6 @@ export function mountApiRoutes(app: Express) {
   app.use('/api/messages', messagesRouter);
   app.use('/api/match-history', matchHistoryRouter);
   app.use('/api/leaderboard', leaderboardRouter);
+  app.use('/api/feedback', feedbackRouter);
 
 }
