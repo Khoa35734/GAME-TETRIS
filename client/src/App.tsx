@@ -20,6 +20,7 @@ import Inbox from './components/menu/Inbox';
 import SinglePlayerSettings from './components/SinglePlayerSettings';
 import OnlineRanked from './components/OnlineRanked';
 import OnlineCasual from './components/menu/OnlineCasual';
+import Leaderboard from './components/Leaderboard'; // 🏆 Leaderboard component
 
 const Home: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -114,6 +115,24 @@ const App: React.FC = () => {
   return (
     <Router>
       <div className="min-h-screen bg-gray-900">
+        {/* Global Navigation */}
+        <nav className="bg-gray-800 border-b border-gray-700 sticky top-0 z-50 px-6 py-3">
+          <div className="max-w-7xl mx-auto flex justify-between items-center">
+            <Link to="/" className="text-white font-semibold text-lg flex items-center gap-2">
+              🏠 Tetris Admin System
+            </Link>
+            <div className="flex gap-4">
+              <Link to="/" className="text-gray-300 hover:text-white transition-colors">
+                Game Home
+              </Link>
+              <Link to="/admin" className="text-gray-300 hover:text-white transition-colors">
+                Admin
+              </Link>
+            </div>
+          </div>
+        </nav>
+
+        {/* Global components */}
         <MobileWarning />
         <InvitationNotification />
 
@@ -128,6 +147,8 @@ const App: React.FC = () => {
 
           <Route path="/" element={<HomeMenu />} />
           <Route path="/inbox" element={<Inbox />} />
+          <Route path="/inbox" element={<Inbox />} /> {/* 📬 Inbox Route */}
+          <Route path="/leaderboard" element={<Leaderboard />} /> {/* 🏆 Leaderboard Route */}
           <Route path="/single/settings" element={<SinglePlayerSettings />} />
           <Route path="/single" element={<Tetris />} />
           <Route path="/online" element={<OnlineMenu />} />

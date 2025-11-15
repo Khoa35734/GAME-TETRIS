@@ -1,8 +1,8 @@
 {
-  "hash": "3d4023f2",
-  "configHash": "8dc96de1",
-  "lockfileHash": "dceba5e5",
-  "browserHash": "6d8d9d1b",
+  "hash": "b634754a",
+  "configHash": "87b1bb28",
+  "lockfileHash": "a146fb8c",
+  "browserHash": "3ab1541c",
   "optimized": {
     "react": {
       "src": "../../node_modules/react/index.js",
@@ -29,7 +29,7 @@
       "needsInterop": true
     },
     "axios": {
-      "src": "../../node_modules/axios/index.js",
+      "src": "../../../node_modules/axios/index.js",
       "file": "axios.js",
       "fileHash": "51782e19",
       "needsInterop": false

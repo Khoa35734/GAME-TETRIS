@@ -729,7 +729,7 @@ const HomeMenu: React.FC = () => {
 
             {/* Leaderboard Button */}
             <button
-              onClick={() => setShowLeaderboard(true)}
+              onClick={() => navigate('/leaderboard')}
               style={{
                 background: 'rgba(255, 193, 7, 0.15)',
                 border: '1px solid rgba(255, 193, 7, 0.4)',
