@@ -65,12 +65,9 @@ export interface MatchData {
 export const createMatchHistoryPool = (): Pool => {
   const host = process.env.PG_HOST || 'localhost';
   const port = Number(process.env.PG_PORT ?? 5432);
-  const database = process.env.PG_DATABASE || process.env.PG_DB || 'tetris';
-  const user = process.env.PG_USER || 'devuser';
-  const passwordEnv = process.env.PG_PASSWORD;
-  const password = typeof passwordEnv === 'string' && passwordEnv.length > 0
-    ? passwordEnv
-    : '123456';
+  const database = process.env.PG_DATABASE || process.env.PG_DB || 'postgres';
+  const user = process.env.PG_USER || 'postgres';
+  const password = process.env.PG_PASSWORD || '123456789Quoc#';
 
   return new Pool({
     user,
