@@ -8,6 +8,7 @@ import FriendsManager from './FriendsManager';
 import ConnectionDebug from '../ConnectionDebug'; // Debug tool
 import ProfileModal from '../ProfileModal'; // Profile modal
 import FeedbackModal from '../FeedbackModal'; // Feedback modal
+import InboxModal from '../InboxModal'; // Inbox modal
 import socket from '../../socket'; // Import socket để gửi authentication
 
 interface User {
@@ -15,6 +16,7 @@ interface User {
   email?: string;
   isGuest: boolean;
   accountId: number; // Thêm accountId để định danh duy nhất
+  role?: string; // Role: player, admin
 }
 
 interface GameModeProps {
@@ -44,6 +46,7 @@ const HomeMenu: React.FC = () => {
   const [showDebug, setShowDebug] = useState(false); // Debug panel
   const [showProfile, setShowProfile] = useState(false); // Profile modal
   const [showFeedback, setShowFeedback] = useState(false); // Feedback modal
+  const [showInbox, setShowInbox] = useState(false); // Inbox modal
 
   // Background music
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
@@ -212,6 +215,14 @@ const HomeMenu: React.FC = () => {
           accountId: result.user.accountId,
         };
         setCurrentUser(user);
+        
+        // Check if user is admin and redirect to dashboard
+        if (result.user.role === 'admin') {
+          console.log('🔐 [Login] Admin detected, redirecting to dashboard...');
+          window.location.href = '/admin';
+          return;
+        }
+        
         setShowGameModes(true);
         setLoginForm({ email: "", password: "" });
 
@@ -758,6 +769,37 @@ const HomeMenu: React.FC = () => {
               }}
             >
               🏆 Bảng xếp hạng
+            </button>
+
+            {/* Inbox Button */}
+            <button
+              onClick={() => setShowInbox(true)}
+              style={{
+                background: 'rgba(139, 92, 246, 0.15)',
+                border: '1px solid rgba(139, 92, 246, 0.4)',
+                color: '#a78bfa',
+                padding: '10px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.95rem',
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(139, 92, 246, 0.25)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(139, 92, 246, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(139, 92, 246, 0.15)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              📬 Hộp thư
             </button>
 
             {/* Feedback Button */}
@@ -2139,6 +2181,9 @@ const HomeMenu: React.FC = () => {
       
       {/* Profile Modal */}
       <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
+      
+      {/* Inbox Modal */}
+      <InboxModal isOpen={showInbox} onClose={() => setShowInbox(false)} />
       
       {/* Feedback Modal */}
       <FeedbackModal isOpen={showFeedback} onClose={() => setShowFeedback(false)} />
