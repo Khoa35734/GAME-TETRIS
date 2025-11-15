@@ -152,22 +152,29 @@ const Versus: React.FC = () => {
             <div style={{ display: 'flex', gap: 16, justifyContent: 'center' }}>
               <button
                 onClick={() => {
-                  // Forfeit: emit special event to give opponent 2-0 win
                   console.log('🏳️ Player forfeited match');
-                  socket.emit('match:forfeit', { roomId });
-                  // DON'T navigate immediately - wait for server to emit bo3:match-end
-                  // which will show the overlay to the opponent and then auto-exit
                   setShowExitConfirm(false);
-                  if (meId) socket.emit('ranked:leave', meId);
+                  
+                  // Leave room appropriately based on context
+                  if (roomId) {
+                    // Custom room - use roomId from URL params
+                    const { roomId: urlRoomId } = window.location.pathname.match(/\/versus\/(?<roomId>[^\/]+)/)?.groups || {};
+                    if (urlRoomId) {
+                      console.log('[Forfeit] Leaving custom room:', roomId);
+                      socket.emit('room:leave', roomId);
+                    } else if (meId) {
+                      console.log('[Forfeit] Leaving ranked match:', meId);
+                      socket.emit('ranked:leave', meId);
+                    }
+                  }
+                  
                   if (autoExitTimerRef.current) {
                     clearInterval(autoExitTimerRef.current);
                     autoExitTimerRef.current = null;
                   }
                   cleanupWebRTC('forfeit');
-                  // Delay navigation to allow server to broadcast result
-                  setTimeout(() => {
-                    navigate('/?modes=1');
-                  }, 1000);
+                  
+                  navigate('/?modes=1');
                 }}
                 style={{
                   padding: '12px 28px',
@@ -540,7 +547,16 @@ const Versus: React.FC = () => {
 
             <button
               onClick={() => {
-                if (meId) socket.emit('ranked:leave', meId);
+                // Leave room appropriately
+                const { roomId: urlRoomId } = window.location.pathname.match(/\/versus\/(?<roomId>[^\/]+)/)?.groups || {};
+                if (urlRoomId && roomId) {
+                  console.log('[GameOver] Leaving custom room:', roomId);
+                  socket.emit('room:leave', roomId);
+                } else if (meId) {
+                  console.log('[GameOver] Leaving ranked match:', meId);
+                  socket.emit('ranked:leave', meId);
+                }
+                
                 if (autoExitTimerRef.current) {
                   clearInterval(autoExitTimerRef.current);
                   autoExitTimerRef.current = null;

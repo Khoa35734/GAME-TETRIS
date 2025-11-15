@@ -239,45 +239,66 @@ export const useSocketEvents = (props: SocketEventProps) => {
     socket.on('matchmaking:found', onFound);
 
     const onGameStart = (payload?: any) => {
-      stopMatchmaking();
-      if (payload?.roomId) setRoomId(payload.roomId);
+      stopMatchmaking();
+      if (payload?.roomId) setRoomId(payload.roomId);
       if (payload?.mode) {
-        const resolvedMode = payload.mode === 'ranked' ? 'ranked' : 'casual';
-        setMatchMode(resolvedMode);
-        console.log('[DEBUG] 🎯 game:start mode:', resolvedMode, payload.mode);
+        setMatchMode(payload.mode === 'ranked' ? 'ranked' : payload.mode === 'custom' ? 'casual' : 'casual');
+        console.log('[DEBUG] 🎯 game:start mode:', payload.mode);
       }
-      if (payload?.player1 && payload?.player2 && meId) {
-        const myInfo = payload.player1.id === meId ? payload.player1 : payload.player2.id === meId ? payload.player2 : null;
-        const oppInfo = payload.player1.id === meId ? payload.player2 : payload.player2.id === meId ? payload.player1 : null;
-        if (myInfo?.name) setPlayerName(myInfo.name);
+      
+      if (payload?.player1 && payload?.player2) {
+        // Match by socketId for reliability (especially in custom rooms)
+        const mySocketId = socket.id;
+        const iAmPlayer1 = payload.player1.socketId === mySocketId;
+        const iAmPlayer2 = payload.player2.socketId === mySocketId;
+        
+        const myInfo = iAmPlayer1 ? payload.player1 : iAmPlayer2 ? payload.player2 : null;
+        const oppInfo = iAmPlayer1 ? payload.player2 : iAmPlayer2 ? payload.player1 : null;
+        
+        console.log('[DEBUG] 🎯 game:start player match:', {
+          mySocketId,
+          iAmPlayer1,
+          iAmPlayer2,
+          player1Socket: payload.player1.socketId,
+          player2Socket: payload.player2.socketId,
+          myName: myInfo?.name,
+          oppName: oppInfo?.name
+        });
+        
+        if (myInfo) {
+          if (myInfo.id) setMeId(myInfo.id);
+          if (myInfo.name) setPlayerName(myInfo.name);
+        }
+        
         if (oppInfo) {
-          setOpponentId(oppInfo.id);
-          setOpponentName(oppInfo.name || `Opponent_${oppInfo.id.slice(0,4)}`);
+          setOpponentId(oppInfo.id || oppInfo.socketId);
+          setOpponentName(oppInfo.name || `Player_${(oppInfo.id || oppInfo.socketId).slice(0, 6)}`);
+          console.log('[DEBUG] ✅ Set opponent name:', oppInfo.name || `Player_${(oppInfo.id || oppInfo.socketId).slice(0, 6)}`);
         }
 
-        // 👇 Determine and persist my role as soon as game starts
+        // Determine role
         let role: 'player1' | 'player2' | null = null;
-        if (payload.player1?.id === meId) role = 'player1';
-        else if (payload.player2?.id === meId) role = 'player2';
+        if (iAmPlayer1) role = 'player1';
+        else if (iAmPlayer2) role = 'player2';
+        
         if (role) {
           setPlayerRole(role);
           playerRoleRef.current = role;
           try {
             localStorage.setItem('tetris:playerRole', role);
           } catch {}
-          console.log('[DEBUG] 🏁 game:start → role resolved:', role, '(meId:', meId, ')');
+          console.log('[DEBUG] 🏁 game:start → role resolved:', role);
         } else {
-          console.warn('[DEBUG] ⚠️ game:start could not resolve role from payload.player1.id/player2.id', { meId, p1: payload.player1?.id, p2: payload.player2?.id });
+          console.warn('[DEBUG] ⚠️ game:start could not resolve role');
         }
       }
-      if (payload?.next) coreSetters.setQueueSeed(payload.next);
-      setNetOppStage(null);
-      setWaiting(false);
-      setCountdownInternal(3); 
-    };
-    socket.on('game:start', onGameStart);
-    
-    const onGameStartWebRTC = ({ opponent }: any) => {
+      
+      if (payload?.next) coreSetters.setQueueSeed(payload.next);
+      setNetOppStage(null);
+      setWaiting(false);
+      setCountdownInternal(3); 
+    };
+    socket.on('game:start', onGameStart);    const onGameStartWebRTC = ({ opponent }: any) => {
       if (opponent) initWebRTC((socket.id || '') < opponent);
     };
     socket.on('game:start', onGameStartWebRTC);
@@ -290,29 +311,41 @@ export const useSocketEvents = (props: SocketEventProps) => {
       console.log('[DEBUG] 🏆 bo3:match-start', payload);
       console.log('[DEBUG] 🏆 My socket.id is:', socket.id);
       
-      // ⭐ SET MATCH MODE (ranked or casual)
+      // ⭐ SET MATCH MODE (ranked or casual or custom)
       if (payload?.mode) {
-        setMatchMode(payload.mode);
+        setMatchMode(payload.mode === 'ranked' ? 'ranked' : 'casual');
         console.log('[DEBUG] 🏆 Match mode:', payload.mode);
       }
       
       if (payload?.player1?.socketId && payload.player2?.socketId) {
-        let role: 'player1' | 'player2' | null = null;
+        const mySocketId = socket.id;
+        const iAmPlayer1 = mySocketId === payload.player1.socketId;
+        const iAmPlayer2 = mySocketId === payload.player2.socketId;
         
-        if (socket.id === payload.player1.socketId) {
+        let role: 'player1' | 'player2' | null = null;
+        if (iAmPlayer1) {
           console.log('[DEBUG] 🏆 SETTING playerRole: player1');
           role = 'player1';
-        } else if (socket.id === payload.player2.socketId) {
+          // Set opponent info from player2
+          if (payload.player2.username) {
+            setOpponentName(payload.player2.username);
+            console.log('[DEBUG] 🏆 Set opponent name:', payload.player2.username);
+          }
+        } else if (iAmPlayer2) {
           console.log('[DEBUG] 🏆 SETTING playerRole: player2');
           role = 'player2';
+          // Set opponent info from player1
+          if (payload.player1.username) {
+            setOpponentName(payload.player1.username);
+            console.log('[DEBUG] 🏆 Set opponent name:', payload.player1.username);
+          }
         } else {
-          console.log('[DEBUG] ⚠️ WARNING: socket.id mismatch!', socket.id, payload.player1.socketId, payload.player2.socketId);
+          console.log('[DEBUG] ⚠️ WARNING: socket.id mismatch!', mySocketId, payload.player1.socketId, payload.player2.socketId);
         }
         
         if (role) {
-          // ✅ CẬP NHẬT CẢ STATE VÀ REF NGAY LẬP TỨC
           setPlayerRole(role);
-          playerRoleRef.current = role; // 👈 CRITICAL: Set ref immediately!
+          playerRoleRef.current = role;
           localStorage.setItem('tetris:playerRole', role);
           console.log('[DEBUG] ✅ playerRole set to:', role, '(ref:', playerRoleRef.current, ')');
         }
@@ -338,12 +371,10 @@ export const useSocketEvents = (props: SocketEventProps) => {
     // 🔼 KẾT THÚC PHẦN LOG ĐÃ SỬA 🔼
     // ===============================================
 
-    if (roomId && !readyEmittedRef.current) {
-      socket.emit('game:im_ready', roomId);
-      readyEmittedRef.current = true;
-    }
-
-    return () => {
+    if (roomId && !readyEmittedRef.current) {
+      socket.emit('game:im_ready', { roomId });
+      readyEmittedRef.current = true;
+    }    return () => {
       stopMatchmaking();
       socket.off('ranked:found', onFound);
       socket.off('matchmaking:found', onFound);
@@ -416,24 +447,29 @@ export const useSocketEvents = (props: SocketEventProps) => {
         Promise.all(promises).then(() => setMatchResult({ outcome: 'draw', reason }));
       }
       
-      setAutoExitCountdown(60);
-      let remaining = 60;
-      autoExitTimerRef.current = window.setInterval(() => {
-        remaining--;
-        setAutoExitCountdown(remaining);
-        if (remaining <= 0) {
-          clearInterval(autoExitTimerRef.current!);
-          autoExitTimerRef.current = null;
-          setAutoExitCountdown(null);
-          if (meId) socket.emit('ranked:leave', meId);
-          cleanupWebRTC('auto-exit');
-          navigate('/?modes=1');
-        }
-      }, 1000);
-    };
-    socket.on('game:over', onGameOver);
-
-    const onApplyGarbage = async (data: { lines: number }) => {
+      setAutoExitCountdown(60);
+      let remaining = 60;
+      autoExitTimerRef.current = window.setInterval(() => {
+        remaining--;
+        setAutoExitCountdown(remaining);
+        if (remaining <= 0) {
+          clearInterval(autoExitTimerRef.current!);
+          autoExitTimerRef.current = null;
+          setAutoExitCountdown(null);
+          
+          // Leave appropriately based on room type
+          if (urlRoomId && roomId) {
+            socket.emit('room:leave', roomId);
+          } else if (meId) {
+            socket.emit('ranked:leave', meId);
+          }
+          
+          cleanupWebRTC('auto-exit');
+          navigate('/?modes=1');
+        }
+      }, 1000);
+    };
+    socket.on('game:over', onGameOver);    const onApplyGarbage = async (data: { lines: number }) => {
       if (data.lines > 0 && !coreRef.current.gameOver) {
         const updated = await applyGarbageRows(data.lines);
         setIncomingGarbage(0);
@@ -555,24 +591,29 @@ export const useSocketEvents = (props: SocketEventProps) => {
         Promise.all(promises).then(() => setMatchResult({ outcome: 'lose', reason: 'Bạn đã thua trận đấu' }));
       }
       
-      setAutoExitCountdown(60);
-      let remaining = 60;
-      autoExitTimerRef.current = window.setInterval(() => {
-        remaining--;
-        setAutoExitCountdown(remaining);
-        if (remaining <= 0) {
-          clearInterval(autoExitTimerRef.current!);
-          autoExitTimerRef.current = null;
-          setAutoExitCountdown(null);
-          if (meId) socket.emit('ranked:leave', meId);
-          cleanupWebRTC('auto-exit');
-          navigate('/?modes=1');
-        }
-      }, 1000);
-    };
-    socket.on('bo3:match-end', onBo3MatchEnd);
-
-    return () => {
+      setAutoExitCountdown(60);
+      let remaining = 60;
+      autoExitTimerRef.current = window.setInterval(() => {
+        remaining--;
+        setAutoExitCountdown(remaining);
+        if (remaining <= 0) {
+          clearInterval(autoExitTimerRef.current!);
+          autoExitTimerRef.current = null;
+          setAutoExitCountdown(null);
+          
+          // Leave appropriately based on room type
+          if (urlRoomId && roomId) {
+            socket.emit('room:leave', roomId);
+          } else if (meId) {
+            socket.emit('ranked:leave', meId);
+          }
+          
+          cleanupWebRTC('auto-exit');
+          navigate('/?modes=1');
+        }
+      }, 1000);
+    };
+    socket.on('bo3:match-end', onBo3MatchEnd);    return () => {
       socket.off('game:next', onGameNext);
       socket.off('game:state', onGameState);
       socket.off('game:over', onGameOver);
@@ -590,18 +631,21 @@ export const useSocketEvents = (props: SocketEventProps) => {
     coreSetters, coreRef
   ]);
 
-  // Unmount cleanup
-  useEffect(() => {
-    return () => {
-      if (meId) socket.emit('ranked:leave', meId);
-      if (afKTimeoutRef.current) clearTimeout(afKTimeoutRef.current);
-      if (autoExitTimerRef.current) clearInterval(autoExitTimerRef.current);
-      if (disconnectTimerRef.current) clearInterval(disconnectTimerRef.current);
-      cleanupWebRTC('component-unmount');
-    };
-  }, [meId, cleanupWebRTC]);
-
-  return {
+  // Unmount cleanup
+  useEffect(() => {
+    return () => {
+      // DON'T emit leave events here - they cause double-leave bugs
+      // Leave is handled explicitly:
+      // - In Versus forfeit button
+      // - In auto-exit timer after match ends
+      // - In RoomLobby back button
+      
+      if (afKTimeoutRef.current) clearTimeout(afKTimeoutRef.current);
+      if (autoExitTimerRef.current) clearInterval(autoExitTimerRef.current);
+      if (disconnectTimerRef.current) clearInterval(disconnectTimerRef.current);
+      cleanupWebRTC('component-unmount');
+    };
+  }, [cleanupWebRTC]);  return {
     resetAFKTimer,
     disconnectCountdown,
     autoExitCountdown,

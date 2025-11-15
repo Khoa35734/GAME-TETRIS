@@ -357,29 +357,32 @@ socket.on('room:startGame', async (roomId: string, cb?: (result: RoomAck) => voi
       return;
     }
 
-    // Chỉ host mới được bắt đầu
     if (match.hostPlayerId !== socket.id) {
-      cb?.({ ok: false, error: 'unknown' });
+      cb?.({ ok: false, error: 'not-host' });
       return;
     }
 
-    // Gọi 'startMatch'. Nó tự kiểm tra logic 'ready'
-    const startedMatch = await matchManager.startMatch(roomId); 
-
-    if (!startedMatch) {
-      // 'startMatch' trả về null nếu thất bại (ví dụ: chưa ai ready)
-      cb?.({ ok: false, error: 'unknown' });
+    if (match.status !== 'waiting') {
+      cb?.({ ok: false, error: 'already-started' });
       return;
     }
 
-    console.log(`[room:startGame] 🚀 Match ${roomId} is starting... emitting 'game:starting'`);
+    if (match.players.length < 2) {
+      cb?.({ ok: false, error: 'not-enough-players' });
+      return;
+    }
 
-    // 1. Gửi sự kiện 'game:starting' cho TẤT CẢ client (để điều hướng)
-    // Client 'Versus.tsx' sẽ nhận và gửi lại 'game:im_ready'
-    io.to(roomId).emit('game:starting'); 
+    const nonHostPlayers = match.players.filter((p) => p.playerId !== match.hostPlayerId);
+    const allGuestsReady = nonHostPlayers.length > 0 && nonHostPlayers.every((p) => p.ready);
+    if (!allGuestsReady) {
+      cb?.({ ok: false, error: 'players-not-ready' });
+      return;
+    }
 
+    console.log(`[room:startGame] 🚀 Match ${roomId} passed lobby checks. Waiting for in-game readiness...`);
+
+    io.to(roomId).emit('game:starting');
     cb?.({ ok: true });
-
   } catch (err) {
     console.error('[room:startGame] Error:', err);
     cb?.({ ok: false, error: 'unknown' });

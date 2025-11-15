@@ -465,6 +465,41 @@ export class MatchManager {
     });
   }
 
+  /**
+   * Reset per-round state so leftover garbage/combos do not leak into the next game.
+   */
+  async resetRoundState(matchId: string): Promise<MatchData | null> {
+    return this.withMatchLock(matchId, async () => {
+      const match = await this.getMatch(matchId);
+      if (!match) {
+        return null;
+      }
+
+      const now = Date.now();
+      const playerIds: string[] = [];
+
+      for (const player of match.players) {
+        player.alive = true;
+        player.pendingGarbage = 0;
+        player.combo = 0;
+        player.b2b = 0;
+        playerIds.push(player.playerId);
+      }
+
+      match.updatedAt = now;
+      await this.saveMatch(match);
+
+      // Clear queued garbage in Redis so the next round starts clean.
+      await Promise.all(
+        playerIds.map((playerId) =>
+          redis.del(KEYS.playerGarbage(matchId, playerId)).catch(() => undefined),
+        ),
+      );
+
+      return match;
+    });
+  }
+
   
   /**
    * Queue garbage for player (atomic operation)

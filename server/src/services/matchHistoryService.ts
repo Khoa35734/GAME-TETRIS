@@ -49,7 +49,7 @@ export interface MatchData {
   player1_wins: number;
   player2_wins: number;
   winner_id: number | null;  // NULL nếu hòa (không bao giờ xảy ra trong BO3)
-  mode: 'casual' | 'ranked';
+  mode: 'casual' | 'ranked' | 'custom';
   games: GameData[];         // Mảng chứa dữ liệu từng ván (1-3 ván)
   end_reason?: string;       // Lý do kết thúc: 'normal', 'player1_disconnect', 'player2_disconnect', etc.
 }
@@ -131,7 +131,7 @@ export async function saveMatchData(matchData: MatchData): Promise<number> {
       throw new Error('No game data provided');
     }
 
-    if (!['casual', 'ranked'].includes(matchData.mode)) {
+    if (!['casual', 'ranked', 'custom'].includes(matchData.mode)) {
       throw new Error(`Invalid mode: ${matchData.mode}`);
     }
 

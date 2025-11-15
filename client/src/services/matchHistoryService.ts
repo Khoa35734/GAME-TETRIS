@@ -26,10 +26,12 @@ export interface MatchHistoryItem {
   winner_id: number;
   player1_score: number;
   player2_score: number;
+  self_score: number;
+  opponent_score: number;
   match_timestamp: string;
   result: 'WIN' | 'LOSE';
   opponent_name: string;
-  score: string; // Format: "2-1"
+  score: string; // Numeric format in user perspective
   mode: 'casual' | 'ranked'; // Match mode
   end_reason?: string; // 'normal', 'player1_disconnect', 'player2_disconnect', etc.
 }

@@ -23,15 +23,8 @@ export type Room = {
 
 export type RoomAck = {
   ok: boolean;
-  error?: 'exists' | 'not-found' | 'started' | 'full' | 'unknown';
+  error?: 'exists' | 'not-found' | 'started' | 'full' | 'unknown' | 'not-host' | 'already-started' | 'not-enough-players' | 'players-not-ready';
   roomId?: string;
-  // ==================================================
-  // START SỬA LỖI
-  // Thêm thuộc tính 'data' để server có thể gửi
-  // snapshot về ngay trong callback 'room:join'
-  // ==================================================
-  data?: any; 
-  // ==================================================
-  // END SỬA LỖI
-  // ==================================================
+  data?: any;
+  message?: string;
 };
