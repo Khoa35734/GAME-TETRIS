@@ -761,7 +761,7 @@ SOFTWARE.
 ## 📞 Support & Contact
 
 - **GitHub Issues**: [Report bugs](https://github.com/Khoa35734/GAME-TETRIS/issues)
-- **Email**: support@example.com (replace with your email)
+- **Email**: khoaphamby@gmail.com (replace with your email)
 - **Discord**: [Join our server](#) (if applicable)
 
 ---
