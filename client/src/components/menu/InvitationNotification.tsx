@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import socket from '../../socket';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import socket from '../../socket';
 
 type Invitation = {
   roomId: string;
@@ -12,23 +12,20 @@ type Invitation = {
 };
 
 export const InvitationNotification: React.FC = () => {
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [activeInvitation, setActiveInvitation] = useState<Invitation | null>(null);
+  const [queuedInvitations, setQueuedInvitations] = useState<Invitation[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
     const handleInvitation = (data: Invitation) => {
       console.log('[InvitationNotification] Received invitation:', data);
-      
-      // Add to list (max 3 invitations displayed)
-      setInvitations(prev => {
-        const newInvitations = [...prev, data];
-        return newInvitations.slice(-3); // Keep only last 3
+      setActiveInvitation(prev => {
+        if (prev) {
+          setQueuedInvitations(queue => [...queue, data].slice(-5));
+          return prev;
+        }
+        return data;
       });
-
-      // Auto-remove after 15 seconds
-      setTimeout(() => {
-        setInvitations(prev => prev.filter(inv => inv.timestamp !== data.timestamp));
-      }, 15000);
     };
 
     socket.on('room:invitation', handleInvitation);
@@ -38,183 +35,134 @@ export const InvitationNotification: React.FC = () => {
     };
   }, []);
 
+  const advanceQueue = useCallback(() => {
+    setQueuedInvitations(prevQueue => {
+      if (prevQueue.length === 0) {
+        setActiveInvitation(null);
+        return [];
+      }
+      const [next, ...rest] = prevQueue;
+      setActiveInvitation(next);
+      return rest;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!activeInvitation) return;
+    const timer = window.setTimeout(() => {
+      console.log('[InvitationNotification] Invitation expired');
+      advanceQueue();
+    }, 15000);
+    return () => window.clearTimeout(timer);
+  }, [activeInvitation, advanceQueue]);
+
   const acceptInvitation = (invitation: Invitation) => {
     console.log('[InvitationNotification] Accepting invitation to room:', invitation.roomId);
-    
-    // Remove from list
-    setInvitations(prev => prev.filter(inv => inv.timestamp !== invitation.timestamp));
-    
-    // Navigate to room lobby
+    advanceQueue();
     navigate(`/room/${invitation.roomId}`);
   };
 
   const declineInvitation = (invitation: Invitation) => {
     console.log('[InvitationNotification] Declining invitation:', invitation.roomId);
-    
-    // Remove from list
-    setInvitations(prev => prev.filter(inv => inv.timestamp !== invitation.timestamp));
-    
-    // Optionally notify the inviter
+    advanceQueue();
     socket.emit('room:invite-declined', {
       roomId: invitation.roomId,
       inviterName: invitation.inviterName
     });
   };
 
-  if (invitations.length === 0) return null;
+  if (!activeInvitation) return null;
+
+  const queueLength = queuedInvitations.length;
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: '20px',
-      right: '20px',
-      zIndex: 9999,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '12px',
-      maxWidth: '380px'
-    }}>
-      {invitations.map((invitation) => (
-        <div
-          key={invitation.timestamp}
-          style={{
-            background: 'linear-gradient(135deg, rgba(156, 39, 176, 0.95) 0%, rgba(123, 31, 162, 0.95) 100%)',
-            backdropFilter: 'blur(10px)',
-            border: '2px solid rgba(255, 255, 255, 0.3)',
-            borderRadius: '12px',
-            padding: '16px',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            animation: 'slideInRight 0.3s ease-out',
-            color: 'white'
-          }}
-        >
-          {/* Header */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '12px'
-          }}>
-            <span style={{ fontSize: '24px' }}>✉️</span>
-            <div style={{ flex: 1 }}>
-              <div style={{
-                fontSize: '16px',
-                fontWeight: 'bold',
-                color: 'white'
-              }}>
-                Lời mời vào phòng
-              </div>
-              <div style={{
-                fontSize: '13px',
-                color: 'rgba(255, 255, 255, 0.8)',
-                marginTop: '2px'
-              }}>
-                từ {invitation.inviterName}
-              </div>
-            </div>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 9999,
+        padding: 16
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 420,
+          borderRadius: 16,
+          background: 'linear-gradient(160deg, #311b92 0%, #000428 100%)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.45)',
+          padding: 28,
+          color: '#fff'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Bạn được mời vào phòng</div>
+            <div style={{ fontSize: 14, opacity: 0.8 }}>từ {activeInvitation.inviterName}</div>
           </div>
-
-          {/* Room Info */}
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.2)',
-            borderRadius: '8px',
-            padding: '10px',
-            marginBottom: '12px',
-            fontSize: '14px'
-          }}>
-            <div style={{ marginBottom: '6px' }}>
-              🏠 <strong>Phòng:</strong> {invitation.roomName}
-            </div>
-            <div>
-              👥 <strong>Số người:</strong> {invitation.currentPlayers}/{invitation.maxPlayers}
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{
-            display: 'flex',
-            gap: '8px'
-          }}>
-            <button
-              onClick={() => acceptInvitation(invitation)}
-              style={{
-                flex: 1,
-                padding: '10px',
-                background: 'linear-gradient(135deg, #4ecdc4 0%, #44a39b 100%)',
-                border: 'none',
-                borderRadius: '8px',
-                color: 'white',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                boxShadow: '0 2px 8px rgba(78, 205, 196, 0.4)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(78, 205, 196, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 2px 8px rgba(78, 205, 196, 0.4)';
-              }}
-            >
-              ✓ Tham gia
-            </button>
-            <button
-              onClick={() => declineInvitation(invitation)}
-              style={{
-                flex: 1,
-                padding: '10px',
-                background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%)',
-                border: 'none',
-                borderRadius: '8px',
-                color: 'white',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                boxShadow: '0 2px 8px rgba(255, 107, 107, 0.4)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 107, 107, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 2px 8px rgba(255, 107, 107, 0.4)';
-              }}
-            >
-              ✕ Từ chối
-            </button>
-          </div>
-
-          {/* Timer indicator */}
-          <div style={{
-            marginTop: '10px',
-            fontSize: '11px',
-            color: 'rgba(255, 255, 255, 0.6)',
-            textAlign: 'center'
-          }}>
-            ⏱️ Lời mời sẽ tự động hết hạn sau 15 giây
-          </div>
+          <span style={{ fontSize: 28 }}>✉️</span>
         </div>
-      ))}
 
-      <style>
-        {`
-          @keyframes slideInRight {
-            from {
-              transform: translateX(400px);
-              opacity: 0;
-            }
-            to {
-              transform: translateX(0);
-              opacity: 1;
-            }
-          }
-        `}
-      </style>
+        <div style={{
+          background: 'rgba(0,0,0,0.25)',
+          borderRadius: 12,
+          padding: 16,
+          marginBottom: 20,
+          border: '1px solid rgba(255,255,255,0.08)'
+        }}>
+          <div style={{ marginBottom: 8 }}>🏠 <strong>Phòng:</strong> {activeInvitation.roomName}</div>
+          <div>👥 <strong>Số người:</strong> {activeInvitation.currentPlayers}/{activeInvitation.maxPlayers}</div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button
+            onClick={() => acceptInvitation(activeInvitation)}
+            style={{
+              flex: 1,
+              padding: '12px 16px',
+              borderRadius: 10,
+              border: 'none',
+              background: 'linear-gradient(135deg, #4ecdc4, #2ebf91)',
+              color: '#0d1b2a',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            ✓ Tham gia ngay
+          </button>
+          <button
+            onClick={() => declineInvitation(activeInvitation)}
+            style={{
+              flex: 1,
+              padding: '12px 16px',
+              borderRadius: 10,
+              border: 'none',
+              background: 'rgba(255,255,255,0.08)',
+              color: '#fff',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            ✕ Từ chối
+          </button>
+        </div>
+
+        <div style={{ marginTop: 16, fontSize: 12, opacity: 0.7, textAlign: 'center' }}>
+          Lời mời sẽ tự đóng sau 15 giây
+          {queueLength > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {queueLength} lời mời khác đang chờ
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
+  
 };

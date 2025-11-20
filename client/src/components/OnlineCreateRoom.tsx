@@ -30,8 +30,6 @@ const OnlineCreateRoom: React.FC = () => {
     socket.emit('room:create', roomId, { maxPlayers, name: displayName }, (result: any) => {
       setCreating(false);
       if (result.ok) {
-        // Mark that we already joined this room
-        sessionStorage.setItem(`joined_${roomId}`, 'true');
         // Navigate to room lobby
         navigate(`/room/${roomId}`);
       } else {

@@ -649,10 +649,11 @@ export class MatchManager {
    * Delete match from Redis
    */
   async deleteMatch(matchId: string): Promise<void> {
+    const match = await this.getMatch(matchId);
+
     await redis.del(KEYS.match(matchId));
     await redis.sRem(KEYS.activeMatches, matchId);
     
-    const match = await this.getMatch(matchId);
     if (match) {
       for (const player of match.players) {
         await redis.del(KEYS.playerMatch(player.playerId));
