@@ -8,26 +8,26 @@
  * 3. Auto-detect từ hostname
  */
 export const getApiBaseUrl = (): string => {
-  // Priority 1: Environment variable
+  // Ưu tiên 1: Biến môi trường (VITE_API_URL)
   const envUrl = import.meta.env.VITE_API_URL;
   if (envUrl) {
     console.log('[API Config] Using env URL:', envUrl);
     return envUrl;
   }
 
-  // Priority 2: localStorage (manual config)
+  // Ưu tiên 2: localStorage (cấu hình thủ công)
   const savedUrl = localStorage.getItem('tetris:apiUrl');
   if (savedUrl) {
     console.log('[API Config] Using saved URL:', savedUrl);
     return savedUrl;
   }
 
-  // Priority 3: Auto-detect based on current hostname
+  // Ưu tiên 3: Tự động phát hiện dựa trên hostname
   const hostname = window.location.hostname;
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
   
   if (isLocalhost) {
-    // Đang chạy trên localhost
+    // Đang chạy trên môi trường dev local
     const url = 'http://localhost:4000/api';
     console.log('[API Config] Using localhost URL:', url);
     return url;
@@ -98,7 +98,7 @@ export const autoDiscoverServer = async (
   onProgress?: (ip: string, success: boolean) => void
 ): Promise<string | null> => {
   const hostname = window.location.hostname;
-  
+
   // Nếu đang ở localhost, không cần discover
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return 'http://localhost:4000/api';
@@ -106,6 +106,7 @@ export const autoDiscoverServer = async (
 
   // Parse IP hiện tại để lấy subnet
   const parts = hostname.split('.');
+  // Chỉ hoạt động với địa chỉ IPv4
   if (parts.length !== 4) {
     return null;
   }
@@ -113,26 +114,29 @@ export const autoDiscoverServer = async (
   const subnet = `${parts[0]}.${parts[1]}.${parts[2]}`;
   const candidates: string[] = [];
 
-  // Thử IP của client trước (most likely)
+  // Ưu tiên IP của client trước (khả năng cao nhất)
   candidates.push(hostname);
 
   // Thử các IP phổ biến trong subnet
-  for (let i = 1; i <= 255; i++) {
+  for (let i = 1; i <= 254; i++) {
     if (i.toString() !== parts[3]) {
       candidates.push(`${subnet}.${i}`);
     }
   }
 
   // Test parallel với timeout ngắn
-  const timeout = 1000; // 1 second per attempt
-  
-  for (const ip of candidates.slice(0, 20)) { // Test first 20 IPs only
+  const timeout = 800; // 0.8 giây cho mỗi IP
+
+  // Chỉ test 20 IP đầu tiên để tránh quá tải mạng và thời gian chờ lâu
+  const testCandidates = candidates.slice(0, 20);
+
+  for (const ip of testCandidates) {
     const baseUrl = `http://${ip}:4000/api`;
-    
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
-      
+
       const response = await fetch(`http://${ip}:4000/api/server-info`, {
         signal: controller.signal,
         method: 'GET',

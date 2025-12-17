@@ -581,6 +581,23 @@ class BO3MatchManager {
       return;
     }
 
+    const winnerSocketId = winner === 'player1' ? match.player1.socketId : match.player2.socketId;
+    const loserRole = winner === 'player1' ? 'player2' : 'player1';
+
+    // Prompt both players (especially the winner) to push their latest stats
+    this.io.to(winnerSocketId).emit('bo3:request-stats', {
+      roomId,
+      matchId: match.matchId,
+      role: winner,
+      reason,
+    });
+    this.io.to(loserSocketId).emit('bo3:request-stats', {
+      roomId,
+      matchId: match.matchId,
+      role: loserRole,
+      reason,
+    });
+
     console.log(`[BO3] handleGameTopout: ${winner} thắng game ${match.currentGame} (do ${loserSocketId} top-out)`);
 
     // 🔽 CHECK STATS CÓ TỒN TẠI KHÔNG 🔽

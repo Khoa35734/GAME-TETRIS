@@ -4,6 +4,15 @@ import * as U from '../game/utils';
 import type { StageType, StageCell, GameCoreSetters } from '../game/types';
 import type { Player } from '../../../hooks/usePlayer';
 
+const GARBAGE_DELAY_MS = 340; // ~340ms is TETR.IO standard
+
+interface GarbagePacket {
+  id: number;
+  amount: number;
+  isLocked: boolean;
+  holeColumn: number; // 🎯 Vị trí lỗ hổng cố định cho toàn bộ gói này
+}
+
 type GarbageProps = {
   player: Player;
   setStage: GameCoreSetters['setStage'];
@@ -11,204 +20,220 @@ type GarbageProps = {
   setIsApplyingGarbage: GameCoreSetters['setIsApplyingGarbage'];
 };
 
-/**
- * 🎯 Garbage System theo cơ chế TETR.IO
- * 
- * - garbageQueue: Hàng rác đang chờ (màu xanh - có thể cancel)
- * - garbageToSend: Hàng rác sẽ gửi đi (tích lũy từ combo)
- * - opponentIncomingGarbage: Hàng rác đối phương đang nhận
- */
 export const useGarbage = ({ player, setStage, updatePlayerPos, setIsApplyingGarbage }: GarbageProps) => {
-  // Garbage Queue: Hàng rác đang chờ
-  const [garbageQueue, setGarbageQueue] = useState(0); // Hiển thị trên GarbageQueueBar (màu xanh)
-  const [garbageQueueLocked, setGarbageQueueLocked] = useState(false); // Đỏ = locked, không thể cancel
+  const [garbagePackets, setGarbagePackets] = useState<GarbagePacket[]>([]);
   
-  // Garbage to Send: Hàng rác tích lũy để gửi
-  const [garbageToSend, setGarbageToSend] = useState(0);
-  
-  // Opponent's incoming garbage (để hiển thị trên UI)
-  const [opponentIncomingGarbage, setOpponentIncomingGarbage] = useState(0);
-  
-  const garbageDelayTimerRef = useRef<number | null>(null);
-  const lastClearTimeRef = useRef<number>(0);
+  const packetLockTimers = useRef<Map<number, number>>(new Map());
+  const animationFrameRef = useRef<number>();
+  const lastHoleColumn = useRef<number | null>(null); // 🎯 Lỗ của gói trước đó
 
-  /**
-   * 🎲 Apply garbage rows với animation (chèn từ đáy lên)
-   * Mỗi hàng có 1 lỗ ngẫu nhiên cố định cho toàn bộ batch
-   */
-  const applyGarbageRows = useCallback((count: number, holeColumn?: number): Promise<StageType | null> => {
+  const applyGarbageRows = useCallback(async (count: number, holeColumn?: number): Promise<StageType | null> => {
     if (count <= 0) return Promise.resolve(null);
-    console.log(`[Garbage] 🔽 Applying ${count} rows...`);
     
     setIsApplyingGarbage(true);
+    // 🎯 Sử dụng holeColumn từ packet (đã được random khi nhận)
+    const hole = holeColumn !== undefined ? holeColumn : Math.floor(Math.random() * player.stage[0].length);
+    console.log(`[Garbage] 🔽 Applying ${count} rows with hole at column ${hole}...`);
     
-    // Random hole cho toàn bộ batch
-    const hole = holeColumn !== undefined ? holeColumn : Math.floor(Math.random() * 10);
-    
+    // This implementation has a flaw: it uses setTimeout for animation, which can be slow and stuttery.
+    // For now, we keep the logic but acknowledge it can be improved.
     return new Promise((resolve) => {
       let currentRow = 0;
       let finalStage: StageType | null = null;
-      let collisionDetected = false;
-      
+
       const applyNextRow = () => {
+        let collisionDetected = false;
+        let stageAfterPush: StageType | null = null;
+        
+        setStage(prev => {
+          const newStage = prev.map(r => [...r] as StageCell[]) as StageType;
+          newStage.shift();
+          newStage.push(U.createGarbageRow(player.stage[0].length, hole));
+          
+          if (checkCollision(player, newStage, { x: 0, y: 0 })) {
+            collisionDetected = true;
+          }
+          stageAfterPush = newStage;
+          return newStage;
+        });
+
+        currentRow++;
+
         if (collisionDetected) {
           console.log(`[Garbage] ⚠️ Collision! Stopping at row ${currentRow}/${count}`);
-          setIsApplyingGarbage(false);
           updatePlayerPos({ x: 0, y: 0, collided: true });
-          resolve(finalStage);
+          setIsApplyingGarbage(false);
+          resolve(stageAfterPush);
           return;
         }
         
         if (currentRow >= count) {
           console.log(`[Garbage] ✅ Applied ${count} rows successfully!`);
           setIsApplyingGarbage(false);
-          resolve(finalStage);
+          resolve(stageAfterPush);
           return;
         }
         
-        setStage(prev => {
-          if (!prev.length) {
-            finalStage = prev;
-            return prev;
-          }
-          const width = prev[0].length;
-          const cloned = prev.map(row => row.map(cell => [cell[0], cell[1]] as StageCell)) as StageType;
-          
-          cloned.shift(); // Remove top row
-          cloned.push(U.createGarbageRow(width, hole)); // Same hole for all rows
-          
-          if (checkCollision(player, cloned, { x: 0, y: 0 })) {
-            collisionDetected = true;
-          }
-          
-          finalStage = cloned;
-          return cloned;
-        });
-        
-        currentRow++;
-        setTimeout(applyNextRow, collisionDetected ? 0 : 100);
+        setTimeout(applyNextRow, 50); // Animation delay
       };
       
       applyNextRow();
     });
   }, [setStage, player, updatePlayerPos, setIsApplyingGarbage]);
 
-  /**
-   * 📨 Nhận garbage từ đối phương
-   * Push vào queue (màu xanh), bắt đầu đếm delay
-   */
   const receiveGarbage = useCallback((amount: number) => {
     if (amount <= 0) return;
     
-    console.log(`[Garbage] 📨 Received ${amount} lines from opponent`);
-    setGarbageQueue(prev => prev + amount);
-    lastClearTimeRef.current = Date.now();
+    // 🎯 Random vị trí lỗ (tránh trùng với gói trước)
+    const boardWidth = player.stage[0]?.length || 10;
+    let holeColumn: number;
     
-    // Clear timer cũ
-    if (garbageDelayTimerRef.current) {
-      clearTimeout(garbageDelayTimerRef.current);
+    if (lastHoleColumn.current !== null && boardWidth > 1) {
+      // Chống lặp: tránh lỗ giống gói trước
+      do {
+        holeColumn = Math.floor(Math.random() * boardWidth);
+      } while (holeColumn === lastHoleColumn.current && Math.random() < 0.75); // 75% tránh trùng
+    } else {
+      holeColumn = Math.floor(Math.random() * boardWidth);
     }
     
-    // Set timer 500ms để lock garbage (chuyển sang đỏ)
-    garbageDelayTimerRef.current = window.setTimeout(() => {
-      setGarbageQueueLocked(true);
-      console.log(`[Garbage] 🔴 Queue locked! Ready to apply.`);
-    }, 500);
+    lastHoleColumn.current = holeColumn;
+    console.log(`[Garbage] 📨 Received packet: ${amount} lines, hole at column ${holeColumn}`);
+    
+    const newPacket: GarbagePacket = {
+      id: Date.now() + Math.random(),
+      amount,
+      isLocked: false,
+      holeColumn, // 🎯 Lưu vị trí lỗ cố định
+    };
+    
+    setGarbagePackets(prev => [...prev, newPacket]);
+    packetLockTimers.current.set(newPacket.id, GARBAGE_DELAY_MS);
   }, []);
 
-  /**
-   * 💥 Cancel garbage khi tấn công
-   * Trừ garbage trong queue trước khi nó lock
-   */
   const cancelGarbage = useCallback((attackPower: number): number => {
     if (attackPower <= 0) return 0;
     
-    let actualCanceled = 0;
+    let powerLeft = attackPower;
+    let canceledAmount = 0;
     
-    setGarbageQueue(prev => {
-      const remaining = Math.max(0, prev - attackPower);
-      const canceled = prev - remaining;
-      actualCanceled = canceled;
+    setGarbagePackets(prev => {
+      const newPackets = [...prev];
       
-      if (canceled > 0) {
-        console.log(`[Garbage] 🛡️ Canceled ${canceled} lines! (${remaining} remaining)`);
-        
-        // Reset delay timer nếu còn garbage
-        if (remaining > 0) {
-          if (garbageDelayTimerRef.current) {
-            clearTimeout(garbageDelayTimerRef.current);
-          }
-          setGarbageQueueLocked(false);
-          garbageDelayTimerRef.current = window.setTimeout(() => {
-            setGarbageQueueLocked(true);
-          }, 500);
-        } else if (remaining === 0) {
-          // Hết garbage → clear timer
-          if (garbageDelayTimerRef.current) {
-            clearTimeout(garbageDelayTimerRef.current);
-            garbageDelayTimerRef.current = null;
-          }
-          setGarbageQueueLocked(false);
+      // ⚠️ CRITICAL: Cancel LOCKED (Red) packets first - they're immediate danger!
+      for (let i = 0; i < newPackets.length && powerLeft > 0; i++) {
+        const packet = newPackets[i];
+        if (packet.isLocked) {
+          const cancel = Math.min(powerLeft, packet.amount);
+          packet.amount -= cancel;
+          powerLeft -= cancel;
+          canceledAmount += cancel;
+          console.log(`[Garbage] 🛡️ Canceled ${cancel} LOCKED (red) lines!`);
         }
       }
       
-      return remaining;
-    });
-    
-    return actualCanceled;
-  }, []);
+      // Then cancel UNLOCKED (Green/Yellow) packets if attack power is left
+      for (let i = 0; i < newPackets.length && powerLeft > 0; i++) {
+        const packet = newPackets[i];
+        if (!packet.isLocked) {
+          const cancel = Math.min(powerLeft, packet.amount);
+          packet.amount -= cancel;
+          powerLeft -= cancel;
+          canceledAmount += cancel;
+          console.log(`[Garbage] 🛡️ Canceled ${cancel} UNLOCKED (green) lines!`);
+        }
+      }
 
-  /**
-   * 🎯 Trigger apply garbage khi lock
-   * Được gọi từ bên ngoài khi cần apply (ví dụ: sau khi piece lock)
-   */
-  const triggerGarbageApply = useCallback(async () => {
-    if (garbageQueue > 0 && garbageQueueLocked) {
-      const amount = garbageQueue;
-      setGarbageQueue(0);
-      setGarbageQueueLocked(false);
-      
-      if (garbageDelayTimerRef.current) {
-        clearTimeout(garbageDelayTimerRef.current);
-        garbageDelayTimerRef.current = null;
+      const filteredPackets = newPackets.filter(p => p.amount > 0);
+      if (canceledAmount > 0) {
+        console.log(`[Garbage] ✅ Total canceled: ${canceledAmount} lines!`);
       }
       
-      console.log(`[Garbage] 🔻 Triggering apply: ${amount} lines`);
-      return await applyGarbageRows(amount);
-    }
-    return null;
-  }, [garbageQueue, garbageQueueLocked, applyGarbageRows]);
+      // Clean up timers for removed packets
+      const remainingIds = new Set(filteredPackets.map(p => p.id));
+      for (const id of packetLockTimers.current.keys()) {
+        if (!remainingIds.has(id)) {
+          packetLockTimers.current.delete(id);
+        }
+      }
+      
+      return filteredPackets;
+    });
 
-  // Cleanup timer on unmount
+    return canceledAmount;
+  }, []);
+
+  const triggerGarbageApply = useCallback(async () => {
+    const packetToApply = garbagePackets.find(p => p.isLocked);
+    if (!packetToApply) return null;
+
+    console.log(`[Garbage] 🔻 Triggering apply for packet: ${packetToApply.amount} lines, hole=${packetToApply.holeColumn}`);
+    
+    setGarbagePackets(prev => prev.filter(p => p.id !== packetToApply.id));
+    packetLockTimers.current.delete(packetToApply.id);
+
+    // 🎯 Truyền holeColumn từ packet vào applyGarbageRows
+    return await applyGarbageRows(packetToApply.amount, packetToApply.holeColumn);
+  }, [garbagePackets, applyGarbageRows]);
+
   useEffect(() => {
-    return () => {
-      if (garbageDelayTimerRef.current) {
-        clearTimeout(garbageDelayTimerRef.current);
+    let lastTime = performance.now();
+
+    const loop = (currentTime: number) => {
+      const deltaTime = currentTime - lastTime;
+      lastTime = currentTime;
+      
+      let needsUpdate = false;
+      for (const [id, timeLeft] of packetLockTimers.current.entries()) {
+        const newTimeLeft = timeLeft - deltaTime;
+        if (newTimeLeft <= 0) {
+          packetLockTimers.current.delete(id);
+          setGarbagePackets(prev => {
+            const newPackets = prev.map(p => p.id === id ? { ...p, isLocked: true } : p);
+            if (prev.some(p => p.id === id && !p.isLocked)) {
+              console.log(`[Garbage] 🔴 Packet locked! Ready to apply.`);
+              return newPackets;
+            }
+            return prev;
+          });
+        } else {
+          packetLockTimers.current.set(id, newTimeLeft);
+        }
+        needsUpdate = true;
+      }
+      
+      if (needsUpdate || garbagePackets.length > 0) {
+        animationFrameRef.current = requestAnimationFrame(loop);
       }
     };
-  }, []);
+
+    animationFrameRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [garbagePackets.length]);
+
+  const lockedAmount = garbagePackets.filter(p => p.isLocked).reduce((sum, p) => sum + p.amount, 0);
+  const unlockedAmount = garbagePackets.filter(p => !p.isLocked).reduce((sum, p) => sum + p.amount, 0);
 
   return {
-    // Queue state (để hiển thị trên UI)
-    garbageQueue,
-    garbageQueueLocked,
+    garbageQueue: unlockedAmount, // For UI (yellow bar)
+    garbageQueueLocked: lockedAmount > 0, // For UI (is there any red)
+    lockedGarbageAmount: lockedAmount, // Specific amount for red bar
     
-    // Outgoing garbage
-    garbageToSend,
-    setGarbageToSend,
-    
-    // Opponent garbage (để hiển thị)
-    opponentIncomingGarbage,
-    setOpponentIncomingGarbage,
-    
-    // Functions
     receiveGarbage,
     cancelGarbage,
     triggerGarbageApply,
     applyGarbageRows,
-    
-    // Legacy compatibility (backward compat với code cũ)
-    incomingGarbage: garbageQueue,
-    setIncomingGarbage: setGarbageQueue,
+
+    // Legacy compatibility for other hooks that might use these
+    incomingGarbage: unlockedAmount + lockedAmount,
+    setIncomingGarbage: () => {}, // This is now managed internally
+    garbageToSend: 0, // Should be managed by useMechanics
+    setGarbageToSend: () => {},
+    opponentIncomingGarbage: 0,
+    setOpponentIncomingGarbage: () => {},
   };
 };

@@ -11,7 +11,7 @@ import { RankResultOverlay } from './RankResultOverlay'; // ⭐ IMPORT RANK RESU
 import StatsPanel from './StatsPanel'; // 📊 Import Stats Panel
 
 // Import tài nguyên (với đường dẫn đã sửa)
-import bgImg from '../../../img/bg.jpg'; // 👈 ĐÃ SỬA ĐƯỜNG DẪN
+import bgImg from '../../../img/bg.webp'; // 👈 ĐÃ SỬA ĐƯỜNG DẪN
 
 // File này không còn chứa bất kỳ logic game, state, hay socket nào
 // Nó chỉ nhận props từ hook `useVersusState` và render JSX
@@ -60,6 +60,7 @@ const Versus: React.FC = () => {
     oppNextFour,
     oppFillWhiteProgress,
     opponentIncomingGarbage,
+    lockedGarbageAmount,
     // oppGameOver, oppPing - removed (not needed in UI)
     oppStats,
   oppPiecesPlaced,
@@ -388,7 +389,7 @@ const Versus: React.FC = () => {
                 </div>
                 
                 {/* Garbage Queue Bar - using the new component */}
-                <GarbageQueueBar count={incomingGarbage} />
+                <GarbageQueueBar unlockedAmount={incomingGarbage} lockedAmount={lockedGarbageAmount} />
               </div>
             </div>
             
@@ -425,7 +426,7 @@ const Versus: React.FC = () => {
                 </div>
                 
                 {/* Opponent's Garbage Queue Bar */}
-                <GarbageQueueBar count={opponentIncomingGarbage} />
+                <GarbageQueueBar unlockedAmount={0} lockedAmount={0} />
               </div>
               
               {/* (Requested) Removed live stats under opponent board */}

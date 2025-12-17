@@ -39,40 +39,47 @@ export const getWinsRequired = (bestOf: number): number => Math.floor(normalizeB
 
 // Tính toán hàng rác
 export const calculateGarbageLines = (
-  lines: number, 
-  tspinType: TSpinType, 
+  lines: number,
+  tspinType: TSpinType,
   pc: boolean,
-  combo: number,
-  b2b: number
+  combo: number, // 1-indexed combo count (e.g., 2 means the 2nd consecutive clear)
+  b2b: number   // 1-indexed B2B chain count
 ): number => {
   if (lines === 0) return 0;
   let garbage = 0;
 
+  // 1. Base Damage (per user's TETR.IO spec)
   if (pc) {
-    garbage = 10;
-  } else if (tspinType !== 'none' && lines > 0) {
-    if (tspinType === 'mini' && lines === 1) {
-      garbage = 0;
-    } else {
-      const tspinBase = [0, 2, 4, 6];
+    garbage = 10; // Perfect Clear
+  } else if (tspinType !== 'none') {
+    // T-Spins
+    if (tspinType === 'mini') {
+      if (lines === 1) garbage = 0;      // Mini T-Spin Single (spec: 0)
+      else if (lines === 2) garbage = 1; // Mini T-Spin Double (spec: 1)
+    } else { // Full T-Spin
+      const tspinBase = [0, 2, 4, 6]; // lines: 0, Single (2), Double (4), Triple (6)
       garbage = tspinBase[lines] ?? 0;
     }
   } else {
-    const standardBase = [0, 0, 1, 2, 4];
+    // Standard Clears
+    const standardBase = [0, 0, 1, 2, 4]; // lines: 0, Single (0), Double (1), Triple (2), Quad (4)
     garbage = standardBase[lines] ?? 0;
   }
 
-  const isTetris = tspinType === 'none' && lines === 4;
-  const isTSpinClear = tspinType !== 'none' && lines > 0;
-  if (b2b >= 1 && (isTetris || isTSpinClear)) {
+  // 2. B2B (Back-to-Back) Bonus
+  const isHardClear = (tspinType !== 'none' && lines > 0) || (tspinType === 'none' && lines === 4);
+  if (b2b > 1 && isHardClear) {
+    // Bonus applies from the 2nd consecutive hard clear onwards
     garbage += 1;
   }
 
-  if (combo >= 9) garbage += 5;
-  else if (combo >= 7) garbage += 4;
-  else if (combo >= 5) garbage += 3;
-  else if (combo >= 3) garbage += 2;
-  else if (combo >= 2) garbage += 1;
+  // 3. Combo Bonus (per user's TETR.IO spec)
+  // Index of table corresponds to combo count.
+  const comboTable = [0, 0, 1, 1, 2, 2, 3, 3]; 
+  if (combo >= 2) {
+    const comboBonus = comboTable[Math.min(combo, comboTable.length - 1)];
+    garbage += comboBonus;
+  }
 
   return garbage;
 };
