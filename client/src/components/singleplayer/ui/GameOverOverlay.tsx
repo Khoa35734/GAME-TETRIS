@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styled from 'styled-components';
 
 // ==========================================
@@ -104,9 +104,16 @@ interface Props {
   elapsedMs: number; rows: number; level: number; piecesPlaced: number; inputs: number; holds: number;
   onTryAgain: () => void;
   onMenu: () => void;
+  // Optional: pass reported player id (for multiplayer contexts)
+  reportedUserId?: number | null;
+  // Optional context such as match id
+  matchId?: string;
 }
 
-export const GameOverOverlay: React.FC<Props> = ({ elapsedMs, rows, level, piecesPlaced, inputs, holds, onTryAgain, onMenu }) => {
+import ReportModal from '../../ReportModal';
+
+export const GameOverOverlay: React.FC<Props> = ({ elapsedMs, rows, level, piecesPlaced, inputs, holds, onTryAgain, onMenu, reportedUserId = null, matchId }) => {
+  const [showReportModal, setShowReportModal] = useState(false);
     const pps = elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00';
     const finesse = piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00';
     const timeStr = (elapsedMs / 1000).toFixed(2);
@@ -128,7 +135,9 @@ export const GameOverOverlay: React.FC<Props> = ({ elapsedMs, rows, level, piece
           <ButtonGroup>
             <PrimaryButton onClick={onTryAgain}>Try Again</PrimaryButton>
             <SecondaryButton onClick={onMenu}>Menu</SecondaryButton>
+            <SecondaryButton onClick={() => setShowReportModal(true)} style={{ background: 'rgba(255,255,255,0.08)' }}>Report Player</SecondaryButton>
           </ButtonGroup>
+          <ReportModal isOpen={showReportModal} onClose={() => setShowReportModal(false)} reportedUserId={reportedUserId} matchId={matchId} />
         </ContentBox>
       </OverlayContainer>
     );

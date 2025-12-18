@@ -110,6 +110,65 @@ const ReportsManagement: React.FC = () => {
     }
   };
 
+  const handleBanUser = async (reportId: string, reported_user_id: string) => {
+    const banReason = prompt('Nhập lý do ban:');
+    if (!banReason) return;
+
+    const banDurationStr = prompt('Nhập số ngày ban (để trống = vĩnh viễn):');
+    const banDuration = banDurationStr ? parseInt(banDurationStr) : null;
+
+    if (!confirm(`⚠️ Bạn có chắc muốn ban user này?\nLý do: ${banReason}\nThời gian: ${banDuration ? banDuration + ' ngày' : 'Vĩnh viễn'}`)) {
+      return;
+    }
+
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const response = await fetch(`${API_BASE}/api/reports/${reportId}/ban`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          admin_id: 1, // TODO: Get admin ID from auth
+          reason: banReason,
+          ban_duration: banDuration
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(`✅ Đã ban user thành công!\nUser ID: ${result.userId}\nThời gian: ${result.banDuration === 'permanent' ? 'Vĩnh viễn' : result.banDuration + ' ngày'}`);
+        fetchReports();
+        setShowDetailModal(false);
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Không thể ban user');
+      }
+    } catch (err) {
+      alert('❌ Lỗi khi ban user: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  };
+
+  const handleUnbanUser = async (userId: string) => {
+    if (!confirm('⚠️ Bạn có chắc muốn unban user này?')) return;
+
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const response = await fetch(`${API_BASE}/api/reports/unban/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_id: 1 }) // TODO: Get admin ID from auth
+      });
+
+      if (response.ok) {
+        alert('✅ Đã unban user thành công!');
+        fetchReports();
+      } else {
+        throw new Error('Không thể unban user');
+      }
+    } catch (err) {
+      alert('❌ Lỗi khi unban user');
+    }
+  };
+
   const filteredReports = reports.filter(r => {
     if (filterStatus !== 'all' && r.status !== filterStatus) return false;
     if (filterType !== 'all' && r.type !== filterType) return false;
@@ -551,7 +610,7 @@ const ReportsManagement: React.FC = () => {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => handleDeleteReport(selectedReport.id)}
                   style={{
@@ -567,6 +626,25 @@ const ReportsManagement: React.FC = () => {
                 >
                   🗑️ Xóa
                 </button>
+                
+                {selectedReport.reported_user_id && selectedReport.status !== 'resolved' && (
+                  <button
+                    onClick={() => handleBanUser(selectedReport.id, selectedReport.reported_user_id)}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                      color: 'white',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      fontSize: '1rem'
+                    }}
+                  >
+                    🚫 Ban User
+                  </button>
+                )}
+
                 <button
                   onClick={() => setShowDetailModal(false)}
                   style={{

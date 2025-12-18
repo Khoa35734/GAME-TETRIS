@@ -5,6 +5,7 @@ import friendsRouter from '../routes/friends';
 import matchesRouter from '../routes/matches';
 import feedbacksRouter from '../routes/feedbacks';
 import reportsRouter from '../routes/reports';
+import usersRouter from '../routes/users';
 import broadcastsRouter from '../routes/broadcasts';
 import adminRoutes from '../routes/admin';
 import messagesRouter from './messages';
@@ -19,6 +20,7 @@ export function mountApiRoutes(app: Express) {
   app.use('/api/matches', matchesRouter);
   app.use('/api/feedbacks', feedbacksRouter);
   app.use('/api/reports', reportsRouter);
+  app.use('/api/users', usersRouter);
   app.use('/api/broadcast', broadcastsRouter);
   app.use('/api/admin', adminRoutes);
   app.use('/api/messages', messagesRouter);

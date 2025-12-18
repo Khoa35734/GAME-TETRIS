@@ -6,6 +6,7 @@ import { getApiBaseUrl } from '../services/apiConfig';
 interface InboxModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onNotificationChange?: () => void;
 }
 
 interface MessageItem {
@@ -34,7 +35,7 @@ interface MessageStats {
   player_message: number;
 }
 
-const InboxModal: React.FC<InboxModalProps> = ({ isOpen, onClose }) => {
+const InboxModal: React.FC<InboxModalProps> = ({ isOpen, onClose, onNotificationChange }) => {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [stats, setStats] = useState<MessageStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,6 +84,10 @@ const InboxModal: React.FC<InboxModalProps> = ({ isOpen, onClose }) => {
       await axios.patch(`${getApiBaseUrl()}/messages/${messageId}/read`);
       loadMessages();
       loadStats();
+      // Gọi callback để cập nhật badge ngay lập tức
+      if (onNotificationChange) {
+        onNotificationChange();
+      }
     } catch (error) {
       console.error('Error marking as read:', error);
     }

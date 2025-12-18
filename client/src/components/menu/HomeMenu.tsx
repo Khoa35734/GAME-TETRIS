@@ -48,6 +48,10 @@ const HomeMenu: React.FC = () => {
   const [showFeedback, setShowFeedback] = useState(false); // Feedback modal
   const [showInbox, setShowInbox] = useState(false); // Inbox modal
 
+  // Notification badges
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  const [pendingFriendRequestsCount, setPendingFriendRequestsCount] = useState(0);
+
   // Background music
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -191,6 +195,53 @@ const HomeMenu: React.FC = () => {
     loadELO();
   }, [currentUser]);
 
+  // Load notification counts - tách ra ngoài để có thể gọi lại
+  const loadNotifications = async () => {
+    if (!currentUser || currentUser.isGuest) {
+      setUnreadMessagesCount(0);
+      setPendingFriendRequestsCount(0);
+      return;
+    }
+
+    try {
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      
+      // Fetch unread messages count
+      const messagesResponse = await fetch(
+        `${API_BASE}/api/messages/stats/${currentUser.accountId}`
+      );
+      if (messagesResponse.ok) {
+        const data = await messagesResponse.json();
+        setUnreadMessagesCount(Number(data.unread) || 0);
+      }
+
+      // Fetch pending friend requests count
+      const friendsResponse = await fetch(
+        `${API_BASE}/api/friends/pending`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('tetris:accessToken')}`,
+          },
+        }
+      );
+      if (friendsResponse.ok) {
+        const data = await friendsResponse.json();
+        setPendingFriendRequestsCount(data.count || 0);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load notifications:', error);
+    }
+  };
+
+  // Auto-refresh notifications
+  useEffect(() => {
+    loadNotifications();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(loadNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
   // Handle login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,6 +280,25 @@ const HomeMenu: React.FC = () => {
         // [THÊM MỚI] Gửi authentication đến server để track online status
         console.log('🔐 [Login] Authenticating socket with accountId:', result.user.accountId);
         socket.emit('user:authenticate', result.user.accountId);
+      } else if (result.banned && result.banInfo) {
+        // User is banned - show detailed ban information
+        const banInfo = result.banInfo;
+        let banMessage = `🚫 TÀI KHOẢN ĐÃ BỊ KHÓA\n\n`;
+        banMessage += `📝 Lý do: ${banInfo.reason}\n`;
+        banMessage += `👮 Bởi: ${banInfo.admin}\n`;
+        banMessage += `📅 Thời gian ban: ${new Date(banInfo.banStart).toLocaleString('vi-VN')}\n`;
+        
+        if (banInfo.isPermanent) {
+          banMessage += `⏰ Thời hạn: VĨnh VIỄN`;
+        } else if (banInfo.banEnd) {
+          const endDate = new Date(banInfo.banEnd);
+          const now = new Date();
+          const daysRemaining = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          banMessage += `⏰ Hết hạn: ${endDate.toLocaleString('vi-VN')}\n`;
+          banMessage += `⏱️ Còn lại: ${daysRemaining} ngày`;
+        }
+        
+        setError(banMessage);
       } else {
         setError(result.message || "Đăng nhập thất bại!");
       }
@@ -724,7 +794,8 @@ const HomeMenu: React.FC = () => {
                 gap: '8px',
                 fontSize: '0.95rem',
                 fontWeight: 600,
-                transition: 'all 0.3s ease'
+                transition: 'all 0.3s ease',
+                position: 'relative'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = 'rgba(156, 39, 176, 0.25)';
@@ -738,6 +809,27 @@ const HomeMenu: React.FC = () => {
               }}
             >
               👥 Bạn bè
+              {pendingFriendRequestsCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  right: '-8px',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  minWidth: '20px',
+                  height: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75rem',
+                  fontWeight: 'bold',
+                  border: '2px solid #1a1a2e',
+                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.5)'
+                }}>
+                  {pendingFriendRequestsCount > 99 ? '99+' : pendingFriendRequestsCount}
+                </span>
+              )}
             </button>
 
             {/* Leaderboard Button */}
@@ -786,7 +878,8 @@ const HomeMenu: React.FC = () => {
                 gap: '8px',
                 fontSize: '0.95rem',
                 fontWeight: 600,
-                transition: 'all 0.3s ease'
+                transition: 'all 0.3s ease',
+                position: 'relative'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = 'rgba(139, 92, 246, 0.25)';
@@ -800,6 +893,27 @@ const HomeMenu: React.FC = () => {
               }}
             >
               📬 Hộp thư
+              {unreadMessagesCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  right: '-8px',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  minWidth: '20px',
+                  height: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75rem',
+                  fontWeight: 'bold',
+                  border: '2px solid #1a1a2e',
+                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.5)'
+                }}>
+                  {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                </span>
+              )}
             </button>
 
             {/* Feedback Button */}
@@ -1135,20 +1249,26 @@ const HomeMenu: React.FC = () => {
                     {error && (
                       <div
                         style={{
-                          background: "rgba(244, 67, 54, 0.15)",
-                          border: "1px solid rgba(244, 67, 54, 0.4)",
+                          background: error.includes('🚫 TÀI KHOẢN ĐÃ BỊ KHÓA') 
+                            ? "linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%)"
+                            : "rgba(244, 67, 54, 0.15)",
+                          border: error.includes('🚫 TÀI KHOẢN ĐÃ BỊ KHÓA')
+                            ? "2px solid #ef4444"
+                            : "1px solid rgba(244, 67, 54, 0.4)",
                           borderRadius: "8px",
-                          padding: "12px 16px",
+                          padding: error.includes('🚫 TÀI KHOẢN ĐÃ BỊ KHÓA') ? "16px" : "12px 16px",
                           marginBottom: "20px",
-                          color: "#ff6b6b",
+                          color: error.includes('🚫 TÀI KHOẢN ĐÃ BỊ KHÓA') ? "#fca5a5" : "#ff6b6b",
                           fontSize: "0.9rem",
                           display: "flex",
-                          alignItems: "center",
-                          gap: "8px"
+                          alignItems: error.includes('🚫 TÀI KHOẢN ĐÃ BỊ KHÓA') ? "flex-start" : "center",
+                          gap: "8px",
+                          whiteSpace: "pre-line",
+                          fontFamily: error.includes('🚫 TÀI KHOẢN ĐÃ BỊ KHÓA') ? "monospace" : "inherit"
                         }}
                       >
                         <span>⚠️</span>
-                        <span>{error}</span>
+                        <span style={{ flex: 1 }}>{error}</span>
                       </div>
                     )}
 
@@ -1757,7 +1877,12 @@ const HomeMenu: React.FC = () => {
       )}
 
       {/* Friends Sidebar - Slides from right */}
-      {showFriends && <FriendsManager onBack={() => setShowFriends(false)} />}
+      {showFriends && (
+        <FriendsManager 
+          onBack={() => setShowFriends(false)} 
+          onNotificationChange={loadNotifications}
+        />
+      )}
 
       {/* Leaderboard Modal */}
       {showLeaderboard && (
@@ -2183,7 +2308,11 @@ const HomeMenu: React.FC = () => {
       <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
       
       {/* Inbox Modal */}
-      <InboxModal isOpen={showInbox} onClose={() => setShowInbox(false)} />
+      <InboxModal 
+        isOpen={showInbox} 
+        onClose={() => setShowInbox(false)} 
+        onNotificationChange={loadNotifications}
+      />
       
       {/* Feedback Modal */}
       <FeedbackModal isOpen={showFeedback} onClose={() => setShowFeedback(false)} />

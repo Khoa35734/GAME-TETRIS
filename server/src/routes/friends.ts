@@ -136,6 +136,30 @@ router.get('/requests', authenticateToken, async (req: AuthRequest, res: Respons
   }
 });
 
+// GET /api/friends/pending - Lấy số lượng lời mời kết bạn chờ xử lý
+router.get('/pending', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    // Đếm các lời mời đến (user khác gửi cho mình)
+    const count = await Friendship.count({
+      where: {
+        friend_id: userId,
+        status: FriendshipStatus.REQUESTED,
+      },
+    });
+
+    res.json({
+      success: true,
+      count,
+      requests: [], // For backward compatibility
+    });
+  } catch (error: any) {
+    console.error('[Friends] Get pending count error:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
+});
+
 // POST /api/friends/search - Tìm user theo user_id
 router.post('/search', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
