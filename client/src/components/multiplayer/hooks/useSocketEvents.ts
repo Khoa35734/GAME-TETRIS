@@ -515,11 +515,6 @@ export const useSocketEvents = (props: SocketEventProps) => {
 
       // 🔽 NGƯỜI THẮNG CŨNG GỬI STATS (vì họ không gọi sendTopout()) 🔽
       // Chỉ gửi nếu MÌNH THẮNG (người thua đã gửi qua sendTopout rồi)
-      if (didIWin && !coreRef.current.gameOver) {
-        console.log('[DEBUG] 📊 Winner sending stats via sendTopout');
-        sendTopout('opponent_topout');
-      }
-
       const myNewScore = myRole === 'player1' ? payload.score.player1Wins : payload.score.player2Wins;
       const oppNewScore = myRole === 'player1' ? payload.score.player2Wins : payload.score.player1Wins;
 
@@ -542,7 +537,17 @@ export const useSocketEvents = (props: SocketEventProps) => {
          setRoundResult(null);
       }, 4000); 
     };
-    socket.on('bo3:game-result', onBo3GameResult);    // --- 2. Lắng nghe sự kiện BẮT ĐẦU GAME MỚI (ví dụ: game 2) ---
+    socket.on('bo3:game-result', onBo3GameResult);
+
+    const onBo3RequestStats = (payload: { roomId?: string }) => {
+      if (payload?.roomId && roomId && payload.roomId !== roomId) {
+        return;
+      }
+      console.log('[DEBUG] 📊 bo3:request-stats received, sending stats');
+      sendPlayerStats();
+    };
+    socket.on('bo3:request-stats', onBo3RequestStats);
+    // --- 2. Lắng nghe sự kiện BẮT ĐẦU GAME MỚI (ví dụ: game 2) ---
     const onBo3NextGame = (payload: any) => {
       // LOG 7: Lắng nghe 'bo3:next-game-start'
       console.log('[DEBUG] 🚀 bo3:next-game-start', payload);
@@ -613,12 +618,13 @@ export const useSocketEvents = (props: SocketEventProps) => {
         }
       }, 1000);
     };
-    socket.on('bo3:match-end', onBo3MatchEnd);    return () => {
+    socket.on('bo3:match-end', onBo3MatchEnd);    return () => {
       socket.off('game:next', onGameNext);
       socket.off('game:state', onGameState);
       socket.off('game:over', onGameOver);
       socket.off('game:applyGarbage', onApplyGarbage);
       socket.off('bo3:game-result', onBo3GameResult);
+      socket.off('bo3:request-stats', onBo3RequestStats);
       socket.off('bo3:next-game-start', onBo3NextGame);
       socket.off('bo3:match-end', onBo3MatchEnd);
     };
@@ -626,9 +632,9 @@ export const useSocketEvents = (props: SocketEventProps) => {
     roomId, applyGarbageRows, navigate, meId, setTimerOn, setNetOppStage, 
     setOppStage, setOppHold, setOppNextFour, setOppGameOver, setMatchResult, 
     setMyStats, setMyFillWhiteProgress, setOppFillWhiteProgress, 
-    setIncomingGarbage, sendTopout,
+    setIncomingGarbage, sendTopout,
     playerRoleRef, setRoundResult, setSeriesScore, setSeriesCurrentGame,
-    coreSetters, coreRef
+    coreSetters, coreRef, sendPlayerStats
   ]);
 
   // Unmount cleanup

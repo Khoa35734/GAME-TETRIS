@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import socket from '../../socket';
 import { getApiBaseUrl } from '../../services/apiConfig';
@@ -23,6 +23,8 @@ type Friend = {
   friendUsername: string;
   status: string;
   isOnline: boolean;
+  presenceStatus?: string;
+  gameMode?: string;
 };
 
 const RoomLobby: React.FC = () => {
@@ -59,6 +61,42 @@ const RoomLobby: React.FC = () => {
   const [loadingFriends, setLoadingFriends] = useState(false);
   const [invitingFriends, setInvitingFriends] = useState<Set<number>>(new Set());
 
+  const navigationType = useMemo<PerformanceNavigationTiming['type'] | undefined>(() => {
+    if (typeof performance !== 'undefined' && typeof performance.getEntriesByType === 'function') {
+      const entries = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+      return entries[0]?.type;
+    }
+    return undefined;
+  }, []);
+
+  const joinedBeforeReload = useMemo(() => {
+    if (!roomId) return false;
+    if (typeof window === 'undefined') return false;
+    try {
+      return sessionStorage.getItem(`joined_${roomId}`) === 'true';
+    } catch (err) {
+      console.warn('[RoomLobby] Unable to read joined flag from sessionStorage', err);
+      return false;
+    }
+  }, [roomId]);
+
+  const shouldSkipRoomFlow = navigationType === 'reload' && joinedBeforeReload;
+
+  const { onlineFriends, offlineFriends } = useMemo(() => {
+    const sorted = [...friends].sort((a, b) => a.friendUsername.localeCompare(b.friendUsername));
+    return {
+      onlineFriends: sorted.filter(friend => friend.isOnline),
+      offlineFriends: sorted.filter(friend => !friend.isOnline),
+    };
+  }, [friends]);
+
+  useEffect(() => {
+    if (!roomId || !shouldSkipRoomFlow) return;
+    sessionStorage.removeItem(`joined_${roomId}`);
+    sessionStorage.removeItem(`roomHost_${roomId}`);
+    navigate('/online', { replace: true });
+  }, [roomId, shouldSkipRoomFlow, navigate]);
+
   // Ghi nhan neu ban la nguoi tao phong
   useEffect(() => {
     if (!roomId) {
@@ -92,12 +130,13 @@ const RoomLobby: React.FC = () => {
         const raw = localStorage.getItem('tetris:user');
         if (raw) {
           const user = JSON.parse(raw);
-          if (user?.id) {
-            const accountId = String(user.id);
+          const accountIdSource = user?.accountId ?? user?.id;
+          if (accountIdSource) {
+            const accountId = String(accountIdSource);
             setMyAccountId(accountId);
-            setDisplayName(user.username || `User_${accountId.slice(0, 6)}`);
+            setDisplayName(user?.username?.trim() || `User_${accountId.slice(0, 6)}`);
             setIdentityReady(true);
-            console.log('[RoomLobby] Identity from localStorage:', { accountId, username: user.username });
+            console.log('[RoomLobby] Identity from localStorage:', { accountId, username: user?.username });
             return;
           }
         }
@@ -148,6 +187,7 @@ const RoomLobby: React.FC = () => {
       setError('ID phòng không hợp lệ');
       return;
     }
+    if (shouldSkipRoomFlow) return;
     if (!identityReady) return;
 
     const onRoomUpdate = (data: any) => {
@@ -243,7 +283,24 @@ const RoomLobby: React.FC = () => {
         console.log('[RoomLobby] Cleanup: hasJoinedRef is false, NOT leaving room (game started)');
       }
     };
-  }, [roomId, navigate, identityReady, displayName]);
+  }, [roomId, navigate, identityReady, displayName, shouldSkipRoomFlow]);
+
+  useEffect(() => {
+    const handleRoomExpired = () => {
+      setError('Phòng đã hết hạn sau 10 phút. Đang quay lại menu tuỳ chỉnh...');
+      hasJoinedRef.current = false;
+      if (roomId) {
+        sessionStorage.removeItem(`joined_${roomId}`);
+        sessionStorage.removeItem(`roomHost_${roomId}`);
+      }
+      setTimeout(() => navigate('/online'), 1500);
+    };
+
+    socket.on('room:expired', handleRoomExpired);
+    return () => {
+      socket.off('room:expired', handleRoomExpired);
+    };
+  }, [navigate, roomId]);
 
   // Chat
   const sendChat = () => {
@@ -295,12 +352,22 @@ const RoomLobby: React.FC = () => {
         setLoadingFriends(false);
         return;
       }
-      const response = await fetch(`${getApiBaseUrl()}/friends/list`, {
+      const response = await fetch(`${getApiBaseUrl()}/friends`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.success) setFriends(data.friends || []);
+        if (data.success) {
+          const normalizedFriends: Friend[] = (data.friends || []).map((friend: any) => ({
+            friendId: Number(friend.friendId ?? friend.userId ?? friend.user_id ?? 0),
+            friendUsername: friend.friendUsername || friend.username || friend.user_name || `User_${friend.userId ?? friend.friendId ?? '???'}`,
+            status: friend.status || friend.presenceStatus || (friend.isOnline ? 'online' : 'offline'),
+            isOnline: Boolean(friend.isOnline),
+            presenceStatus: friend.presenceStatus,
+            gameMode: friend.gameMode,
+          })).filter((friend) => !!friend.friendId);
+          setFriends(normalizedFriends);
+        }
       }
     } catch (err) {
       console.error('[RoomLobby] Failed to fetch friends:', err);
@@ -622,72 +689,148 @@ const RoomLobby: React.FC = () => {
                 <div>Bạn chưa có bạn bè nào</div>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {friends.map((friend) => {
-                  const isInviting = invitingFriends.has(friend.friendId);
-                  const canInvite = friend.isOnline && !isInviting;
-
-                  return (
-                    <div
-                      key={friend.friendId}
-                      style={{
-                        padding: 16,
-                        background: friend.isOnline ? 'rgba(78, 205, 196, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                        borderRadius: 12,
-                        border: friend.isOnline ? '1px solid rgba(78, 205, 196, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        transition: 'all 0.3s ease'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div
-                          style={{
-                            width: 12, height: 12, borderRadius: '50%',
-                            background: friend.isOnline ? '#4ecdc4' : '#888',
-                            boxShadow: friend.isOnline ? '0 0 8px rgba(78, 205, 196, 0.6)' : 'none'
-                          }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '1rem', color: friend.isOnline ? '#fff' : '#888' }}>
-                            {friend.friendUsername}
-                          </div>
-                          <div style={{ fontSize: '0.85rem', color: friend.isOnline ? '#4ecdc4' : '#666', marginTop: 2 }}>
-                            {friend.isOnline ? '🟢 Đang online' : '⚫ Offline'}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => canInvite && inviteFriend(friend.friendId, friend.friendUsername)}
-                        disabled={!canInvite}
-                        style={{
-                          padding: '8px 16px',
-                          background: canInvite ? 'rgba(156, 39, 176, 0.3)' : 'rgba(255, 255, 255, 0.05)',
-                          border: canInvite ? '1px solid rgba(156, 39, 176, 0.5)' : '1px solid rgba(255, 255, 255, 0.1)',
-                          borderRadius: 8,
-                          color: canInvite ? '#ba68c8' : '#555',
-                          fontWeight: 600, fontSize: '0.9rem',
-                          cursor: canInvite ? 'pointer' : 'not-allowed',
-                          transition: 'all 0.3s ease', opacity: canInvite ? 1 : 0.5
-                        }}
-                        onMouseEnter={(e) => {
-                          if (canInvite) {
-                            e.currentTarget.style.background = 'rgba(156, 39, 176, 0.5)';
-                            e.currentTarget.style.transform = 'scale(1.05)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (canInvite) {
-                            e.currentTarget.style.background = 'rgba(156, 39, 176, 0.3)';
-                            e.currentTarget.style.transform = 'scale(1)';
-                          }
-                        }}
-                      >
-                        {isInviting ? '⏳ Đang gửi...' : friend.isOnline ? '✉️ Mời' : '🚫 Offline'}
-                      </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <h3 style={{ margin: 0, color: '#4ecdc4', fontSize: '1.1rem', textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Đang online ({onlineFriends.length})
+                    </h3>
+                    <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>Chỉ có thể mời khi đang online</span>
+                  </div>
+                  {onlineFriends.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', borderRadius: 12 }}>
+                      Không có bạn nào đang online
                     </div>
-                  );
-                })}
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {onlineFriends.map(friend => {
+                        const isInviting = invitingFriends.has(friend.friendId);
+                        const canInvite = !isInviting;
+                        return (
+                          <div
+                            key={friend.friendId}
+                            style={{
+                              padding: 16,
+                              background: 'rgba(78, 205, 196, 0.12)',
+                              borderRadius: 12,
+                              border: '1px solid rgba(78, 205, 196, 0.3)',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              transition: 'all 0.3s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                              <div
+                                style={{
+                                  width: 12, height: 12, borderRadius: '50%',
+                                  background: '#4ecdc4',
+                                  boxShadow: '0 0 8px rgba(78, 205, 196, 0.6)'
+                                }}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: '1rem', color: '#fff' }}>
+                                  {friend.friendUsername}
+                                </div>
+                                <div style={{ fontSize: '0.85rem', color: '#4ecdc4', marginTop: 2 }}>
+                                  🟢 Sẵn sàng nhận lời mời
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => canInvite && inviteFriend(friend.friendId, friend.friendUsername)}
+                              disabled={!canInvite}
+                              style={{
+                                padding: '8px 16px',
+                                background: canInvite ? 'rgba(156, 39, 176, 0.4)' : 'rgba(255, 255, 255, 0.05)',
+                                border: canInvite ? '1px solid rgba(156, 39, 176, 0.5)' : '1px solid rgba(255, 255, 255, 0.1)',
+                                borderRadius: 8,
+                                color: '#fff',
+                                fontWeight: 600, fontSize: '0.9rem',
+                                cursor: canInvite ? 'pointer' : 'not-allowed',
+                                transition: 'all 0.3s ease', opacity: canInvite ? 1 : 0.5
+                              }}
+                              onMouseEnter={(e) => {
+                                if (canInvite) {
+                                  e.currentTarget.style.background = 'rgba(156, 39, 176, 0.6)';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (canInvite) {
+                                  e.currentTarget.style.background = 'rgba(156, 39, 176, 0.4)';
+                                  e.currentTarget.style.transform = 'translateY(0)';
+                                }
+                              }}
+                            >
+                              {isInviting ? '⏳ Đang gửi...' : '✉️ Mời vào phòng'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <h3 style={{ margin: 0, color: '#888', fontSize: '1.1rem', textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Đang offline ({offlineFriends.length})
+                    </h3>
+                    <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.4)' }}>Không thể gửi lời mời</span>
+                  </div>
+                  {offlineFriends.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.03)', borderRadius: 12 }}>
+                      Tất cả bạn bè đều đang online 🎉
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {offlineFriends.map(friend => (
+                        <div
+                          key={friend.friendId}
+                          style={{
+                            padding: 16,
+                            background: 'rgba(255, 255, 255, 0.03)',
+                            borderRadius: 12,
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div
+                              style={{
+                                width: 12, height: 12, borderRadius: '50%',
+                                background: '#666'
+                              }}
+                            />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '1rem', color: '#999' }}>
+                                {friend.friendUsername}
+                              </div>
+                              <div style={{ fontSize: '0.85rem', color: '#666', marginTop: 2 }}>
+                                ⚫ Đang offline
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            disabled
+                            style={{
+                              padding: '8px 16px',
+                              borderRadius: 8,
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              color: '#555',
+                              fontWeight: 600,
+                              cursor: 'not-allowed'
+                            }}
+                          >
+                            🚫 Không thể mời
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

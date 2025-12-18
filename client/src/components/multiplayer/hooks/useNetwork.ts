@@ -239,7 +239,9 @@ export const useNetwork = ({
   const sendTopout = useCallback((reason?: string) => {
     // Vẫn giữ logic UDP/TCP topout (để server biết ai thua)
     const sent = sendUDP('topout', { reason }, true);
-    if (!sent && roomId) socket.emit('game:topout', roomId, reason);
+    if (roomId) {
+      socket.emit('game:topout', roomId, reason);
+    }
 
     // Gửi stats ngay sau khi báo topout
     sendPlayerStats();

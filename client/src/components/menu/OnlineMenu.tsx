@@ -98,13 +98,11 @@ const OnlineMenu: React.FC = () => {
 
     const payload = { maxPlayers: 2, name: displayName };
 
-    sessionStorage.setItem(`joined_${roomId}`, 'true');
     sessionStorage.setItem(`roomHost_${roomId}`, 'true');
 
     socket.emit('room:create', roomId, payload, (ack: any) => {
       if (!ack?.ok) {
         console.error('Failed to create room:', ack?.error);
-        sessionStorage.removeItem(`joined_${roomId}`);
         sessionStorage.removeItem(`roomHost_${roomId}`);
         navigate('/online');
       }

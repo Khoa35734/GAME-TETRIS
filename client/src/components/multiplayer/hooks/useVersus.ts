@@ -379,6 +379,7 @@ export const useVersus = (urlRoomId: string | undefined) => {
     nextFour,
     myFillWhiteProgress,
     incomingGarbage: garbage.garbageQueue,
+    lockedGarbageAmount: garbage.lockedGarbageAmount,
     garbageQueueLocked: garbage.garbageQueueLocked,
     rows: coreState.rows,
     level: coreState.level,

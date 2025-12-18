@@ -4,6 +4,46 @@ import { matchToRoomSnapshot, findPlayerInMatch } from '../game/helper';
 import { RoomAck } from '../core/types';
 import { playersReadyForGame, onlineUsers } from '../core/state';
 import { bagGenerator, nextPieces, TType } from '../game/pieceGenerator';
+
+const ROOM_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const roomExpirationTimers = new Map<string, NodeJS.Timeout>();
+
+const clearRoomExpiration = (roomId: string) => {
+  const timer = roomExpirationTimers.get(roomId);
+  if (timer) {
+    clearTimeout(timer);
+    roomExpirationTimers.delete(roomId);
+  }
+};
+
+const expireRoom = async (roomId: string, io: Server) => {
+  try {
+    const match = await matchManager.getMatch(roomId);
+    if (!match) return;
+
+    if (match.status !== 'waiting') {
+      clearRoomExpiration(roomId);
+      return;
+    }
+
+    await matchManager.deleteMatch(roomId);
+    io.to(roomId).emit('room:expired', { reason: 'timeout' });
+
+    const sockets = await io.in(roomId).fetchSockets();
+    sockets.forEach((roomSocket) => roomSocket.leave(roomId));
+  } catch (error) {
+    console.error(`[room] Failed to expire room ${roomId}:`, error);
+  } finally {
+    clearRoomExpiration(roomId);
+  }
+};
+
+const scheduleRoomExpiration = (roomId: string, io: Server) => {
+  clearRoomExpiration(roomId);
+  const timer = setTimeout(() => expireRoom(roomId, io), ROOM_TIMEOUT_MS);
+  roomExpirationTimers.set(roomId, timer);
+};
+
 export function setupRoomHandlers(socket: Socket, io: Server) {
   // Create room
   socket.on('room:create', async (roomId: string, optsOrCb?: any, cbMaybe?: any) => {
@@ -25,16 +65,29 @@ export function setupRoomHandlers(socket: Socket, io: Server) {
       }
 
       const maxPlayers = Math.max(2, Math.min(Number(options?.maxPlayers) || 2, 6));
-      const displayName = typeof options?.name === 'string' ? options.name : undefined;
+      const rawDisplayName = typeof options?.name === 'string' ? options.name : undefined;
+      const displayName = rawDisplayName?.trim() ? rawDisplayName.trim() : undefined;
+      const socketAccountId = (socket as any).accountId;
+      const socketUsername = (socket as any).username;
+      const hostDisplayName =
+        displayName || socketUsername || `User_${String(socketAccountId ?? socket.id).slice(0, 6)}`;
+      const hostAccountId =
+        typeof socketAccountId === 'number' && Number.isFinite(socketAccountId)
+          ? String(socketAccountId)
+          : undefined;
 
       const match = await matchManager.createMatch({
         matchId: roomId,
         hostPlayerId: socket.id,
         hostSocketId: socket.id,
+        hostAccountId,
+        hostName: hostDisplayName,
         mode: 'custom',
-        maxPlayers: maxPlayers,
-        roomId: roomId,
-hostAccountId: (socket as any).username || displayName || (socket as any).accountId.toString(),      });
+        maxPlayers,
+        roomId,
+      });
+
+      scheduleRoomExpiration(roomId, io);
 
       await socket.join(roomId);
 
@@ -42,11 +95,8 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
         `[room:create] ✅ ${socket.id} created match ${roomId} (max ${maxPlayers} players) in Redis`
       );
 
-      // Gửi snapshot ngay trong callback 'create'
-      // Lỗi 'data' does not exist đã được sửa trong 'types.ts'
       const snapshot = matchToRoomSnapshot(match);
       cb?.({ ok: true, roomId, data: snapshot });
-      
     } catch (err) {
       console.error('[room:create] Error:', err);
       cb?.({ ok: false, error: 'unknown' });
@@ -86,21 +136,24 @@ hostAccountId: (socket as any).username || displayName || (socket as any).accoun
         }
       }
 
-      const displayName = typeof options?.name === 'string' ? options.name : undefined;
+      const displayName = typeof options?.name === 'string' ? options.name.trim() : undefined;
       const existingPlayer = match.players.find((p) => p.socketId === socket.id);
 
-     // Code MỚI ĐÃ SỬA
-if (!existingPlayer) {
-  await matchManager.addPlayer(roomId, {
-    playerId: socket.id,
-    socketId: socket.id,
-    // 'accountId' nên lấy từ socket (sau khi auth)
-    accountId: (socket as any).accountId?.toString() || (socket as any).username,
-    // 'name' chính là 'displayName' mà client gửi lên
-    name: displayName 
-  });
-  console.log(`[room:join] ✅ ${socket.id} (Name: ${displayName}) joined match ${roomId}`);
-}
+      if (!existingPlayer) {
+        const accountId = (socket as any).accountId;
+        await matchManager.addPlayer(roomId, {
+          playerId: socket.id,
+          socketId: socket.id,
+          accountId:
+            typeof accountId === 'number' && Number.isFinite(accountId)
+              ? String(accountId)
+              : undefined,
+          name: displayName || (socket as any).username || `Guest_${socket.id.slice(0, 6)}`,
+        });
+        console.log(
+          `[room:join] ✅ ${socket.id} (Name: ${displayName || (socket as any).username || 'Guest'}) joined match ${roomId}`
+        );
+      }
 
       await socket.join(roomId);
 
@@ -183,6 +236,7 @@ if (!existingPlayer) {
       } else {
         // Phòng đã bị xóa
         console.log(`[room:leave] 🗑️ Empty match ${roomId.slice(0, 8)} deleted`);
+        clearRoomExpiration(roomId);
       }
       
     } catch (err) {
@@ -380,6 +434,8 @@ socket.on('room:startGame', async (roomId: string, cb?: (result: RoomAck) => voi
     }
 
     console.log(`[room:startGame] 🚀 Match ${roomId} passed lobby checks. Waiting for in-game readiness...`);
+
+    clearRoomExpiration(roomId);
 
     io.to(roomId).emit('game:starting');
     cb?.({ ok: true });

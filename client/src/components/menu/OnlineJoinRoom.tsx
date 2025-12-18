@@ -26,8 +26,6 @@ const OnlineJoinRoom: React.FC = () => {
     socket.emit('room:join', code.trim(), { name: displayName }, (result: any) => {
       setJoining(false);
       if (result.ok) {
-        // Mark that we joined this room
-        sessionStorage.setItem(`joined_${code.trim()}`, 'true');
         // Navigate to room lobby
         navigate(`/room/${code.trim()}`);
       } else {
