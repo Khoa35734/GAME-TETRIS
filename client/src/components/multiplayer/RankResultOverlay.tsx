@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ReportModal from '../ReportModal';
 
 interface RankResultOverlayProps {
   show: boolean;
@@ -35,6 +36,7 @@ export const RankResultOverlay: React.FC<RankResultOverlayProps> = ({
 }) => {
   const [animatedElo, setAnimatedElo] = useState(oldElo);
   const [showEloChange, setShowEloChange] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // Animation ELO từ oldElo → newElo
   useEffect(() => {
@@ -366,7 +368,24 @@ export const RankResultOverlay: React.FC<RankResultOverlayProps> = ({
         </div>
 
         {/* 🔘 NÚT ĐÓNG */}
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 12, alignItems: 'center' }}>
+          <button
+            onClick={() => { console.log('[UI] Report button (in RankResultOverlay) clicked'); setShowReportModal(true); }}
+            style={{
+              padding: '12px 24px',
+              borderRadius: 10,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.03)',
+              color: '#fff',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: 14,
+            }}
+            data-test="rank-report-player"
+          >
+            ⚠️ Báo cáo người chơi
+          </button>
+
           <button
             onClick={onComplete}
             style={{
@@ -395,6 +414,11 @@ export const RankResultOverlay: React.FC<RankResultOverlayProps> = ({
             🏠 Về Menu
           </button>
         </div>
+        <ReportModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          // We don't have opponentId here; user can input username in modal if needed
+        />
       </div>
 
       {/* CSS Animations */}

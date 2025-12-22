@@ -371,55 +371,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
         ))}
       </Section>
 
-      {/* Game Settings Section */}
-      <Section>
-        <SectionTitle>🎯 Cài đặt game</SectionTitle>
-        
-        <SettingRow>
-          <SettingLabel>DAS Delay (ms):</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.das_delay_ms ?? ''}
-            onChange={e => setSettings({ ...settings, das_delay_ms: parseInt(e.target.value) || 0 })}
-            min={0}
-            max={500}
-          />
-        </SettingRow>
-
-        <SettingRow>
-          <SettingLabel>ARR (ms):</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.arr_ms ?? ''}
-            onChange={e => setSettings({ ...settings, arr_ms: parseInt(e.target.value) || 0 })}
-            min={0}
-            max={100}
-          />
-        </SettingRow>
-
-        <SettingRow>
-          <SettingLabel>Soft Drop Rate (ms):</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.soft_drop_rate ?? ''}
-            onChange={e => setSettings({ ...settings, soft_drop_rate: parseInt(e.target.value) || 0 })}
-            min={10}
-            max={200}
-          />
-        </SettingRow>
-
-        <SettingRow>
-          <SettingLabel>Hiển thị mảnh tiếp theo:</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.show_next_pieces ?? ''}
-            onChange={e => setSettings({ ...settings, show_next_pieces: parseInt(e.target.value) || 0 })}
-            min={1}
-            max={7}
-          />
-        </SettingRow>
-      </Section>
-
       {/* Audio Settings Section */}
       <Section>
         <SectionTitle>🔊 Âm thanh</SectionTitle>

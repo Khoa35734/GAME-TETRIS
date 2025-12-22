@@ -24,13 +24,10 @@ const FEEDBACK_CATEGORIES: Category[] = [
   { value: 'other', label: 'Khác' },
 ];
 
-type Priority = 'low' | 'medium' | 'high';
-
 const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
   const [category, setCategory] = useState('');
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<Priority>('medium');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
@@ -45,7 +42,6 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
     setCategory('');
     setSubject('');
     setDescription('');
-    setPriority('medium');
     setSubmitStatus('idle');
   };
 
@@ -72,7 +68,6 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
         category,
         subject,
         description,
-        priority,
       };
 
       await axios.post(`${getApiBaseUrl()}/feedback`, payload);
@@ -113,27 +108,27 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-          border: '2px solid rgba(78, 205, 196, 0.3)',
+          background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f35 100%)',
+          border: '2px solid rgba(100, 200, 255, 0.5)',
           borderRadius: '16px',
           width: '100%',
-          maxWidth: '600px',
+          maxWidth: '620px',
           maxHeight: '90vh',
           overflow: 'auto',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+          boxShadow: '0 15px 50px rgba(0, 0, 0, 0.7), 0 0 40px rgba(100, 200, 255, 0.2)',
         }}
       >
         {/* Header */}
         <div
           style={{
             padding: '24px',
-            borderBottom: '2px solid rgba(78, 205, 196, 0.2)',
+            borderBottom: '2px solid rgba(100, 200, 255, 0.3)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
           }}
         >
-          <h2 style={{ color: '#4ecdc4', margin: 0, fontSize: '1.5rem' }}>
+          <h2 style={{ color: '#64c8ff', margin: 0, fontSize: '1.5rem', fontWeight: 700, letterSpacing: '0.5px' }}>
             📢 Gửi phản hồi
           </h2>
           <button
@@ -155,8 +150,8 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
         <form onSubmit={handleSubmit} style={{ padding: '24px' }}>
           {/* Category */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: '#ccc', fontSize: '0.9rem', display: 'block', marginBottom: '8px' }}>
-              Danh mục *
+            <label style={{ color: '#a8c5ff', fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '8px', letterSpacing: '0.3px' }}>
+              📋 Danh mục *
             </label>
             <select
               value={category}
@@ -164,11 +159,11 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
               required
               style={{
                 width: '100%',
-                padding: '12px',
+                padding: '12px 14px',
                 borderRadius: '8px',
-                border: '2px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
+                border: '1.5px solid rgba(100, 200, 255, 0.6)',
+                background: 'rgba(20, 30, 60, 0.8)',
+                color: '#e8f0ff',
                 fontSize: '0.95rem',
               }}
             >
@@ -183,8 +178,8 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
 
           {/* Subject */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: '#ccc', fontSize: '0.9rem', display: 'block', marginBottom: '8px' }}>
-              Tiêu đề *
+            <label style={{ color: '#a8c5ff', fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '8px', letterSpacing: '0.3px' }}>
+              ✏️ Tiêu đề *
             </label>
             <input
               type="text"
@@ -195,11 +190,11 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
               maxLength={255}
               style={{
                 width: '100%',
-                padding: '12px',
+                padding: '12px 14px',
                 borderRadius: '8px',
-                border: '2px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
+                border: '1.5px solid rgba(100, 200, 255, 0.6)',
+                background: 'rgba(20, 30, 60, 0.8)',
+                color: '#e8f0ff',
                 fontSize: '0.95rem',
               }}
             />
@@ -207,8 +202,8 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
 
           {/* Description */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: '#ccc', fontSize: '0.9rem', display: 'block', marginBottom: '8px' }}>
-              Mô tả chi tiết *
+            <label style={{ color: '#a8c5ff', fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '8px', letterSpacing: '0.3px' }}>
+              📝 Mô tả chi tiết *
             </label>
             <textarea
               value={description}
@@ -218,65 +213,35 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
               rows={6}
               style={{
                 width: '100%',
-                padding: '12px',
+                padding: '12px 14px',
                 borderRadius: '8px',
-                border: '2px solid rgba(255, 255, 255, 0.1)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#fff',
+                border: '1.5px solid rgba(100, 200, 255, 0.6)',
+                background: 'rgba(20, 30, 60, 0.8)',
+                color: '#e8f0ff',
                 fontSize: '0.95rem',
                 resize: 'vertical',
                 fontFamily: 'inherit',
+                lineHeight: 1.5,
               }}
             />
           </div>
 
           {/* Priority */}
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ color: '#ccc', fontSize: '0.9rem', display: 'block', marginBottom: '8px' }}>
-              Mức độ ưu tiên
-            </label>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              {(['low', 'medium', 'high'] as Priority[]).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  style={{
-                    flex: 1,
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: priority === p
-                      ? '2px solid #4ecdc4'
-                      : '2px solid rgba(255, 255, 255, 0.1)',
-                    background: priority === p
-                      ? 'rgba(78, 205, 196, 0.15)'
-                      : 'rgba(255, 255, 255, 0.05)',
-                    color: priority === p ? '#4ecdc4' : '#999',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    fontWeight: 500,
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {p === 'low' && '🟢 Thấp'}
-                  {p === 'medium' && '🟡 Trung bình'}
-                  {p === 'high' && '🔴 Cao'}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Removed priority selection */}
 
           {/* Status Messages */}
           {submitStatus === 'success' && (
             <div
               style={{
-                padding: '12px',
+                padding: '12px 14px',
                 borderRadius: '8px',
-                background: 'rgba(74, 222, 128, 0.15)',
-                border: '2px solid rgba(74, 222, 128, 0.4)',
-                color: '#4ade80',
+                background: 'rgba(76, 175, 80, 0.15)',
+                border: '1.5px solid rgba(76, 175, 80, 0.5)',
+                color: '#7cff7c',
                 marginBottom: '20px',
                 textAlign: 'center',
+                fontSize: '14px',
+                fontWeight: 500,
               }}
             >
               ✅ Gửi thành công! Cảm ơn bạn đã đóng góp.
@@ -286,13 +251,15 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
           {submitStatus === 'error' && (
             <div
               style={{
-                padding: '12px',
+                padding: '12px 14px',
                 borderRadius: '8px',
-                background: 'rgba(248, 113, 113, 0.15)',
-                border: '2px solid rgba(248, 113, 113, 0.4)',
-                color: '#f87171',
+                background: 'rgba(255, 107, 107, 0.15)',
+                border: '1.5px solid rgba(255, 107, 107, 0.5)',
+                color: '#ff6b6b',
                 marginBottom: '20px',
                 textAlign: 'center',
+                fontSize: '14px',
+                fontWeight: 500,
               }}
             >
               ❌ Có lỗi xảy ra. Vui lòng thử lại sau.
@@ -309,13 +276,13 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose }) => {
               borderRadius: '8px',
               border: 'none',
               background: isSubmitting
-                ? 'rgba(78, 205, 196, 0.3)'
-                : 'linear-gradient(135deg, #4ecdc4 0%, #44a7a0 100%)',
-              color: '#fff',
+                ? 'rgba(100, 200, 255, 0.2)'
+                : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              color: '#ffffff',
               fontSize: '1rem',
               fontWeight: 700,
               cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all 0.3s',
               opacity: isSubmitting ? 0.6 : 1,
             }}
           >

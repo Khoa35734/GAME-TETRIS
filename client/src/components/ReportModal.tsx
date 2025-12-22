@@ -7,7 +7,7 @@ import { getApiBaseUrl } from '../services/apiConfig';
 const Backdrop = styled.div`
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,0.8);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -15,48 +15,94 @@ const Backdrop = styled.div`
 `;
 
 const Box = styled.div`
-  background: white;
-  padding: 20px;
-  border-radius: 10px;
-  width: 420px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+  background: linear-gradient(135deg, #0a0e27 0%, #1a1f35 100%);
+  padding: 28px;
+  border-radius: 14px;
+  width: 480px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(100, 200, 255, 0.2);
+  border: 2px solid rgba(100, 200, 255, 0.5);
 `;
 
 const Title = styled.h3`
-  margin: 0 0 12px 0;
+  margin: 0 0 20px 0;
+  color: #64c8ff;
+  font-size: 20px;
+  font-weight: 700;
+  text-shadow: 0 0 12px rgba(100, 200, 255, 0.6);
+  letter-spacing: 0.5px;
 `;
 
 const Field = styled.div`
-  margin-bottom: 12px;
+  margin-bottom: 18px;
 `;
 
 const Input = styled.input`
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid #ddd;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(100, 200, 255, 0.6);
+  background: rgba(20, 30, 60, 0.8);
+  color: #e8f0ff;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: #64c8ff;
+    background: rgba(50, 80, 140, 0.5);
+    box-shadow: 0 0 16px rgba(100, 200, 255, 0.4);
+  }
+  
+  &::placeholder {
+    color: #7a8fa6;
+  }
 `;
 
 const Textarea = styled.textarea`
   width: 100%;
-  min-height: 100px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid #ddd;
+  min-height: 140px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(100, 200, 255, 0.6);
+  background: rgba(20, 30, 60, 0.8);
+  color: #e8f0ff;
+  font-size: 14px;
+  resize: vertical;
+  transition: all 0.3s ease;
+  font-family: inherit;
+  line-height: 1.5;
+  
+  &:focus {
+    outline: none;
+    border-color: #64c8ff;
+    background: rgba(50, 80, 140, 0.5);
+    box-shadow: 0 0 16px rgba(100, 200, 255, 0.4);
+  }
+  
+  &::placeholder {
+    color: #7a8fa6;
+  }
 `;
 
 const Buttons = styled.div`
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 16px;
 `;
 
 const Button = styled.button`
-  padding: 8px 14px;
-  border-radius: 6px;
+  padding: 10px 18px;
+  border-radius: 8px;
   border: none;
   cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
 `;
 
 interface Props {
@@ -169,40 +215,40 @@ const ReportModal: React.FC<Props> = ({ isOpen, onClose, reportedUserId = null, 
   return (
     <Backdrop>
       <Box>
-        <Title>Báo cáo người chơi</Title>
+        <Title>🚨 Báo cáo người chơi</Title>
         {resolvedReportedId ? (
           <Field>
-            <label>Người bị báo cáo</label>
-            <div style={{ padding: 8, background: '#f7f7f7', borderRadius: 6 }}>
-              {reportedUsername ? `${reportedUsername} (id: ${resolvedReportedId})` : `id: ${resolvedReportedId}`}
+            <div style={{ color: '#a8c5ff', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>👤 Người bị báo cáo</div>
+            <div style={{ padding: '12px 14px', background: 'rgba(30, 50, 100, 0.7)', border: '1px solid rgba(100, 200, 255, 0.4)', borderRadius: '8px', color: '#d0e8ff', fontSize: '14px' }}>
+              {reportedUsername ? `${reportedUsername} (ID: ${resolvedReportedId})` : `ID: ${resolvedReportedId}`}
             </div>
           </Field>
         ) : (
           <Field>
-            <label>Reported username</label>
-            <Input value={reportedUsername} onChange={(e) => setReportedUsername(e.target.value)} placeholder="Nhập username của người bị báo cáo (ví dụ: Player123)" />
+            <div style={{ color: '#a8c5ff', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>👤 Username của người bị báo cáo</div>
+            <Input value={reportedUsername} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportedUsername(e.target.value)} placeholder="Ví dụ: Player123" />
           </Field>
         )}
         <Field>
-          <label>Mô tả (chi tiết)</label>
-          <Textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Mô tả hành vi vi phạm, thời điểm, bằng chứng..." />
+          <div style={{ color: '#a8c5ff', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>📝 Chi tiết hành vi vi phạm *</div>
+          <Textarea value={message} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setMessage(e.target.value)} placeholder="Mô tả chi tiết: hành vi vi phạm, thời điểm, bằng chứng..." />
         </Field>
 
-        {error && <div style={{ color: 'red', marginBottom: 8 }}>{error}</div>}
+        {error && <div style={{ color: '#ff6b6b', marginBottom: '12px', padding: '10px 12px', background: 'rgba(255, 107, 107, 0.15)', borderRadius: '6px', fontSize: '13px', fontWeight: 500 }}>❌ {error}</div>}
 
         {submittedSuccess ? (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ padding: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, color: '#064e3b' }}>
-              Báo cáo đã được gửi. Cảm ơn bạn — chúng tôi sẽ xem xét và xử lý nếu cần.
+          <div style={{ marginTop: 12 }}>
+            <div style={{ padding: '14px', background: 'rgba(76, 175, 80, 0.15)', border: '1.5px solid rgba(76, 175, 80, 0.5)', borderRadius: '8px', color: '#7cff7c', fontSize: '14px', fontWeight: 500, lineHeight: 1.5 }}>
+              ✅ Báo cáo đã được gửi. Cảm ơn bạn — chúng tôi sẽ xem xét và xử lý nếu cần.
             </div>
             <Buttons>
-              <Button onClick={() => { setSubmittedSuccess(false); onClose(); }}>Đóng</Button>
+              <Button onClick={() => { setSubmittedSuccess(false); onClose(); }} style={{ background: 'rgba(100, 200, 255, 0.2)', color: '#64c8ff', border: '1px solid rgba(100, 200, 255, 0.5)' }}>Đóng</Button>
             </Buttons>
           </div>
         ) : (
           <Buttons>
-            <Button onClick={onClose} disabled={submitting}>Hủy</Button>
-            <Button onClick={submitReport} disabled={submitting} style={{ background: '#2563eb', color: 'white' }}>{submitting ? 'Đang gửi...' : 'Gửi báo cáo'}</Button>
+            <Button onClick={onClose} disabled={submitting} style={{ background: 'rgba(255, 255, 255, 0.1)', color: '#c8d8e8', border: '1px solid rgba(200, 216, 232, 0.3)' }}>Hủy</Button>
+            <Button onClick={submitReport} disabled={submitting} style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', color: '#ffffff', fontWeight: 700 }}>{submitting ? '⏳ Đang gửi...' : '✉️ Gửi báo cáo'}</Button>
           </Buttons>
         )}
       </Box>

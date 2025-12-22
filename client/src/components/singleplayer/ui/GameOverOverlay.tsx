@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 
 // ==========================================
@@ -114,6 +114,14 @@ import ReportModal from '../../ReportModal';
 
 export const GameOverOverlay: React.FC<Props> = ({ elapsedMs, rows, level, piecesPlaced, inputs, holds, onTryAgain, onMenu, reportedUserId = null, matchId }) => {
   const [showReportModal, setShowReportModal] = useState(false);
+
+  // Debug: log when overlay mounts so we can confirm it rendered at runtime
+  useEffect(() => {
+    console.log('[UI] GameOverOverlay mounted', { reportedUserId, matchId });
+    return () => {
+      console.log('[UI] GameOverOverlay unmounted');
+    };
+  }, [reportedUserId, matchId]);
     const pps = elapsedMs > 0 ? (piecesPlaced / (elapsedMs / 1000)).toFixed(2) : '0.00';
     const finesse = piecesPlaced > 0 ? (inputs / piecesPlaced).toFixed(2) : '0.00';
     const timeStr = (elapsedMs / 1000).toFixed(2);
@@ -135,9 +143,20 @@ export const GameOverOverlay: React.FC<Props> = ({ elapsedMs, rows, level, piece
           <ButtonGroup>
             <PrimaryButton onClick={onTryAgain}>Try Again</PrimaryButton>
             <SecondaryButton onClick={onMenu}>Menu</SecondaryButton>
-            <SecondaryButton onClick={() => setShowReportModal(true)} style={{ background: 'rgba(255,255,255,0.08)' }}>Report Player</SecondaryButton>
+            <SecondaryButton
+              data-test="report-player-button"
+              onClick={() => { console.log('[UI] Report Player clicked', { reportedUserId, matchId }); setShowReportModal(true); }}
+              style={{ background: 'rgba(255,255,255,0.08)' }}
+            >
+              Report Player
+            </SecondaryButton>
           </ButtonGroup>
-          <ReportModal isOpen={showReportModal} onClose={() => setShowReportModal(false)} reportedUserId={reportedUserId} matchId={matchId} />
+          <ReportModal
+            isOpen={showReportModal}
+            onClose={() => setShowReportModal(false)}
+            reportedUserId={reportedUserId}
+            matchId={matchId}
+          />
         </ContentBox>
       </OverlayContainer>
     );
