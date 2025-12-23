@@ -14,6 +14,7 @@ import {
 
 interface FriendsManagerProps {
   onBack: () => void;
+  onNotificationChange?: () => void;
 }
 
 // Animation: Slide in from right
@@ -322,7 +323,7 @@ const EmptyState = styled.div`
   font-size: 1.1rem;
 `;
 
-const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
+const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack, onNotificationChange }) => {
   const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'search'>('friends');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
@@ -403,6 +404,10 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
     if (result.success) {
       showMessage('Đã chấp nhận lời mời!', 'success');
       loadRequests();
+      // Gọi callback để cập nhật badge ngay lập tức
+      if (onNotificationChange) {
+        onNotificationChange();
+      }
     } else {
       showMessage(result.message || 'Lỗi khi chấp nhận', 'error');
     }
@@ -413,6 +418,10 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
     if (result.success) {
       showMessage('Đã từ chối lời mời', 'info');
       loadRequests();
+      // Gọi callback để cập nhật badge ngay lập tức
+      if (onNotificationChange) {
+        onNotificationChange();
+      }
     } else {
       showMessage(result.message || 'Lỗi khi từ chối', 'error');
     }
@@ -659,11 +668,11 @@ const FriendsManager: React.FC<FriendsManagerProps> = ({ onBack }) => {
   );
 };
 
-const FriendsManagerWithBackdrop: React.FC<FriendsManagerProps> = ({ onBack }) => {
+const FriendsManagerWithBackdrop: React.FC<FriendsManagerProps> = ({ onBack, onNotificationChange }) => {
   return (
     <>
       <Backdrop onClick={onBack} />
-      <FriendsManager onBack={onBack} />
+      <FriendsManager onBack={onBack} onNotificationChange={onNotificationChange} />
     </>
   );
 };

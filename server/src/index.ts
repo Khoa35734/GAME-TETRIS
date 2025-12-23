@@ -15,6 +15,7 @@ import { initRedis } from './stores/redisStore';
 import { initPostgres } from './stores/postgres';
 import { setupFriendshipAssociations } from './models/Friendship';
 import { startCleanupJob } from './jobs/cleanup';
+import { startBanCheckJob } from './jobs/checkExpiredBans';
 import { onlineUsers, userPresence, type Presence } from './core/state';
 import messagesRouter from './routes/messages';
 
@@ -43,6 +44,9 @@ async function bootstrap() {
 
     // Start cleanup job
     startCleanupJob();
+
+    // Start ban check job
+    startBanCheckJob();
 
     // Start server
     server.listen(PORT, () => {

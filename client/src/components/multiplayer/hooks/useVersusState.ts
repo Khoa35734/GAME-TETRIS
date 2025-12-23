@@ -9,6 +9,8 @@ import { useStage } from '../../../hooks/useStage';
 import { useGameStatus } from '../../../hooks/useGameStatus';
 import { useInterval } from '../../../hooks/useInterval';
 import { tryRotate } from '../../../game/srsRotation';
+import { saveGameSession } from '../../../services/leaderboardService';
+import { getUserId } from '../../../services/tokenStore';
 
 // Import từ các file mới tách ra
 import * as C from '../game/constants';
@@ -1147,19 +1149,68 @@ export const useVersusState = (urlRoomId: string | undefined) => {
       if (typeof payload?.gameNumber === 'number') setSeriesCurrentGame(payload.gameNumber);
     };
 
-    const handleMatchEnd = (payload: any) => {
+    const handleMatchEnd = async (payload: any) => {
+      console.log('[BO3] Match ended:', payload);
+      
       if (payload?.score) applySeriesScore(payload.score);
       if (Array.isArray(payload.games)) setSeriesCurrentGame(payload.games.length);
       
       if (payload?.winner === 'player1' || payload?.winner === 'player2') {
         const role = playerRoleRef.current;
         if (role) {
-          if (payload.winner === role) {
+          const didWin = payload.winner === role;
+          
+          if (didWin) {
             setMatchResult(prev => prev ?? { outcome: 'win', reason: 'Match end' });
             setOppGameOver(true);
           } else {
             setMatchResult(prev => prev ?? { outcome: 'lose', reason: 'Match end' });
             setGameOver(true);
+          }
+
+          // 🎯 LƯU KẾT QUẢ VÀO DATABASE
+          try {
+            const myUserId = getUserId();
+            const oppUserId = payload.opponentUserId; // Server sẽ gửi
+            const sessionUuid = payload.sessionUuid || crypto.randomUUID(); // Server sẽ gửi hoặc tạo mới
+            const score = payload.score || { player1: 0, player2: 0 };
+            const player1Score = role === 'player1' ? score.player1 : score.player2;
+            const player2Score = role === 'player1' ? score.player2 : score.player1;
+            const totalGames = (payload.games || []).length;
+            const durationSeconds = Math.floor(elapsedMs / 1000);
+            
+            if (myUserId && oppUserId) {
+              console.log('[BO3] Saving ranked match to DB:', {
+                sessionUuid,
+                player1Id: myUserId,
+                player2Id: oppUserId,
+                winnerId: didWin ? myUserId : oppUserId,
+                player1Score,
+                player2Score,
+                totalGames,
+                durationSeconds
+              });
+
+              await saveGameSession({
+                sessionUuid,
+                gameMode: 'ranked',
+                matchType: 'BO3',
+                player1Id: myUserId,
+                player2Id: oppUserId,
+                winnerId: didWin ? myUserId : oppUserId,
+                player1Score,
+                player2Score,
+                totalGames,
+                durationSeconds,
+                status: 'completed'
+              });
+
+              console.log('[BO3] ✅ Match result saved to database!');
+            } else {
+              console.warn('[BO3] ⚠️ Cannot save match - missing user IDs:', { myUserId, oppUserId });
+            }
+          } catch (error) {
+            console.error('[BO3] ❌ Failed to save match result:', error);
           }
         }
       }

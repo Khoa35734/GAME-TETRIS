@@ -137,24 +137,3 @@ const GarbageQueueBar: React.FC<GarbageQueueBarProps> = ({ unlockedAmount, locke
 };
 
 export default GarbageQueueBar;
-
-            background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent)',
-            boxShadow: '0 0 8px rgba(255, 255, 255, 0.9), 0 0 16px rgba(255, 255, 255, 0.5)',
-            borderRadius: '2px',
-            zIndex: 10,
-            transition: 'bottom 0.2s ease-out',
-          }}
-        />
-      )}
-
-      {/* Overflow indicator */}
-      {totalCount > 20 && (
-        <div style={{ position: 'absolute', top: 0, width: '100%', background: '#c0392b', color: 'white', fontSize: '10px', fontWeight: 'bold', textAlign: 'center', padding: '2px 0' }}>
-          +{totalCount - 20}
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default GarbageQueueBar;

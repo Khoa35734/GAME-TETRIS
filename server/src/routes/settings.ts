@@ -27,19 +27,6 @@ const authenticateToken = (req: AuthRequest, res: Response, next: Function) => {
   });
 };
 
-// Default key bindings
-const DEFAULT_KEY_BINDINGS = {
-  moveLeft: 'ArrowLeft',
-  moveRight: 'ArrowRight',
-  softDrop: 'ArrowDown',
-  hardDrop: 'Space',
-  rotateClockwise: 'ArrowUp',
-  rotateCounterClockwise: 'z',
-  rotate180: 'a',
-  hold: 'c',
-  restart: 'r',
-};
-
 // GET /api/settings - Get user settings
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -48,23 +35,13 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
-    let settings = await UserSettings.findOne({ where: { user_id: userId } });
+    const settings = await UserSettings.findOne({ where: { user_id: userId } });
 
-    // If no settings exist, create default settings
+    // If no settings exist, return error (trigger should have created it)
     if (!settings) {
-      settings = await UserSettings.create({
-        user_id: userId,
-        das_delay_ms: 133,
-        arr_ms: 10,
-        soft_drop_rate: 50,
-        show_next_pieces: 5,
-        sound_enabled: true,
-        music_enabled: true,
-        sound_volume: 0.70,
-        music_volume: 0.50,
-        key_bindings: DEFAULT_KEY_BINDINGS,
-        theme_preference: 'default',
-        language_pref: 'vi',
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Settings not found. Please contact support.' 
       });
     }
 
@@ -79,7 +56,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
         music_enabled: settings.music_enabled,
         sound_volume: settings.sound_volume,
         music_volume: settings.music_volume,
-        key_bindings: settings.key_bindings || DEFAULT_KEY_BINDINGS,
+        key_bindings: settings.key_bindings,
         theme_preference: settings.theme_preference,
         language_pref: settings.language_pref,
       },
@@ -144,7 +121,7 @@ router.put('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'music_volume phải từ 0 đến 1' });
     }
 
-    // Update or create settings
+    // Update or create settings (database defaults will be used for missing fields)
     const [settings, created] = await UserSettings.upsert({
       user_id: userId,
       das_delay_ms,
@@ -155,7 +132,7 @@ router.put('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       music_enabled,
       sound_volume,
       music_volume,
-      key_bindings: key_bindings || DEFAULT_KEY_BINDINGS,
+      key_bindings,
       theme_preference,
       language_pref,
     });
@@ -220,16 +197,15 @@ router.patch('/keys', authenticateToken, async (req: AuthRequest, res: Response)
     let settings = await UserSettings.findOne({ where: { user_id: userId } });
 
     if (!settings) {
-      // Create new settings with default values and custom key bindings
-      settings = await UserSettings.create({
-        user_id: userId,
-        key_bindings,
+      return res.status(404).json({
+        success: false,
+        message: 'Settings not found. Trigger should have created it on signup.',
       });
-    } else {
-      // Update only key_bindings
-      settings.key_bindings = key_bindings;
-      await settings.save();
     }
+
+    // Update only key_bindings
+    settings.key_bindings = key_bindings;
+    await settings.save();
 
     return res.json({
       success: true,
@@ -250,25 +226,23 @@ router.post('/reset', authenticateToken, async (req: AuthRequest, res: Response)
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
-    const settings = await UserSettings.upsert({
-      user_id: userId,
-      das_delay_ms: 133,
-      arr_ms: 10,
-      soft_drop_rate: 50,
-      show_next_pieces: 5,
-      sound_enabled: true,
-      music_enabled: true,
-      sound_volume: 0.70,
-      music_volume: 0.50,
-      key_bindings: DEFAULT_KEY_BINDINGS,
-      theme_preference: 'default',
-      language_pref: 'vi',
-    });
+    // Delete current settings, trigger will recreate with database defaults
+    await UserSettings.destroy({ where: { user_id: userId } });
+
+    // Trigger recreates settings with database defaults
+    const settings = await UserSettings.findOne({ where: { user_id: userId } });
+
+    if (!settings) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to reset settings. Please logout and login again.',
+      });
+    }
 
     return res.json({
       success: true,
-      message: 'Đã reset về cài đặt mặc định',
-      settings: settings[0],
+      message: 'Đã reset về cài đặt mặc định từ database',
+      settings,
     });
   } catch (error) {
     console.error('[settings] POST /reset error:', error);

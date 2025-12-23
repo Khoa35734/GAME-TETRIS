@@ -8,11 +8,9 @@ const router = Router();
 const pool = new Pool({
   host: process.env.PG_HOST || 'localhost',
   port: Number(process.env.PG_PORT ?? 5432),
-  database: process.env.PG_DATABASE || process.env.PG_DB || 'tetris',
-  user: process.env.PG_USER || 'devuser',
-  password: typeof process.env.PG_PASSWORD === 'string' && process.env.PG_PASSWORD.length > 0
-    ? process.env.PG_PASSWORD
-    : '123456',
+  database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
+  user: process.env.PG_USER || 'postgres',
+  password: process.env.PG_PASSWORD || '123456789Quoc#',
 });
 
 /**

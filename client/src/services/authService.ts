@@ -16,6 +16,14 @@ export interface AuthResponse {
     role?: string;
     isGuest?: boolean;
   };
+  banned?: boolean;
+  banInfo?: {
+    reason: string;
+    admin: string;
+    banStart: string;
+    banEnd: string | null;
+    isPermanent: boolean;
+  };
 }
 
 type Nullable<T> = T | null;

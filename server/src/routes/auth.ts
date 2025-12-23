@@ -133,7 +133,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const users = await sequelize.query(
-      'SELECT user_id, user_name, email, password, role FROM users WHERE email = :email',
+      'SELECT user_id, user_name, email, password, role, is_banned FROM users WHERE email = :email',
       { 
         replacements: { email }, 
         type: QueryTypes.SELECT 
@@ -147,6 +147,84 @@ router.post('/login', async (req, res) => {
         success: false,
         message: 'Email không tồn tại.' 
       });
+    }
+
+    // Kiểm tra user có bị ban không
+    if (user.is_banned) {
+      // Lấy thông tin ban chi tiết
+      const banInfo = await sequelize.query(
+        `SELECT 
+          bh.reason,
+          bh.ban_start,
+          bh.ban_end,
+          a.user_name AS admin_name
+        FROM ban_history bh
+        LEFT JOIN users a ON bh.admin_id = a.user_id
+        WHERE bh.user_id = :userId AND bh.is_active = true
+        ORDER BY bh.created_at DESC
+        LIMIT 1`,
+        { 
+          replacements: { userId: user.user_id }, 
+          type: QueryTypes.SELECT 
+        }
+      );
+
+      const ban = banInfo[0] as any;
+
+      if (ban) {
+        const banEndDate = ban.ban_end ? new Date(ban.ban_end) : null;
+        const now = new Date();
+        
+        let banMessage = '🚫 Tài khoản của bạn đã bị khóa.\n\n';
+        banMessage += `📝 Lý do: ${ban.reason}\n`;
+        banMessage += `👮 Bởi: ${ban.admin_name || 'Admin'}\n`;
+        banMessage += `📅 Thời gian ban: ${new Date(ban.ban_start).toLocaleString('vi-VN')}\n`;
+        
+        if (banEndDate) {
+          const daysRemaining = Math.ceil((banEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (daysRemaining > 0) {
+            banMessage += `⏰ Hết hạn: ${banEndDate.toLocaleString('vi-VN')} (${daysRemaining} ngày)\n`;
+          } else {
+            // Ban đã hết hạn, tự động unban
+            await sequelize.query(
+              `UPDATE ban_history SET is_active = false WHERE user_id = :userId AND is_active = true`,
+              {
+                replacements: { userId: user.user_id },
+                type: QueryTypes.UPDATE
+              }
+            );
+            await sequelize.query(
+              `UPDATE users SET is_banned = false WHERE user_id = :userId`,
+              {
+                replacements: { userId: user.user_id },
+                type: QueryTypes.UPDATE
+              }
+            );
+            
+            console.log(`[Auth] Auto-unbanned user ${user.user_id} - ban expired`);
+            // Cho phép đăng nhập tiếp
+          }
+        } else {
+          banMessage += '⏰ Thời hạn: Vĩnh viễn\n';
+        }
+
+        // Nếu vẫn còn ban, trả về lỗi
+        if (!banEndDate || (banEndDate && banEndDate > now)) {
+          return res.status(403).json({ 
+            success: false,
+            message: banMessage,
+            banned: true,
+            banInfo: {
+              reason: ban.reason,
+              admin: ban.admin_name || 'Admin',
+              banStart: ban.ban_start,
+              banEnd: ban.ban_end,
+              isPermanent: !ban.ban_end
+            }
+          });
+        }
+      }
     }
 
     // Verify password

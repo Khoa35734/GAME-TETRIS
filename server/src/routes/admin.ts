@@ -53,4 +53,33 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// Lấy danh sách người dùng bị ban
+router.get('/banned-users', async (req, res) => {
+  try {
+    const bannedUsers = await sequelize.query(
+      `SELECT 
+        bh.ban_id,
+        bh.user_id,
+        u.user_name,
+        bh.admin_id,
+        a.user_name AS admin_name,
+        bh.reason,
+        bh.ban_start,
+        bh.ban_end,
+        bh.is_active,
+        bh.created_at
+      FROM ban_history bh
+      LEFT JOIN users u ON bh.user_id = u.user_id
+      LEFT JOIN users a ON bh.admin_id = a.user_id
+      WHERE bh.is_active = true
+      ORDER BY bh.created_at DESC`,
+      { type: QueryTypes.SELECT }
+    );
+    res.json(bannedUsers);
+  } catch (err) {
+    console.error('[Admin] Error fetching banned users:', err);
+    res.status(500).json({ message: 'Lỗi khi lấy danh sách người dùng bị ban.' });
+  }
+});
+
 export default router;

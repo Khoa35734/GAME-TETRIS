@@ -253,7 +253,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     const result = await getUserSettings();
     if (result.success && result.settings) {
       setSettings(result.settings);
-      setKeyBindings(result.settings.key_bindings || DEFAULT_KEY_BINDINGS);
+      if (result.settings.key_bindings) {
+        setKeyBindings(result.settings.key_bindings);
+      }
+    } else {
+      setMessage({ text: result.message || 'Không thể tải settings từ database', type: 'error' });
     }
     setLoading(false);
   };
@@ -367,55 +371,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
         ))}
       </Section>
 
-      {/* Game Settings Section */}
-      <Section>
-        <SectionTitle>🎯 Cài đặt game</SectionTitle>
-        
-        <SettingRow>
-          <SettingLabel>DAS Delay (ms):</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.das_delay_ms || 133}
-            onChange={e => setSettings({ ...settings, das_delay_ms: parseInt(e.target.value) })}
-            min={0}
-            max={500}
-          />
-        </SettingRow>
-
-        <SettingRow>
-          <SettingLabel>ARR (ms):</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.arr_ms || 10}
-            onChange={e => setSettings({ ...settings, arr_ms: parseInt(e.target.value) })}
-            min={0}
-            max={100}
-          />
-        </SettingRow>
-
-        <SettingRow>
-          <SettingLabel>Soft Drop Rate (ms):</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.soft_drop_rate || 50}
-            onChange={e => setSettings({ ...settings, soft_drop_rate: parseInt(e.target.value) })}
-            min={10}
-            max={200}
-          />
-        </SettingRow>
-
-        <SettingRow>
-          <SettingLabel>Hiển thị mảnh tiếp theo:</SettingLabel>
-          <NumberInput
-            type="number"
-            value={settings.show_next_pieces || 5}
-            onChange={e => setSettings({ ...settings, show_next_pieces: parseInt(e.target.value) })}
-            min={1}
-            max={7}
-          />
-        </SettingRow>
-      </Section>
-
       {/* Audio Settings Section */}
       <Section>
         <SectionTitle>🔊 Âm thanh</SectionTitle>
@@ -424,7 +379,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
           <SettingLabel>Bật âm thanh:</SettingLabel>
           <Checkbox
             type="checkbox"
-            checked={settings.sound_enabled ?? true}
+            checked={settings.sound_enabled ?? false}
             onChange={e => setSettings({ ...settings, sound_enabled: e.target.checked })}
           />
         </SettingRow>
@@ -433,7 +388,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
           <SettingLabel>Bật nhạc nền:</SettingLabel>
           <Checkbox
             type="checkbox"
-            checked={settings.music_enabled ?? true}
+            checked={settings.music_enabled ?? false}
             onChange={e => setSettings({ ...settings, music_enabled: e.target.checked })}
           />
         </SettingRow>
@@ -443,8 +398,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
           <NumberInput
             type="number"
             step="0.1"
-            value={settings.sound_volume || 0.7}
-            onChange={e => setSettings({ ...settings, sound_volume: parseFloat(e.target.value) })}
+            value={settings.sound_volume ?? ''}
+            onChange={e => setSettings({ ...settings, sound_volume: parseFloat(e.target.value) || 0 })}
             min={0}
             max={1}
           />
@@ -455,8 +410,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
           <NumberInput
             type="number"
             step="0.1"
-            value={settings.music_volume || 0.5}
-            onChange={e => setSettings({ ...settings, music_volume: parseFloat(e.target.value) })}
+            value={settings.music_volume ?? ''}
+            onChange={e => setSettings({ ...settings, music_volume: parseFloat(e.target.value) || 0 })}
             min={0}
             max={1}
           />
